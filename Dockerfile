@@ -24,6 +24,7 @@ RUN npm install -g @anthropic-ai/claude-code
 
 WORKDIR /app
 COPY --from=builder /app/perch .
+COPY claude/ /root/.claude/
 
 ENV AUTH_MODE=none
 ENV LISTEN_ADDR=:8443
