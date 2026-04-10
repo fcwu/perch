@@ -188,7 +188,7 @@ curl -sk https://localhost:8443/bootstrap -o /dev/null -w "%{http_code}"
 **預期**：
 - 第一次：**不需帶 client certificate** 即可存取，下載成功（200），回傳 `client.p12`
 - 第二次：HTTP 410（端點已失效，one-time only）
-- 其他任何路徑在無 client cert 時 → HTTP 401
+- 其他任何路徑在無 client cert 時 → **自動 302 跳轉** 到 `/bootstrap`
 
 ---
 
@@ -377,15 +377,15 @@ docker run -d \
 
 ---
 
-## T23 — mTLS 模式：無 Client Cert 擋下所有受保護端點（unit test）
+## T23 — mTLS 模式：無 Client Cert 自動跳轉 /bootstrap（unit test）
 
-> **自動化**：`go test` → `TestAuthMTLSBlocksWithoutClientCert`
+> **自動化**：`go test` → `TestAuthMTLSRedirectsWithoutClientCert`
 
-**目的**：確認 mtls 模式下，沒有 client certificate 的請求被 401 拒絕。
+**目的**：確認 mtls 模式下，沒有 client certificate 的請求被自動跳轉到 `/bootstrap`，讓使用者能完成首次設定。
 
 **涵蓋路徑**：`/`、`/ws`、`/input`、`/schedule`
 
-**預期**：無 client cert → HTTP 401。
+**預期**：無 client cert → HTTP 302，`Location: /bootstrap`。
 
 ---
 

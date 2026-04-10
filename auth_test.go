@@ -95,19 +95,22 @@ func TestAuthPasswordBypassEndpoints(t *testing.T) {
 	}
 }
 
-func TestAuthMTLSBlocksWithoutClientCert(t *testing.T) {
+func TestAuthMTLSRedirectsWithoutClientCert(t *testing.T) {
 	mw := newAuthMiddleware("mtls", "")
 	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
-	// No TLS state → should be blocked for all non-bootstrap paths
+	// No TLS state → should redirect to /bootstrap for all non-bootstrap paths
 	protected := []string{"/", "/ws", "/input", "/schedule"}
 	for _, path := range protected {
 		req := httptest.NewRequest("GET", path, nil)
 		w := httptest.NewRecorder()
 		mw.wrap(next).ServeHTTP(w, req)
-		if w.Code != http.StatusUnauthorized {
-			t.Errorf("mtls path %s: expected 401 without client cert, got %d", path, w.Code)
+		if w.Code != http.StatusFound {
+			t.Errorf("mtls path %s: expected 302 redirect without client cert, got %d", path, w.Code)
+		}
+		if loc := w.Header().Get("Location"); loc != "/bootstrap" {
+			t.Errorf("mtls path %s: expected redirect to /bootstrap, got %q", path, loc)
 		}
 	}
 }

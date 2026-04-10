@@ -45,7 +45,7 @@ func (a *AuthMiddleware) wrap(next http.Handler) http.Handler {
 				return
 			}
 			if r.TLS == nil || len(r.TLS.PeerCertificates) == 0 {
-				http.Error(w, "client certificate required", http.StatusUnauthorized)
+				http.Redirect(w, r, "/bootstrap", http.StatusFound)
 				return
 			}
 			next.ServeHTTP(w, r)
