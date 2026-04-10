@@ -21,29 +21,6 @@ Perch 是一個輕量的 web terminal server，讓你不需要 SSH，直接用�
 
 ## 快速開始
 
-### 本地執行（開發用）
-
-```bash
-# 下載
-git clone https://github.com/fcwu/perch.git
-cd perch
-
-# 建置前端
-cd frontend && npm install && npm run build && cd ..
-
-# 建置 Go binary
-go build -o perch .
-
-# 執行（無認證模式，僅限本地測試）
-AUTH_MODE=none LISTEN_ADDR=:8443 ./perch
-```
-
-瀏覽器開啟 **`http://localhost:8443`**，即可進入 terminal。
-
-> `AUTH_MODE=none` 和 `AUTH_MODE=password` 使用 plain HTTP；只有 `AUTH_MODE=mtls` 才使用 HTTPS。
-
-### Docker 執行（建議正式使用）
-
 ```bash
 # 從 GitHub Container Registry 拉取
 docker pull ghcr.io/fcwu/perch:latest
@@ -90,25 +67,23 @@ docker run -d \
 | `BLOCK_IPS` | — | 空格分隔的封鎖 IP 清單，支援 CIDR，例如 `1.2.3.4 10.0.0.0/8` |
 | `CLAUDE_WORKDIR` | `/workspace`（若存在） | Claude Code 的起始工作目錄 |
 | `ANTHROPIC_API_KEY` | — | Anthropic API 金鑰，直接傳給 Claude（見下方說明） |
+| `DISCORD_BOT_TOKEN` | — | Discord bot token（啟用 Discord 整合） |
+| `DISCORD_CHANNEL_ID` | — | 要監聽的 Discord channel ID |
+| `TELEGRAM_BOT_TOKEN` | — | Telegram bot token（啟用 Telegram 整合） |
+| `TELEGRAM_CHAT_ID` | — | 要監聽的 Telegram chat ID |
 
-### Claude 啟動環境變數
+### Claude 認證
 
-Claude Code 啟動時繼承 Perch 的所有環境變數，並額外設定：
-
-| 變數 | 固定值 | 說明 |
-|------|--------|------|
-| `HOME` | `/root` | 確保 Claude 讀取 `/root/.claude` 的憑證（與 `-v ~/.claude:/root/.claude` 對應） |
-| `CLAUDE_CODE_NO_FLICKER` | `1` | 減少畫面閃爍 |
-| `CLAUDE_CODE_DISABLE_MOUSE` | `1` | 停用滑鼠捕捉（瀏覽器操作必要） |
-
-**認證方式建議：**
-
-優先使用 `-v ~/.claude:/root/.claude` 掛載本機憑證（OAuth 登入）。若遇到容器內仍要求重新登入，改用 API 金鑰：
+Claude Code 使用 OAuth 登入。將主機的 `~/.claude` 掛載進容器，Claude 即可直接使用已登入的憑證：
 
 ```bash
-docker run -d \
-  -e ANTHROPIC_API_KEY=your_key_here \
-  ...
+-v ~/.claude:/root/.claude
+```
+
+若 OAuth 憑證無法使用（例如跨平台或憑證過期），可改用 API 金鑰：
+
+```bash
+-e ANTHROPIC_API_KEY=your_key_here
 ```
 
 ---
@@ -123,10 +98,6 @@ docker run -d \
 
 連線後需輸入密碼才能看到 terminal。密碼以 cookie session 方式儲存。
 
-```bash
-AUTH_MODE=password AUTH_PASSWORD=mysecret ./perch
-```
-
 ### `AUTH_MODE=mtls` — 雙向 TLS（mTLS）
 
 最安全的模式，瀏覽器必須安裝 client 憑證才能連線。
@@ -134,7 +105,7 @@ AUTH_MODE=password AUTH_PASSWORD=mysecret ./perch
 **首次設定流程：**
 
 1. 啟動 server（mTLS 模式）
-2. 第一次連線時，訪問 **`https://<your-server>:8443/bootstrap`** 下載 `client.p12`
+2. 瀏覽器開啟 `https://<your-server>:8443`，**自動跳轉** 到 `/bootstrap` 並下載 `client.p12`
 3. 在手機 / 電腦安裝 `client.p12`（密碼：`perch`）
 4. Bootstrap 端點自動失效（只能用一次）
 5. 之後連線時，瀏覽器自動帶上 client 憑證
@@ -206,124 +177,19 @@ curl -s -X DELETE http://localhost:8080/schedule/<id>
 
 ## Docker Mount 說明
 
-### Claude Code 認證
-
-Container 內的 Claude Code 需要讀取你的登入憑證：
-
-```bash
--v ~/.claude:/root/.claude
-```
-
-這樣 container 內的 Claude Code 就能使用你在主機上已登入的帳號，不需要重新登入。
-
-### Working Directory
-
-讓 Claude Code 在你指定的目錄工作：
-
-```bash
--v /your/workspace:/workspace
-```
-
-Container 啟動後，Claude Code 的 working directory 預設是 `/root`。若要讓它在特定專案目錄工作，可以同時設定：
-
-```bash
--v /your/workspace:/workspace \
--e CLAUDE_ARGS="--cwd /workspace"
-```
-
-> 目前版本 `CLAUDE_ARGS` 尚未實作，working directory 需在 terminal 內手動 `cd`。
-
-### 排程資料持久化
-
-排程資料儲存在 `/app/data/schedules.json`，重啟後不遺失：
-
-```bash
--v perch-data:/app/data
-```
-
-### 完整範例
-
-```bash
-docker run -d \
-  -p 8080:8080 \
-  -e AUTH_MODE=password \
-  -e AUTH_PASSWORD=mysecret \
-  -e LISTEN_ADDR=:8080 \
-  -v ~/.claude:/root/.claude \
-  -v /your/workspace:/workspace \
-  -v perch-data:/app/data \
-  ghcr.io/fcwu/perch:latest
-```
-
----
-
-## 架構說明
-
-```
-手機 Chrome / Discord / Telegram
-    │
-    │ HTTPS / WSS / Bot API
-    ▼
-┌─────────────────────────────┐
-│  Perch (Go binary)          │
-│                             │
-│  IP Block (TCP 層)          │
-│  TLS / mTLS                 │
-│  Auth Middleware             │
-│  Rate Limiter               │
-│                             │
-│  WebSocket ──► PTY          │
-│  Scheduler ──► PTY          │
-│  IM Bot    ──► PTY          │
-│               │             │
-│               ▼             │
-│          Claude Code        │
-│               │             │
-│               ▼             │
-│          Claude Hook        │
-│               │             │
-│               ▼             │
-│  POST /hook ──► IM Bot      │
-└─────────────────────────────┘
-```
-
-- 所有瀏覽器連線共用同一個 PTY session（多人同時看到同樣畫面）
-- Claude Code 崩潰後自動重啟
-- IP 封鎖在 TLS handshake 之前就丟棄連線
+| Mount | 用途 |
+|-------|------|
+| `-v ~/.claude:/root/.claude` | Claude Code 登入憑證 |
+| `-v /your/workspace:/workspace` | Claude Code 工作目錄 |
+| `-v perch-data:/app/data` | 排程資料持久化 |
 
 ---
 
 ## IM 整合（Discord / Telegram）
 
-> **設計思維**：Perch 的核心是 PTY，所有輸入都是「往 PTY 寫一行文字」。IM 整合只是多了一個輸入來源——訊息從 Discord/Telegram 進來，寫進 PTY，Claude 處理完後透過 Claude Code Hooks 把結果送回 IM。
-
-### 設計概覽
-
-```
-Discord/Telegram 用戶
-        │
-        │ 傳訊息
-        ▼
-  IMManager（goroutine）
-        │ pty.write(msg + "\n")
-        ▼
-  Claude Code（PTY）
-        │
-        │ 執行工具、思考、回應
-        ▼
-  Claude Code Hook（PreToolUse / PostToolUse / Stop）
-        │ curl -X POST http://localhost/hook
-        ▼
-  POST /hook endpoint（Perch）
-        │
-        ├── PreToolUse  → 加 reaction ⚙️（工具執行中）
-        ├── PostToolUse → 加 reaction ✅ / ❌
-        └── Stop        → 送文字回應，清除中間 reaction
-```
+訊息從 Discord / Telegram 進來，寫進 PTY，Claude 處理完後透過 Claude Code Hooks 把結果送回 IM。
 
 ### Hook 與 Reaction 對應
-
-Discord 支援 reaction，Telegram 不支援（只能送訊息）。
 
 | Claude Hook 事件 | Discord | Telegram |
 |------------------|---------|----------|
@@ -333,21 +199,6 @@ Discord 支援 reaction，Telegram 不支援（只能送訊息）。
 | `PostToolUse` 失敗 | ❌ | — |
 | `Stop`（回應完成）| 💬 + 文字訊息 | 文字訊息 |
 | 回應超過 2000 字 | 📎 附件 | 文件 |
-
-Reaction 加在**用戶的原始訊息**上，不發新訊息，視覺上乾淨。
-
-### 簡化假設
-
-目前實作採用**簡單版**：同一時間只有一個 IM 對話在進行。Perch 記錄「最後一則 IM 訊息的 ID」，Hook 觸發時就把 reaction 加到那則訊息。若有多人同時傳訊息，訊息會依序進入 PTY queue，reaction 對應最後一則。
-
-### 環境變數
-
-| 變數 | 說明 |
-|------|------|
-| `DISCORD_BOT_TOKEN` | Discord bot token（啟用 Discord 整合） |
-| `DISCORD_CHANNEL_ID` | 要監聽的 channel ID |
-| `TELEGRAM_BOT_TOKEN` | Telegram bot token（啟用 Telegram 整合） |
-| `TELEGRAM_CHAT_ID` | 要監聽的 chat ID（user 或 group） |
 
 ---
 
@@ -390,31 +241,6 @@ docker run -d \
   -v /your/workspace:/workspace \
   ghcr.io/fcwu/perch:latest
 ```
-
-Bot 上線後，在指定 channel 傳訊息，Claude 就會收到並回應。
-
----
-
-## 從原始碼建置
-
-```bash
-git clone https://github.com/fcwu/perch.git
-cd perch
-
-# 執行測試
-go test ./...
-
-# 建置前端
-cd frontend
-npm install
-npm run build
-cd ..
-
-# 建置 binary
-go build -o perch .
-```
-
-需要：Go 1.25+、Node.js 20+
 
 ---
 
