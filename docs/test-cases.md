@@ -169,24 +169,6 @@ curl -s -X POST http://localhost:8081/login \
 
 ---
 
-## T14 — 多連線雙向輸入同步
-
-**目的**：任一 tab 輸入的文字，所有 tab 都能即時看到輸出；任一 tab 都能控制同一個 PTY。
-
-**步驟**：
-1. 開啟 Tab A 與 Tab B，兩個都連上 `http://localhost:8080`
-2. 在 Tab A 點擊 terminal，輸入指令並送出
-3. 觀察 Tab B 是否出現同樣的輸出
-4. 在 Tab B 輸入另一個指令並送出
-5. 觀察 Tab A 是否出現同樣的輸出
-
-**預期**：
-- Tab A 輸入 → Tab B 即時看到輸出
-- Tab B 輸入 → Tab A 即時看到輸出
-- 兩個 tab 始終呈現相同的 terminal 狀態
-
----
-
 ## T12 — mTLS Bootstrap 流程
 
 **目的**：`AUTH_MODE=mtls` 首次設定流程正確，`/bootstrap` 端點一次性。
@@ -230,6 +212,24 @@ ls /workspace
 ```
 
 **預期**：`/workspace` 目錄列出主機上 `/your/workspace` 的內容。
+
+---
+
+## T14 — 多連線雙向輸入同步
+
+**目的**：任一 tab 輸入的文字，所有 tab 都能即時看到輸出；任一 tab 都能控制同一個 PTY。
+
+**步驟**：
+1. 開啟 Tab A 與 Tab B，兩個都連上 `http://localhost:8080`
+2. 在 Tab A 點擊 terminal，輸入指令並送出
+3. 觀察 Tab B 是否出現同樣的輸出
+4. 在 Tab B 輸入另一個指令並送出
+5. 觀察 Tab A 是否出現同樣的輸出
+
+**預期**：
+- Tab A 輸入 → Tab B 即時看到輸出
+- Tab B 輸入 → Tab A 即時看到輸出
+- 兩個 tab 始終呈現相同的 terminal 狀態
 
 ---
 
