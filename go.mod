@@ -1,10 +1,11 @@
 module github.com/dorowu/perch
 
-go 1.22
+go 1.25.0
 
 require (
 	github.com/creack/pty v1.1.21 // indirect
 	github.com/gorilla/websocket v1.5.3 // indirect
-	golang.org/x/crypto v0.28.0 // indirect
+	golang.org/x/crypto v0.41.0 // indirect
 	golang.org/x/time v0.8.0 // indirect
+	software.sslmate.com/src/go-pkcs12 v0.7.1 // indirect
 )
