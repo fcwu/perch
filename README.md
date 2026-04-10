@@ -260,9 +260,9 @@ docker run -d \
 ## 架構說明
 
 ```
-手機 Chrome
+手機 Chrome / Discord / Telegram
     │
-    │ HTTPS / WSS
+    │ HTTPS / WSS / Bot API
     ▼
 ┌─────────────────────────────┐
 │  Perch (Go binary)          │
@@ -274,15 +274,124 @@ docker run -d \
 │                             │
 │  WebSocket ──► PTY          │
 │  Scheduler ──► PTY          │
+│  IM Bot    ──► PTY          │
 │               │             │
 │               ▼             │
 │          Claude Code        │
+│               │             │
+│               ▼             │
+│          Claude Hook        │
+│               │             │
+│               ▼             │
+│  POST /hook ──► IM Bot      │
 └─────────────────────────────┘
 ```
 
 - 所有瀏覽器連線共用同一個 PTY session（多人同時看到同樣畫面）
 - Claude Code 崩潰後自動重啟
 - IP 封鎖在 TLS handshake 之前就丟棄連線
+
+---
+
+## IM 整合（Discord / Telegram）
+
+> **設計思維**：Perch 的核心是 PTY，所有輸入都是「往 PTY 寫一行文字」。IM 整合只是多了一個輸入來源——訊息從 Discord/Telegram 進來，寫進 PTY，Claude 處理完後透過 Claude Code Hooks 把結果送回 IM。
+
+### 設計概覽
+
+```
+Discord/Telegram 用戶
+        │
+        │ 傳訊息
+        ▼
+  IMManager（goroutine）
+        │ pty.write(msg + "\n")
+        ▼
+  Claude Code（PTY）
+        │
+        │ 執行工具、思考、回應
+        ▼
+  Claude Code Hook（PreToolUse / PostToolUse / Stop）
+        │ curl -X POST http://localhost/hook
+        ▼
+  POST /hook endpoint（Perch）
+        │
+        ├── PreToolUse  → 加 reaction ⚙️（工具執行中）
+        ├── PostToolUse → 加 reaction ✅ / ❌
+        └── Stop        → 送文字回應，清除中間 reaction
+```
+
+### Hook 與 Reaction 對應
+
+Discord 支援 reaction，Telegram 不支援（只能送訊息）。
+
+| Claude Hook 事件 | Discord | Telegram |
+|------------------|---------|----------|
+| 收到訊息（進入 PTY）| 👀 | — |
+| `PreToolUse` | ⚙️ | — |
+| `PostToolUse` 成功 | ✅ | — |
+| `PostToolUse` 失敗 | ❌ | — |
+| `Stop`（回應完成）| 💬 + 文字訊息 | 文字訊息 |
+| 回應超過 2000 字 | 📎 附件 | 文件 |
+
+Reaction 加在**用戶的原始訊息**上，不發新訊息，視覺上乾淨。
+
+### 簡化假設
+
+目前實作採用**簡單版**：同一時間只有一個 IM 對話在進行。Perch 記錄「最後一則 IM 訊息的 ID」，Hook 觸發時就把 reaction 加到那則訊息。若有多人同時傳訊息，訊息會依序進入 PTY queue，reaction 對應最後一則。
+
+### 環境變數
+
+| 變數 | 說明 |
+|------|------|
+| `DISCORD_BOT_TOKEN` | Discord bot token（啟用 Discord 整合） |
+| `DISCORD_CHANNEL_ID` | 要監聽的 channel ID |
+| `TELEGRAM_BOT_TOKEN` | Telegram bot token（啟用 Telegram 整合） |
+| `TELEGRAM_CHAT_ID` | 要監聽的 chat ID（user 或 group） |
+
+---
+
+## Discord Bot 設定
+
+### 步驟一：建立 Bot
+
+1. 前往 [Discord Developer Portal](https://discord.com/developers/applications)
+2. 點 **New Application** → 輸入名稱（例如 `perch`）→ Create
+3. 左側選 **Bot** → 點 **Add Bot**
+4. 在 **TOKEN** 區塊點 **Reset Token** → 複製 token → 存為 `DISCORD_BOT_TOKEN`
+5. 在同一頁往下找 **Privileged Gateway Intents**，開啟 **Message Content Intent**（必填，否則收不到訊息內容）
+
+### 步驟二：邀請 Bot 進 Server
+
+1. 左側選 **OAuth2 → URL Generator**
+2. Scopes 勾選：`bot`
+3. Bot Permissions 勾選：
+   - `Read Messages / View Channels`
+   - `Send Messages`
+   - `Add Reactions`
+   - `Read Message History`
+4. 複製產生的 URL → 在瀏覽器開啟 → 選擇要加入的 Server → Authorize
+
+### 步驟三：取得 Channel ID
+
+1. Discord 開啟 **User Settings → Advanced** → 啟用 **Developer Mode**
+2. 右鍵點擊要監聽的 channel → **Copy Channel ID** → 存為 `DISCORD_CHANNEL_ID`
+
+### 步驟四：啟動
+
+```bash
+docker run -d \
+  -p 8080:8080 \
+  -e AUTH_MODE=none \
+  -e LISTEN_ADDR=:8080 \
+  -e DISCORD_BOT_TOKEN=your_bot_token \
+  -e DISCORD_CHANNEL_ID=your_channel_id \
+  -v ~/.claude:/root/.claude \
+  -v /your/workspace:/workspace \
+  ghcr.io/fcwu/perch:latest
+```
+
+Bot 上線後，在指定 channel 傳訊息，Claude 就會收到並回應。
 
 ---
 

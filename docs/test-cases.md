@@ -300,6 +300,50 @@ docker run -d \
 
 ---
 
+## T18 — Discord 訊息寫入 PTY
+
+**目的**：確認 Discord channel 的訊息能正確寫入 PTY，Claude 收到並回應。
+
+**前置條件**：已完成 Discord Bot 設定，取得 `DISCORD_BOT_TOKEN` 和 `DISCORD_CHANNEL_ID`。
+
+**步驟**：
+```bash
+docker run -d \
+  -p 8080:8080 \
+  -e AUTH_MODE=none \
+  -e LISTEN_ADDR=:8080 \
+  -e DISCORD_BOT_TOKEN=your_token \
+  -e DISCORD_CHANNEL_ID=your_channel_id \
+  -v ~/.claude:/root/.claude \
+  ghcr.io/fcwu/perch:latest
+```
+
+在 Discord channel 傳送訊息：「你好，今天幾號？」
+
+**預期**：
+- 訊息傳入後，Discord 訊息上出現 👀 reaction
+- 瀏覽器 terminal 可看到該訊息文字出現在 PTY
+
+---
+
+## T19 — Discord Hook Reaction 狀態機
+
+**目的**：確認 Claude 執行工具期間，emoji reaction 正確反映執行狀態。
+
+**前置條件**：同 T18，且 Claude Code Hooks 已啟用（settings.json bake 進 image）。
+
+**步驟**：
+1. 在 Discord 傳送會觸發工具的指令，例如：「列出 /workspace 下的所有檔案」
+2. 觀察該訊息上的 reaction 變化
+
+**預期**：
+- 傳送後 → 👀 出現
+- Claude 呼叫 Bash 工具時 → ⚙️ 出現
+- 工具執行完成 → ✅ 出現，⚙️ 消失
+- Claude 回應完畢 → 💬 出現，👀 消失，Discord 收到 reply 訊息
+
+---
+
 ## 已知 Bug 清單
 
 無。
