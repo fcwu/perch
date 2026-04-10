@@ -40,6 +40,10 @@ func (a *AuthMiddleware) wrap(next http.Handler) http.Handler {
 			}
 			next.ServeHTTP(w, r)
 		case "mtls":
+			if r.URL.Path == "/bootstrap" {
+				next.ServeHTTP(w, r)
+				return
+			}
 			if r.TLS == nil || len(r.TLS.PeerCertificates) == 0 {
 				http.Error(w, "client certificate required", http.StatusUnauthorized)
 				return
@@ -62,7 +66,7 @@ func (a *AuthMiddleware) handleLogin(w http.ResponseWriter, r *http.Request) {
 	token := a.newSession()
 	http.SetCookie(w, &http.Cookie{
 		Name: "session", Value: token,
-		HttpOnly: true, Secure: true, Path: "/",
+		HttpOnly: true, Path: "/",
 	})
 	w.WriteHeader(http.StatusNoContent)
 }

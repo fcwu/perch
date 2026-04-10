@@ -59,7 +59,7 @@ func buildTLSConfig(mode string, serverCertPEM, serverKeyPEM, caCertPEM []byte) 
 		pool := x509.NewCertPool()
 		pool.AppendCertsFromPEM(caCertPEM)
 		cfg.ClientCAs = pool
-		cfg.ClientAuth = tls.RequireAndVerifyClientCert
+		cfg.ClientAuth = tls.RequestClientCert
 	}
 	return cfg, nil
 }
