@@ -26,6 +26,12 @@ export default function App() {
     const ws = new WebSocket(`${proto}://${location.host}/ws`)
     ws.binaryType = 'arraybuffer'
 
+    ws.onopen = () => {
+      fitAddon.fit()
+      const { cols, rows } = term
+      ws.send(JSON.stringify({ type: 'resize', cols, rows }))
+    }
+
     ws.onmessage = (e) => {
       term.write(new Uint8Array(e.data as ArrayBuffer))
     }
