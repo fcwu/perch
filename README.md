@@ -88,6 +88,28 @@ docker run -d \
 | `AUTH_PASSWORD` | — | 密碼（`AUTH_MODE=password` 時必填） |
 | `LISTEN_ADDR` | `:8443` | 監聽位址，例如 `:8443` 或 `0.0.0.0:443` |
 | `BLOCK_IPS` | — | 空格分隔的封鎖 IP 清單，支援 CIDR，例如 `1.2.3.4 10.0.0.0/8` |
+| `CLAUDE_WORKDIR` | `/workspace`（若存在） | Claude Code 的起始工作目錄 |
+| `ANTHROPIC_API_KEY` | — | Anthropic API 金鑰，直接傳給 Claude（見下方說明） |
+
+### Claude 啟動環境變數
+
+Claude Code 啟動時繼承 Perch 的所有環境變數，並額外設定：
+
+| 變數 | 固定值 | 說明 |
+|------|--------|------|
+| `HOME` | `/root` | 確保 Claude 讀取 `/root/.claude` 的憑證（與 `-v ~/.claude:/root/.claude` 對應） |
+| `CLAUDE_CODE_NO_FLICKER` | `1` | 減少畫面閃爍 |
+| `CLAUDE_CODE_DISABLE_MOUSE` | `1` | 停用滑鼠捕捉（瀏覽器操作必要） |
+
+**認證方式建議：**
+
+優先使用 `-v ~/.claude:/root/.claude` 掛載本機憑證（OAuth 登入）。若遇到容器內仍要求重新登入，改用 API 金鑰：
+
+```bash
+docker run -d \
+  -e ANTHROPIC_API_KEY=your_key_here \
+  ...
+```
 
 ---
 

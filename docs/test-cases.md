@@ -1,6 +1,6 @@
 # Perch 測試案例
 
-> 更新日期：2026-04-10
+> 更新日期：2026-04-11
 
 ---
 
@@ -230,6 +230,73 @@ ls /workspace
 - Tab A 輸入 → Tab B 即時看到輸出
 - Tab B 輸入 → Tab A 即時看到輸出
 - 兩個 tab 始終呈現相同的 terminal 狀態
+
+---
+
+## T15 — 掛載 ~/.claude → Claude Code 已登入
+
+**目的**：確認 `-v ~/.claude:/root/.claude` 能讓 Claude Code 直接使用主機的登入憑證，不需重新登入。
+
+**前置條件**：主機的 `~/.claude` 目錄中已有有效的 Claude Code 憑證（執行過 `claude` 並完成登入）。
+
+**步驟**：
+```bash
+docker run -d \
+  -p 8080:8080 \
+  -e AUTH_MODE=none \
+  -e LISTEN_ADDR=:8080 \
+  -v ~/.claude:/root/.claude \
+  -v /your/workspace:/workspace \
+  ghcr.io/fcwu/perch:latest
+```
+
+瀏覽器開啟 `http://localhost:8080`，觀察 terminal 輸出。
+
+**預期**：
+- Claude Code 啟動後直接顯示 Welcome 訊息或 prompt，**不出現登入提示**
+- 無 `Please log in` 或 OAuth 相關訊息
+
+---
+
+## T16 — 未掛載 ~/.claude → Claude Code 未登入
+
+**目的**：確認未掛載 `~/.claude` 時，Claude Code 正確顯示登入提示，不使用任何殘留憑證。
+
+**步驟**：
+```bash
+docker run -d \
+  -p 8082:8082 \
+  -e AUTH_MODE=none \
+  -e LISTEN_ADDR=:8082 \
+  -v /your/workspace:/workspace \
+  ghcr.io/fcwu/perch:latest
+```
+
+瀏覽器開啟 `http://localhost:8082`，觀察 terminal 輸出。
+
+**預期**：
+- Claude Code 啟動後出現登入提示（例如 `Please log in` 或引導使用者執行 `claude` 登入指令）
+- **不自動進入** Ready 狀態
+
+**反向驗證**：掛載 `-v ~/.claude:/root/.claude` 後重建 container，應進入 T15 的已登入狀態。
+
+---
+
+## T17 — 首次開啟 Web UI Terminal 填滿畫面
+
+**目的**：確認瀏覽器首次載入時，xterm.js terminal 完整填滿可視區域，無空白邊緣。
+
+**步驟**：
+1. 啟動 Perch（任何認證模式均可）
+2. 開啟一個**全新**瀏覽器分頁，直接輸入 `http://localhost:8080`
+3. 觀察頁面載入後的 terminal 畫面
+
+**預期**：
+- Terminal 黑色區域填滿整個 viewport（上下左右無明顯空白）
+- 無需手動縮放或重整頁面
+- xterm.js 的字元欄位數（cols）與列數（rows）正確對應視窗大小，送出的 resize 訊息已反映正確尺寸
+
+**反向驗證**：調整瀏覽器視窗大小後，terminal 應自動重新 fit，不出現黑色空白條。
 
 ---
 
