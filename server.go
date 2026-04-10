@@ -17,17 +17,22 @@ type Server struct {
 	pty    *PTYManager
 	auth   *AuthMiddleware
 	sched  *Scheduler
+	im     *IMManager
 	logger *slog.Logger
 	mux    *http.ServeMux
 }
 
-func newServer(pm *PTYManager, auth *AuthMiddleware, sched *Scheduler, logger *slog.Logger) *Server {
+func newServer(pm *PTYManager, auth *AuthMiddleware, sched *Scheduler, im *IMManager, logger *slog.Logger) *Server {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	s := &Server{pty: pm, auth: auth, sched: sched, logger: logger, mux: http.NewServeMux()}
+	s := &Server{pty: pm, auth: auth, sched: sched, im: im, logger: logger, mux: http.NewServeMux()}
 	s.mux.HandleFunc("/ws", s.handleWS)
 	s.mux.HandleFunc("/input", s.handleInput)
+	// /hook is called by Claude Code hooks running inside the container (localhost).
+	// It is intentionally exempt from auth — registered on the raw mux, bypassing the
+	// auth wrapper applied in ServeHTTP.
+	s.mux.Handle("/hook", newHookHandler(im))
 	if auth != nil && auth.mode == "password" {
 		s.mux.HandleFunc("/login", auth.handleLogin)
 	}
@@ -43,6 +48,12 @@ func newServer(pm *PTYManager, auth *AuthMiddleware, sched *Scheduler, logger *s
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	// /hook is called by Claude Code hooks running inside the container (localhost).
+	// Skip auth — it carries no session cookie and must always be reachable.
+	if r.URL.Path == "/hook" {
+		s.mux.ServeHTTP(w, r)
+		return
+	}
 	if s.auth != nil {
 		s.auth.wrap(s.mux).ServeHTTP(w, r)
 	} else {

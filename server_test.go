@@ -11,7 +11,7 @@ import (
 
 func TestWebSocketReceivesPTYOutput(t *testing.T) {
 	pm := newPTYManager()
-	srv := newServer(pm, nil, nil, nil)
+	srv := newServer(pm, nil, nil, nil, nil)
 
 	ts := httptest.NewServer(srv)
 	defer ts.Close()

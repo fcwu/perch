@@ -53,6 +53,31 @@ func main() {
 	sched.loadFromFile()
 	go sched.run()
 
+	// --- IM bots (optional) ---
+	var im *IMManager
+	discordToken := os.Getenv("DISCORD_BOT_TOKEN")
+	discordChannel := os.Getenv("DISCORD_CHANNEL_ID")
+	telegramToken := os.Getenv("TELEGRAM_BOT_TOKEN")
+	telegramChatStr := os.Getenv("TELEGRAM_CHAT_ID")
+
+	if discordToken != "" && discordChannel != "" || telegramToken != "" && telegramChatStr != "" {
+		im = newIMManager(logger.Logger)
+	}
+	if im != nil && discordToken != "" && discordChannel != "" {
+		im.addAdapter(newDiscordAdapter(discordToken, discordChannel, logger.Logger))
+	}
+	if im != nil && telegramToken != "" && telegramChatStr != "" {
+		chatID, err := parseTelegramChatID(telegramChatStr)
+		if err != nil {
+			logger.Error("invalid TELEGRAM_CHAT_ID", "value", telegramChatStr, "err", err)
+			os.Exit(1)
+		}
+		im.addAdapter(newTelegramAdapter(telegramToken, chatID, logger.Logger))
+	}
+	if im != nil {
+		im.start(pm)
+	}
+
 	// --- Auth ---
 	auth := newAuthMiddleware(authMode, password)
 
@@ -60,7 +85,7 @@ func main() {
 	rl := newRateLimiter(2, 5)
 
 	// --- Server ---
-	srv := newServer(pm, auth, sched, logger.Logger)
+	srv := newServer(pm, auth, sched, im, logger.Logger)
 
 	// Apply rate limiting to sensitive endpoints only
 	sensitivePaths := map[string]bool{"/login": true, "/bootstrap": true}
@@ -123,5 +148,8 @@ func main() {
 
 	<-ctx.Done()
 	logger.Info("shutting down")
+	if im != nil {
+		im.stop()
+	}
 	httpSrv.Shutdown(context.Background())
 }
