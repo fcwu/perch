@@ -5,24 +5,40 @@ import (
 	"crypto/x509"
 	"encoding/pem"
 	"net/http"
+	"os"
+	"path/filepath"
 	"sync/atomic"
 
 	"software.sslmate.com/src/go-pkcs12"
 )
 
 type BootstrapHandler struct {
-	p12Data []byte
-	used    atomic.Bool
+	p12Data  []byte
+	usedFile string
+	used     atomic.Bool
 }
 
-func newBootstrapHandler(p12Data []byte) *BootstrapHandler {
-	return &BootstrapHandler{p12Data: p12Data}
+// newBootstrapHandler creates the handler. usedFile is the path to the
+// sentinel file that persists the "already used" state across restarts.
+// If the file already exists, bootstrap is immediately disabled.
+func newBootstrapHandler(p12Data []byte, usedFile string) *BootstrapHandler {
+	bh := &BootstrapHandler{p12Data: p12Data, usedFile: usedFile}
+	if _, err := os.Stat(usedFile); err == nil {
+		bh.used.Store(true)
+	}
+	return bh
 }
 
 func (b *BootstrapHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if !b.used.CompareAndSwap(false, true) {
 		http.Error(w, "bootstrap already used", http.StatusGone)
 		return
+	}
+	// Persist the used state before sending the response so a crash mid-write
+	// cannot allow a second download.
+	if b.usedFile != "" {
+		os.MkdirAll(filepath.Dir(b.usedFile), 0700)
+		os.WriteFile(b.usedFile, []byte("used"), 0600)
 	}
 	w.Header().Set("Content-Type", "application/x-pkcs12")
 	w.Header().Set("Content-Disposition", `attachment; filename="client.p12"`)

@@ -124,7 +124,7 @@ func main() {
 			logger.Error("generate client p12", "err", err)
 			os.Exit(1)
 		}
-		srv.mux.Handle("/bootstrap", newBootstrapHandler(p12Data))
+		srv.mux.Handle("/bootstrap", newBootstrapHandler(p12Data, "data/bootstrap.used"))
 		tlsCfg, err := buildTLSConfig(authMode, serverCertPEM, serverKeyPEM, caCertPEM)
 		if err != nil {
 			logger.Error("build TLS config", "err", err)
