@@ -40,7 +40,13 @@ func main() {
 
 	// --- PTY ---
 	pm := newPTYManager()
-	go pm.start("claude", []string{}, logger.Logger)
+	workdir := os.Getenv("CLAUDE_WORKDIR")
+	if workdir == "" {
+		if _, err := os.Stat("/workspace"); err == nil {
+			workdir = "/workspace"
+		}
+	}
+	go pm.start("claude", []string{}, workdir, logger.Logger)
 
 	// --- Scheduler ---
 	sched := newScheduler(pm)

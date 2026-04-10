@@ -79,15 +79,19 @@ func (p *PTYManager) resize(cols, rows uint16) error {
 	return pty.Setsize(ptmx, &pty.Winsize{Cols: cols, Rows: rows})
 }
 
-func (p *PTYManager) start(command string, args []string, logger *slog.Logger) {
+func (p *PTYManager) start(command string, args []string, workdir string, logger *slog.Logger) {
 	for {
 		p.mu.Lock()
 		p.framebuf = nil
 		p.mu.Unlock()
 
 		cmd := exec.Command(command, args...)
+		if workdir != "" {
+			cmd.Dir = workdir
+		}
 		cmd.Env = append(os.Environ(),
 			"TERM=xterm-256color",
+			"HOME=/root",
 			"CLAUDE_CODE_NO_FLICKER=1",
 			"CLAUDE_CODE_DISABLE_MOUSE=1",
 		)
