@@ -66,35 +66,6 @@ func main() {
 		}
 	})
 
-	// --- TLS ---
-	caCertPEM, caKeyPEM, err := generateSelfSignedCert("perch-ca", nil)
-	if err != nil {
-		logger.Error("generate CA cert", "err", err)
-		os.Exit(1)
-	}
-	serverCertPEM, serverKeyPEM, err := generateSelfSignedCert("perch-server", nil)
-	if err != nil {
-		logger.Error("generate server cert", "err", err)
-		os.Exit(1)
-	}
-	_ = caKeyPEM
-
-	if authMode == "mtls" {
-		p12Data, err := generateClientP12(caCertPEM, caKeyPEM, "perch")
-		if err != nil {
-			logger.Error("generate client p12", "err", err)
-			os.Exit(1)
-		}
-		bootstrapHandler := newBootstrapHandler(p12Data)
-		srv.mux.Handle("/bootstrap", bootstrapHandler)
-	}
-
-	tlsCfg, err := buildTLSConfig(authMode, serverCertPEM, serverKeyPEM, caCertPEM)
-	if err != nil {
-		logger.Error("build TLS config", "err", err)
-		os.Exit(1)
-	}
-
 	// --- Listener ---
 	baseListener, err := net.Listen("tcp", addr)
 	if err != nil {
@@ -103,7 +74,33 @@ func main() {
 	}
 	bl := newIPBlockList(blockedIPs)
 	blockedListener := wrapListener(baseListener, bl)
-	tlsListener := tls.NewListener(blockedListener, tlsCfg)
+
+	// --- TLS (mtls mode only) ---
+	var finalListener net.Listener = blockedListener
+	if authMode == "mtls" {
+		caCertPEM, caKeyPEM, err := generateSelfSignedCert("perch-ca", nil)
+		if err != nil {
+			logger.Error("generate CA cert", "err", err)
+			os.Exit(1)
+		}
+		serverCertPEM, serverKeyPEM, err := generateSelfSignedCert("perch-server", nil)
+		if err != nil {
+			logger.Error("generate server cert", "err", err)
+			os.Exit(1)
+		}
+		p12Data, err := generateClientP12(caCertPEM, caKeyPEM, "perch")
+		if err != nil {
+			logger.Error("generate client p12", "err", err)
+			os.Exit(1)
+		}
+		srv.mux.Handle("/bootstrap", newBootstrapHandler(p12Data))
+		tlsCfg, err := buildTLSConfig(authMode, serverCertPEM, serverKeyPEM, caCertPEM)
+		if err != nil {
+			logger.Error("build TLS config", "err", err)
+			os.Exit(1)
+		}
+		finalListener = tls.NewListener(blockedListener, tlsCfg)
+	}
 
 	httpSrv := &http.Server{Handler: finalHandler}
 
@@ -113,7 +110,7 @@ func main() {
 
 	go func() {
 		logger.Info("perch listening", "addr", addr, "auth", authMode)
-		if err := httpSrv.Serve(tlsListener); err != nil && err != http.ErrServerClosed {
+		if err := httpSrv.Serve(finalListener); err != nil && err != http.ErrServerClosed {
 			logger.Error("server error", "err", err)
 		}
 	}()

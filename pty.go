@@ -11,10 +11,13 @@ import (
 	"github.com/creack/pty"
 )
 
+const maxFramebuf = 1 << 20 // 1 MB cap
+
 type PTYManager struct {
 	mu          sync.Mutex
 	subscribers map[chan []byte]struct{}
 	ptmx        *os.File
+	framebuf    []byte
 }
 
 func newPTYManager() *PTYManager {
@@ -26,6 +29,11 @@ func newPTYManager() *PTYManager {
 func (p *PTYManager) subscribe() (chan []byte, func()) {
 	ch := make(chan []byte, 256)
 	p.mu.Lock()
+	if len(p.framebuf) > 0 {
+		snapshot := make([]byte, len(p.framebuf))
+		copy(snapshot, p.framebuf)
+		ch <- snapshot
+	}
 	p.subscribers[ch] = struct{}{}
 	p.mu.Unlock()
 	return ch, func() {
@@ -38,6 +46,10 @@ func (p *PTYManager) subscribe() (chan []byte, func()) {
 func (p *PTYManager) broadcast(data []byte) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	p.framebuf = append(p.framebuf, data...)
+	if len(p.framebuf) > maxFramebuf {
+		p.framebuf = p.framebuf[len(p.framebuf)-maxFramebuf:]
+	}
 	for ch := range p.subscribers {
 		select {
 		case ch <- data:
@@ -69,8 +81,16 @@ func (p *PTYManager) resize(cols, rows uint16) error {
 
 func (p *PTYManager) start(command string, args []string, logger *slog.Logger) {
 	for {
+		p.mu.Lock()
+		p.framebuf = nil
+		p.mu.Unlock()
+
 		cmd := exec.Command(command, args...)
-		cmd.Env = append(os.Environ(), "TERM=xterm-256color")
+		cmd.Env = append(os.Environ(),
+			"TERM=xterm-256color",
+			"CLAUDE_CODE_NO_FLICKER=1",
+			"CLAUDE_CODE_DISABLE_MOUSE=1",
+		)
 		ptmx, err := pty.Start(cmd)
 		if err != nil {
 			logger.Error("pty start failed", "err", err)

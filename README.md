@@ -38,7 +38,9 @@ go build -o perch .
 AUTH_MODE=none LISTEN_ADDR=:8443 ./perch
 ```
 
-瀏覽器開啟 **`https://localhost:8443`**，接受自簽憑證警告，即可進入 terminal。
+瀏覽器開啟 **`http://localhost:8443`**，即可進入 terminal。
+
+> `AUTH_MODE=none` 和 `AUTH_MODE=password` 使用 plain HTTP；只有 `AUTH_MODE=mtls` 才使用 HTTPS。
 
 ### Docker 執行（建議正式使用）
 
@@ -48,15 +50,21 @@ docker pull ghcr.io/fcwu/perch:latest
 
 # 無認證模式（內網測試）
 docker run -d \
-  -p 8443:8443 \
+  -p 8080:8080 \
   -e AUTH_MODE=none \
+  -e LISTEN_ADDR=:8080 \
+  -v ~/.claude:/root/.claude \
+  -v /your/workspace:/workspace \
   ghcr.io/fcwu/perch:latest
 
 # 密碼模式
 docker run -d \
-  -p 8443:8443 \
+  -p 8080:8080 \
   -e AUTH_MODE=password \
   -e AUTH_PASSWORD=你的密碼 \
+  -e LISTEN_ADDR=:8080 \
+  -v ~/.claude:/root/.claude \
+  -v /your/workspace:/workspace \
   -v perch-data:/app/data \
   ghcr.io/fcwu/perch:latest
 
@@ -64,6 +72,8 @@ docker run -d \
 docker run -d \
   -p 8443:8443 \
   -e AUTH_MODE=mtls \
+  -v ~/.claude:/root/.claude \
+  -v /your/workspace:/workspace \
   -v perch-data:/app/data \
   ghcr.io/fcwu/perch:latest
 ```
@@ -118,9 +128,10 @@ AUTH_MODE=password AUTH_PASSWORD=mysecret ./perch
 ## 在手機上使用
 
 1. 確認手機與電腦 / server 在同一網路（或 server 有公網 IP）
-2. 手機 Chrome 開啟 `https://<server-ip>:8443`
-3. 接受自簽憑證警告（或使用 mTLS 模式安裝憑證）
-4. 畫面下方有虛擬鍵盤，點擊按鈕送出特殊按鍵
+2. 手機 Chrome 開啟：
+   - `none` / `password` 模式：`http://<server-ip>:8080`
+   - `mtls` 模式：`https://<server-ip>:8443`
+3. 畫面下方有虛擬鍵盤，點擊按鈕送出特殊按鍵
 
 虛擬鍵盤按鍵：
 
@@ -143,13 +154,13 @@ AUTH_MODE=password AUTH_PASSWORD=mysecret ./perch
 ### 列出排程
 
 ```bash
-curl -sk https://localhost:8443/schedule
+curl -s http://localhost:8080/schedule
 ```
 
 ### 新增排程
 
 ```bash
-curl -sk -X POST https://localhost:8443/schedule \
+curl -s -X POST http://localhost:8080/schedule \
   -H "Content-Type: application/json" \
   -d '{
     "hour": 9,
@@ -164,27 +175,63 @@ curl -sk -X POST https://localhost:8443/schedule \
 ### 刪除排程
 
 ```bash
-curl -sk -X DELETE https://localhost:8443/schedule/<id>
+curl -s -X DELETE http://localhost:8080/schedule/<id>
 ```
 
 排程資料存在 `schedules.json`，重啟後不遺失（Docker 需掛 volume）。
 
 ---
 
-## Docker Volume 說明
+## Docker Mount 說明
 
-正式使用建議掛 volume 持久化排程資料：
+### Claude Code 認證
+
+Container 內的 Claude Code 需要讀取你的登入憑證：
+
+```bash
+-v ~/.claude:/root/.claude
+```
+
+這樣 container 內的 Claude Code 就能使用你在主機上已登入的帳號，不需要重新登入。
+
+### Working Directory
+
+讓 Claude Code 在你指定的目錄工作：
+
+```bash
+-v /your/workspace:/workspace
+```
+
+Container 啟動後，Claude Code 的 working directory 預設是 `/root`。若要讓它在特定專案目錄工作，可以同時設定：
+
+```bash
+-v /your/workspace:/workspace \
+-e CLAUDE_ARGS="--cwd /workspace"
+```
+
+> 目前版本 `CLAUDE_ARGS` 尚未實作，working directory 需在 terminal 內手動 `cd`。
+
+### 排程資料持久化
+
+排程資料儲存在 `/app/data/schedules.json`，重啟後不遺失：
+
+```bash
+-v perch-data:/app/data
+```
+
+### 完整範例
 
 ```bash
 docker run -d \
-  -p 8443:8443 \
+  -p 8080:8080 \
   -e AUTH_MODE=password \
   -e AUTH_PASSWORD=mysecret \
-  -v perch-data:/app \
+  -e LISTEN_ADDR=:8080 \
+  -v ~/.claude:/root/.claude \
+  -v /your/workspace:/workspace \
+  -v perch-data:/app/data \
   ghcr.io/fcwu/perch:latest
 ```
-
-`/app` 目錄下會儲存 `schedules.json`。
 
 ---
 
