@@ -177,7 +177,7 @@ curl -s -X POST http://localhost:8081/login \
 ```bash
 AUTH_MODE=mtls LISTEN_ADDR=:8443 ./perch &
 
-# 下載 client.p12（第一次）
+# 下載 client.p12（第一次，不帶 client cert）
 curl -sk https://localhost:8443/bootstrap -o client.p12
 echo "Exit: $?"
 
@@ -186,8 +186,9 @@ curl -sk https://localhost:8443/bootstrap -o /dev/null -w "%{http_code}"
 ```
 
 **預期**：
-- 第一次：下載成功（200），回傳 `client.p12`
-- 第二次：HTTP 404 或 410（端點已失效）
+- 第一次：**不需帶 client certificate** 即可存取，下載成功（200），回傳 `client.p12`
+- 第二次：HTTP 410（端點已失效，one-time only）
+- 其他任何路徑在無 client cert 時 → HTTP 401
 
 ---
 
@@ -341,6 +342,60 @@ docker run -d \
 - Claude 呼叫 Bash 工具時 → ⚙️ 出現
 - 工具執行完成 → ✅ 出現，⚙️ 消失
 - Claude 回應完畢 → 💬 出現，👀 消失，Discord 收到 reply 訊息
+
+---
+
+## T20 — Password 模式：所有端點受保護（unit test）
+
+> **自動化**：`go test` → `TestAuthPasswordBlocksAllEndpoints`
+
+**目的**：確認 password 模式下，所有受保護端點在無 session cookie 時回傳 401。
+
+**涵蓋路徑**：`/`、`/ws`、`/input`、`/schedule`、`/schedule/:id`
+
+**預期**：無 session cookie → HTTP 401。
+
+---
+
+## T21 — Password 模式：/login 與 /bootstrap 不需 session（unit test）
+
+> **自動化**：`go test` → `TestAuthPasswordBypassEndpoints`
+
+**目的**：確認登入與 bootstrap 端點在無 session 時可直接到達（否則使用者無法完成登入）。
+
+**預期**：`/login`、`/bootstrap` → 非 401。
+
+---
+
+## T22 — Password 模式：Session Cookie 無 Secure Flag（unit test）
+
+> **自動化**：`go test` → `TestAuthPasswordSessionCookieNotSecure`
+
+**目的**：password 模式使用 plain HTTP，`Secure` flag 會導致瀏覽器不回送 cookie，使登入後所有請求仍被擋下。
+
+**預期**：`/login` 回傳的 `Set-Cookie` 中，session cookie 不得帶 `Secure` 屬性。
+
+---
+
+## T23 — mTLS 模式：無 Client Cert 擋下所有受保護端點（unit test）
+
+> **自動化**：`go test` → `TestAuthMTLSBlocksWithoutClientCert`
+
+**目的**：確認 mtls 模式下，沒有 client certificate 的請求被 401 拒絕。
+
+**涵蓋路徑**：`/`、`/ws`、`/input`、`/schedule`
+
+**預期**：無 client cert → HTTP 401。
+
+---
+
+## T24 — mTLS 模式：/bootstrap 不需 Client Cert（unit test）
+
+> **自動化**：`go test` → `TestAuthMTLSBootstrapAccessibleWithoutClientCert`
+
+**目的**：`/bootstrap` 是取得 client cert 的唯一管道，若也要求 client cert 則永遠無法 bootstrap（雞生蛋問題）。TLS 層設為 `RequestClientCert`（optional），application layer 對 `/bootstrap` 不檢查憑證。
+
+**預期**：`/bootstrap` 在無 client cert 時 → 非 401（可到達 handler）。
 
 ---
 
