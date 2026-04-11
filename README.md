@@ -29,6 +29,7 @@ docker run -d \
   -p 8080:8080 \
   -e AUTH_MODE=none \
   -e LISTEN_ADDR=:8080 \
+  -e TZ=Asia/Taipei \
   -v ~/.claude:/root/.claude \
   -v ~/.claude.json:/root/.claude.json \
   -v /your/workspace:/workspace \
@@ -40,6 +41,7 @@ docker run -d \
   -e AUTH_MODE=password \
   -e AUTH_PASSWORD=你的密碼 \
   -e LISTEN_ADDR=:8080 \
+  -e TZ=Asia/Taipei \
   -v ~/.claude:/root/.claude \
   -v ~/.claude.json:/root/.claude.json \
   -v /your/workspace:/workspace \
@@ -49,6 +51,7 @@ docker run -d \
 docker run -d \
   -p 8443:8443 \
   -e AUTH_MODE=mtls \
+  -e TZ=Asia/Taipei \
   -v ~/.claude:/root/.claude \
   -v ~/.claude.json:/root/.claude.json \
   -v /your/workspace:/workspace \
@@ -152,20 +155,26 @@ Claude 會透過內建的 `local-schedule` skill 設定排程。排程資料存�
 
 1. 前往 [Discord Developer Portal](https://discord.com/developers/applications)
 2. 點 **New Application** → 輸入名稱（例如 `perch`）→ Create
-3. 左側選 **Bot** → 點 **Add Bot**
-4. 在 **TOKEN** 區塊點 **Reset Token** → 複製 token → 存為 `DISCORD_BOT_TOKEN`
-5. 在同一頁往下找 **Privileged Gateway Intents**，開啟 **Message Content Intent**（必填，否則收不到訊息內容）
+3. 左側選 **Installation** → 取消勾選 **User Install**，保留 **Guild Install**，**Install Link** 選 **None**
+4. 左側選 **Bot** → 點 **Add Bot**
+5. 在 **TOKEN** 區塊點 **Reset Token** → 複製 token → 存為 `DISCORD_BOT_TOKEN`
+6. 在同一頁找 **Authorization Flow** → 關閉 **Public Bot**
+7. 在同一頁往下找 **Privileged Gateway Intents** → 開啟 **Message Content Intent**
 
 ### 步驟二：邀請 Bot 進 Server
 
-1. 左側選 **OAuth2 → URL Generator**
+1. 左側選 **OAuth2**
 2. Scopes 勾選：`bot`
 3. Bot Permissions 勾選：
-   - `Read Messages / View Channels`
+   - `View Channels`
    - `Send Messages`
-   - `Add Reactions`
+   - `Create Public Threads`（目前未使用）
+   - `Send Messages in Threads`（目前未使用）
+   - `Manage Messages`（目前未使用）
+   - `Manage Threads`（目前未使用）
    - `Read Message History`
-4. 複製產生的 URL → 在瀏覽器開啟 → 選擇要加入的 Server → Authorize
+   - `Add Reactions`
+4. 複製頁面下方產生的 URL → 在瀏覽器開啟 → 選擇要加入的 Server → Authorize
 
 ### 步驟三：取得 Channel ID
 
