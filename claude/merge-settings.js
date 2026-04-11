@@ -2,6 +2,9 @@
 // Merges perch hooks from /app/perch-claude/settings.json into
 // /root/.claude/settings.json without overwriting hooks the user
 // already has configured.
+//
+// Hook format (Claude Code ≥ 1.x):
+// { "hooks": { "PreToolUse": [{ "matcher": "", "hooks": [{ "type": "command", "command": "..." }] }] } }
 
 const fs = require('fs')
 
@@ -16,6 +19,21 @@ function loadJSON(path) {
   }
 }
 
+// Collect all "command" strings already present in a hook-event array.
+function existingCommands(eventEntries) {
+  const cmds = new Set()
+  for (const entry of eventEntries) {
+    if (Array.isArray(entry.hooks)) {
+      for (const h of entry.hooks) {
+        if (h.command) cmds.add(h.command)
+      }
+    }
+    // legacy flat format
+    if (entry.command) cmds.add(entry.command)
+  }
+  return cmds
+}
+
 const user = loadJSON(USER_SETTINGS)
 const perch = loadJSON(PERCH_SETTINGS)
 
@@ -26,13 +44,15 @@ user.hooks = user.hooks || {}
 for (const [event, entries] of Object.entries(perch.hooks)) {
   if (!Array.isArray(entries)) continue
   user.hooks[event] = user.hooks[event] || []
+
+  const existing = existingCommands(user.hooks[event])
+
   for (const entry of entries) {
-    const cmd = entry.command
-    if (!cmd) continue
-    const alreadyPresent = user.hooks[event].some(e => e.command === cmd)
-    if (!alreadyPresent) {
-      user.hooks[event].push(entry)
-    }
+    if (!Array.isArray(entry.hooks)) continue
+    const newHooks = entry.hooks.filter(h => h.command && !existing.has(h.command))
+    if (newHooks.length === 0) continue
+    user.hooks[event].push({ matcher: entry.matcher ?? '', hooks: newHooks })
+    newHooks.forEach(h => existing.add(h.command))
   }
 }
 

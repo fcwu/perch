@@ -2,17 +2,35 @@
   "hooks": {
     "PreToolUse": [
       {
-        "command": "curl -sf -X POST \"http://localhost${LISTEN_ADDR}/hook\" -H 'Content-Type: application/json' -d @-"
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "curl -sf -X POST \"http://localhost${LISTEN_ADDR}/hook\" -H 'Content-Type: application/json' -d @-"
+          }
+        ]
       }
     ],
     "PostToolUse": [
       {
-        "command": "curl -sf -X POST \"http://localhost${LISTEN_ADDR}/hook\" -H 'Content-Type: application/json' -d @-"
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "curl -sf -X POST \"http://localhost${LISTEN_ADDR}/hook\" -H 'Content-Type: application/json' -d @-"
+          }
+        ]
       }
     ],
     "Stop": [
       {
-        "command": "curl -sf -X POST \"http://localhost${LISTEN_ADDR}/hook\" -H 'Content-Type: application/json' -d @-"
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "curl -sf -X POST \"http://localhost${LISTEN_ADDR}/hook\" -H 'Content-Type: application/json' -d @-"
+          }
+        ]
       }
     ]
   }
