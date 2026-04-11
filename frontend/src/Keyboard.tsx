@@ -47,6 +47,10 @@ export function Keyboard({ termRef }: Props) {
 
   return (
     <div style={{
+      position: 'fixed',
+      bottom: 0,
+      left: 0,
+      right: 0,
       display: 'flex',
       flexWrap: 'nowrap',
       alignItems: 'center',
@@ -54,6 +58,7 @@ export function Keyboard({ termRef }: Props) {
       borderTop: '1px solid #2a2a2a',
       padding: '6px 8px',
       gap: 6,
+      zIndex: 10,
     }}>
       {KEYS.map(([label, seq]) => (
         <button
@@ -61,6 +66,7 @@ export function Keyboard({ termRef }: Props) {
           onPointerDown={(e) => {
             e.preventDefault()
             termRef.current?.input(seq, true)
+            termRef.current?.scrollToBottom?.()
           }}
           style={btn}
         >

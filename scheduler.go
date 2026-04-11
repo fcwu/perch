@@ -105,7 +105,7 @@ func (s *Scheduler) run() {
 		for id, job := range s.jobs {
 			if t.Hour() == job.Hour && t.Minute() == job.Minute {
 				if s.pty != nil {
-					s.pty.write([]byte(job.Message + "\n"))
+					s.pty.write([]byte(job.Message + "\r"))
 				}
 				if !job.Repeat {
 					toDelete = append(toDelete, id)
@@ -133,8 +133,11 @@ func (s *Scheduler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "bad request", http.StatusBadRequest)
 			return
 		}
-		s.addJob(job)
+		id := s.addJob(job)
+		job.ID = id
+		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusCreated)
+		json.NewEncoder(w).Encode(job)
 	case r.Method == http.MethodDelete && len(r.URL.Path) > len("/schedule/"):
 		id := r.URL.Path[len("/schedule/"):]
 		s.deleteJob(id)

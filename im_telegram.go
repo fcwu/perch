@@ -72,7 +72,7 @@ func (t *TelegramAdapter) onText(c telebot.Context) error {
 	t.mu.Unlock()
 
 	if pty != nil {
-		pty.write([]byte(c.Text() + "\n"))
+		pty.write([]byte(c.Text() + "\r"))
 	}
 	return nil
 }

@@ -89,7 +89,7 @@ func (d *DiscordAdapter) onMessage(s *discordgo.Session, m *discordgo.MessageCre
 	d.react(s, m.ChannelID, m.ID, emojiEyes)
 
 	if pty != nil {
-		pty.write([]byte(m.Content + "\n"))
+		pty.write([]byte(m.Content + "\r"))
 	}
 }
 

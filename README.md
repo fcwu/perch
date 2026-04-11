@@ -76,7 +76,8 @@ Perch 的內建 skill（`local-schedule` 等）會在容器啟動時自動合併
 | `LISTEN_ADDR` | `:8443` | 監聽位址，例如 `:8443` 或 `0.0.0.0:443` |
 | `BLOCK_IPS` | — | 空格分隔的封鎖 IP 清單，支援 CIDR，例如 `1.2.3.4 10.0.0.0/8` |
 | `CLAUDE_WORKDIR` | `/workspace`（若存在） | Claude Code 的起始工作目錄 |
-| `ANTHROPIC_API_KEY` | — | Anthropic API 金鑰，直接傳給 Claude（見下方說明） |
+| `TZ` | `UTC` | 容器時區，影響排程觸發時間，例如 `Asia/Taipei` |
+| `ANTHROPIC_API_KEY` | — | Anthropic API 金鑰，直接傳給 Claude |
 | `DISCORD_BOT_TOKEN` | — | Discord bot token（啟用 Discord 整合） |
 | `DISCORD_CHANNEL_ID` | — | 要監聽的 Discord channel ID |
 | `TELEGRAM_BOT_TOKEN` | — | Telegram bot token（啟用 Telegram 整合） |
@@ -123,6 +124,8 @@ Perch 內建排程功能，可以設定每天特定時間自動送指令進 term
 > 「每天早上 9 點幫我做 daily standup 摘要」
 
 Claude 會透過內建的 `local-schedule` skill 設定排程。排程資料存在 workspace 目錄，重啟容器後不遺失。
+
+> 排程時間以容器時區為準，預設 UTC。若需台灣時間，啟動時加上 `-e TZ=Asia/Taipei`。
 
 ---
 
