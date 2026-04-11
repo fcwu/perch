@@ -16,10 +16,12 @@ When the user says something like *"每天早上 9 點幫我做 daily standup"*:
 | Time | 09:00 | `hour: 9, minute: 0` |
 | Task | 幫我做 daily standup | `message` field |
 
-**`message` is a prompt sent directly to Claude Code.** Write it as a clear, self-contained request without time information. Claude Code will receive it and act on it when the time comes.
+**`message` is a prompt sent directly to Claude Code.** Write it as a clear, self-contained *request* — not the answer. Claude Code receives it at the scheduled time and generates a fresh response each time.
 
-Good: `"幫我做今天的 daily standup 摘要"`  
-Bad: `"每天早上9點幫我做 daily standup"` ← includes time info, redundant
+✅ Good: `"請給我一句讓我開心的話"`  → Claude Code generates a different uplifting message every day  
+✅ Good: `"幫我做今天的 daily standup 摘要"` → Claude Code summarises fresh each morning  
+❌ Bad: `"你今天很棒！加油！🌟"` → pre-generated answer, same every day  
+❌ Bad: `"每天早上9點幫我做 daily standup"` → includes time info, redundant
 
 ## Base URL
 

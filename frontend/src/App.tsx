@@ -44,15 +44,25 @@ export default function App() {
 
         if (!rows.includes(bufferRow)) { callback(undefined); return }
 
-        // Keep trailing spaces (trimRight=false) so each row is exactly `cols`
-        // chars wide and character offsets stay cols-aligned.
-        const combined = rows.map(r => getLine(r)?.translateToString(false) ?? '').join('')
+        // Get each row's text, trimming trailing spaces so that padding
+        // characters don't break URL matching across wrapped lines.
+        // (translateToString(false) pads rows to `cols` width; those spaces
+        // would truncate the regex match at the first line boundary.)
+        const trimmed = rows.map(r => (getLine(r)?.translateToString(false) ?? '').trimEnd())
+        const combined = trimmed.join('')
+
+        // Cumulative character lengths (for offset → coordinate mapping)
+        const cumLen: number[] = [0]
+        for (const s of trimmed) cumLen.push(cumLen[cumLen.length - 1] + s.length)
 
         // Map a character offset in `combined` back to buffer {x, y} coordinates
-        const toCoord = (off: number) => ({
-          y: startRow + Math.floor(off / cols),
-          x: (off % cols) + 1,
-        })
+        const toCoord = (off: number) => {
+          let ri = trimmed.length - 1
+          for (let i = 0; i < trimmed.length; i++) {
+            if (off < cumLen[i + 1]) { ri = i; break }
+          }
+          return { y: rows[ri], x: (off - cumLen[ri]) + 1 }
+        }
 
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const links: any[] = []

@@ -59,8 +59,8 @@ docker run -d \
 
 | Mount | 用途 |
 |-------|------|
-| `-v ~/.claude:/root/.claude` | Claude Code 登入憑證、設定、技能 |
-| `-v ~/.claude.json:/root/.claude.json` | Claude Code UI 狀態（主題、onboarding 記錄）；缺少此掛載會每次重跑主題 wizard |
+| `-v ~/.claude:/root/.claude` | Claude Code 設定、技能；含 `.credentials.json`（OAuth token） |
+| `-v ~/.claude.json:/root/.claude.json` | 記錄 `hasCompletedOnboarding` 與 `userID`；缺少時 Claude Code 視為全新安裝，即使憑證存在也會要求重新登入 |
 | `-v /your/workspace:/workspace` | Claude Code 工作目錄；排程資料也存於此 |
 
 Perch 的內建 skill（`local-schedule` 等）會在容器啟動時自動合併到掛載的 `~/.claude/skills/` 中，不需要手動複製。
