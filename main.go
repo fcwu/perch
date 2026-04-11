@@ -55,16 +55,18 @@ func main() {
 
 	// --- IM bots (optional) ---
 	var im *IMManager
+	var discordSess *DiscordSessionManager
 	discordToken := os.Getenv("DISCORD_BOT_TOKEN")
 	discordChannel := os.Getenv("DISCORD_CHANNEL_ID")
 	telegramToken := os.Getenv("TELEGRAM_BOT_TOKEN")
 	telegramChatStr := os.Getenv("TELEGRAM_CHAT_ID")
 
-	if discordToken != "" || telegramToken != "" && telegramChatStr != "" {
+	if discordToken != "" && discordChannel != "" || telegramToken != "" && telegramChatStr != "" {
 		im = newIMManager(logger.Logger)
 	}
-	if im != nil && discordToken != "" {
-		im.addAdapter(newDiscordSessionManager(discordToken, discordChannel, workdir, logger.Logger))
+	if im != nil && discordToken != "" && discordChannel != "" {
+		discordSess = newDiscordSessionManager(discordToken, discordChannel, workdir, logger.Logger)
+		im.addAdapter(discordSess)
 	}
 	if im != nil && telegramToken != "" && telegramChatStr != "" {
 		chatID, err := parseTelegramChatID(telegramChatStr)
@@ -85,7 +87,11 @@ func main() {
 	rl := newRateLimiter(2, 5)
 
 	// --- Server ---
-	srv := newServer(pm, auth, sched, im, nil, logger.Logger)
+	var sessProvider SessionProvider
+	if discordSess != nil {
+		sessProvider = discordSess
+	}
+	srv := newServer(pm, auth, sched, im, sessProvider, logger.Logger)
 
 	// Apply rate limiting to sensitive endpoints only
 	sensitivePaths := map[string]bool{"/login": true, "/bootstrap": true}
