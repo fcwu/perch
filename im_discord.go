@@ -82,6 +82,11 @@ func newDiscordSessionManager(token, channelID, workdir string, logger *slog.Log
 }
 
 func (d *DiscordSessionManager) Start(_ *PTYManager) error {
+	// Pre-start the allowed channel's session so PTY is ready before first message.
+	if d.allowedChannelID != "" {
+		d.getOrCreateSession(d.allowedChannelID)
+	}
+
 	session, err := discordgo.New("Bot " + d.token)
 	if err != nil {
 		return err
@@ -101,9 +106,17 @@ func (d *DiscordSessionManager) Start(_ *PTYManager) error {
 func (d *DiscordSessionManager) Stop() {
 	d.mu.Lock()
 	s := d.dgo
+	sessions := make([]*discordSession, 0, len(d.sessions))
+	for _, sess := range d.sessions {
+		sessions = append(sessions, sess)
+	}
 	d.mu.Unlock()
+
 	if s != nil {
 		s.Close()
+	}
+	for _, sess := range sessions {
+		sess.pty.stop()
 	}
 }
 

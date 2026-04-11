@@ -18,11 +18,28 @@ type PTYManager struct {
 	subscribers map[chan []byte]struct{}
 	ptmx        *os.File
 	framebuf    []byte
+	done        chan struct{}
 }
 
 func newPTYManager() *PTYManager {
 	return &PTYManager{
 		subscribers: make(map[chan []byte]struct{}),
+		done:        make(chan struct{}),
+	}
+}
+
+func (p *PTYManager) stop() {
+	select {
+	case <-p.done:
+		return // already stopped
+	default:
+		close(p.done)
+	}
+	p.mu.Lock()
+	ptmx := p.ptmx
+	p.mu.Unlock()
+	if ptmx != nil {
+		ptmx.Close()
 	}
 }
 
@@ -81,6 +98,12 @@ func (p *PTYManager) resize(cols, rows uint16) error {
 
 func (p *PTYManager) start(command string, args []string, workdir string, logger *slog.Logger) {
 	for {
+		select {
+		case <-p.done:
+			return
+		default:
+		}
+
 		p.mu.Lock()
 		p.framebuf = nil
 		p.mu.Unlock()
@@ -98,7 +121,11 @@ func (p *PTYManager) start(command string, args []string, workdir string, logger
 		ptmx, err := pty.Start(cmd)
 		if err != nil {
 			logger.Error("pty start failed", "err", err)
-			time.Sleep(5 * time.Second)
+			select {
+			case <-p.done:
+				return
+			case <-time.After(5 * time.Second):
+			}
 			continue
 		}
 		p.mu.Lock()
@@ -126,6 +153,10 @@ func (p *PTYManager) start(command string, args []string, workdir string, logger
 		p.mu.Unlock()
 		cmd.Wait()
 		logger.Info("process exited, restarting in 2s")
-		time.Sleep(2 * time.Second)
+		select {
+		case <-p.done:
+			return
+		case <-time.After(2 * time.Second):
+		}
 	}
 }
