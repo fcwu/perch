@@ -38,8 +38,7 @@ export function Keyboard({ termRef }: Props) {
           key={label}
           onPointerDown={(e) => {
             e.preventDefault()
-            termRef.current?.focus()
-            termRef.current?.paste(seq)
+            termRef.current?.input(seq, true)
           }}
           style={{ padding: '6px 10px', fontFamily: 'monospace', fontSize: 13, cursor: 'pointer' }}
         >

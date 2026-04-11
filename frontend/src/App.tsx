@@ -17,7 +17,7 @@ export default function App() {
     })
     const fitAddon = new FitAddon()
     term.loadAddon(fitAddon)
-    term.loadAddon(new WebLinksAddon())
+    term.loadAddon(new WebLinksAddon((_e, uri) => { window.open(uri, '_blank') }))
     term.open(containerRef.current!)
     fitAddon.fit()
     termRef.current = term
@@ -42,17 +42,22 @@ export default function App() {
       }
     })
 
-    const observer = new ResizeObserver(() => {
+    const sendResize = () => {
       fitAddon.fit()
       const { cols, rows } = term
       if (ws.readyState === WebSocket.OPEN) {
         ws.send(JSON.stringify({ type: 'resize', cols, rows }))
       }
-    })
+    }
+
+    const observer = new ResizeObserver(sendResize)
     observer.observe(containerRef.current!)
+
+    window.addEventListener('resize', sendResize)
 
     return () => {
       observer.disconnect()
+      window.removeEventListener('resize', sendResize)
       ws.close()
       term.dispose()
     }
