@@ -9,7 +9,7 @@ import (
 )
 
 func TestSchedulerAddAndList(t *testing.T) {
-	sched := newScheduler(nil)
+	sched := newScheduler(nil, "")
 	sched.savePath = ""
 
 	id := sched.addJob(Job{Hour: 9, Minute: 30, Message: "good morning", Repeat: true})
@@ -27,7 +27,7 @@ func TestSchedulerAddAndList(t *testing.T) {
 }
 
 func TestSchedulerDeleteJob(t *testing.T) {
-	sched := newScheduler(nil)
+	sched := newScheduler(nil, "")
 	sched.savePath = ""
 
 	id := sched.addJob(Job{Hour: 10, Minute: 0, Message: "standup", Repeat: true})
@@ -38,7 +38,7 @@ func TestSchedulerDeleteJob(t *testing.T) {
 }
 
 func TestSchedulerHTTPAPI(t *testing.T) {
-	sched := newScheduler(nil)
+	sched := newScheduler(nil, "")
 	sched.savePath = ""
 	ts := httptest.NewServer(sched)
 	defer ts.Close()
