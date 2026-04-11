@@ -6,6 +6,10 @@ set -e
 if [ "$(id -u)" = "0" ]; then
     PUID="${PUID:-1000}"
     PGID="${PGID:-$(id -g "$PUID" 2>/dev/null || echo "$PUID")}"
+    # Fix ownership of Claude config files created by previous root containers.
+    # Without this, uid PUID cannot read root-owned .credentials.json and claude
+    # will fail to authenticate even if the OAuth token is present.
+    chown -R "${PUID}:${PGID}" /root/.claude /root/.claude.json 2>/dev/null || true
     exec gosu "${PUID}:${PGID}" env HOME=/root "$0" "$@"
 fi
 
