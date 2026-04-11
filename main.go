@@ -33,8 +33,11 @@ func main() {
 
 	addr := os.Getenv("LISTEN_ADDR")
 	if addr == "" {
-		addr = ":8443"
+		addr = ":8080"
 	}
+	// Export resolved addr so claude hook commands can POST to the right port
+	// without requiring the user to set LISTEN_ADDR explicitly.
+	os.Setenv("LISTEN_ADDR", addr)
 
 	blockedIPs := strings.Fields(os.Getenv("BLOCK_IPS"))
 

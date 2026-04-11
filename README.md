@@ -28,13 +28,12 @@ docker pull ghcr.io/fcwu/perch:latest
 docker run -d \
   -p 8080:8080 \
   -e AUTH_MODE=none \
-  -e LISTEN_ADDR=:8080 \
   -e TZ=Asia/Taipei \
   -e PUID=$(id -u) \
   -e PGID=$(id -g) \
   -v ~/.claude:/home/perchuser/.claude \
   -v ~/.claude.json:/home/perchuser/.claude.json \
-  -v /your/workspace:/workspace \
+  -v ./:/workspace \
   ghcr.io/fcwu/perch:latest
 
 # 密碼模式
@@ -42,25 +41,25 @@ docker run -d \
   -p 8080:8080 \
   -e AUTH_MODE=password \
   -e AUTH_PASSWORD=你的密碼 \
-  -e LISTEN_ADDR=:8080 \
   -e TZ=Asia/Taipei \
   -e PUID=$(id -u) \
   -e PGID=$(id -g) \
   -v ~/.claude:/home/perchuser/.claude \
   -v ~/.claude.json:/home/perchuser/.claude.json \
-  -v /your/workspace:/workspace \
+  -v ./:/workspace \
   ghcr.io/fcwu/perch:latest
 
 # mTLS 模式（最安全，正式對外使用）
 docker run -d \
   -p 8443:8443 \
   -e AUTH_MODE=mtls \
+  -e LISTEN_ADDR=:8443 \
   -e TZ=Asia/Taipei \
   -e PUID=$(id -u) \
   -e PGID=$(id -g) \
   -v ~/.claude:/home/perchuser/.claude \
   -v ~/.claude.json:/home/perchuser/.claude.json \
-  -v /your/workspace:/workspace \
+  -v ./:/workspace \
   ghcr.io/fcwu/perch:latest
 ```
 
@@ -70,7 +69,7 @@ docker run -d \
 |-------|------|
 | `-v ~/.claude:/home/perchuser/.claude` | Claude Code 設定、技能；含 `.credentials.json`（OAuth token） |
 | `-v ~/.claude.json:/home/perchuser/.claude.json` | 記錄 `hasCompletedOnboarding` 與 `userID`；缺少時 Claude Code 視為全新安裝，即使憑證存在也會要求重新登入 |
-| `-v /your/workspace:/workspace` | Claude Code 工作目錄；排程資料也存於此 |
+| `-v ./:/workspace` | Claude Code 工作目錄（當前目錄）；排程資料也存於此 |
 
 ## 環境變數
 
@@ -78,7 +77,7 @@ docker run -d \
 |------|--------|------|
 | `AUTH_MODE` | `none` | 認證模式：`none` / `password` / `mtls` |
 | `AUTH_PASSWORD` | — | 密碼（`AUTH_MODE=password` 時必填） |
-| `LISTEN_ADDR` | `:8443` | 監聽位址，例如 `:8443` 或 `0.0.0.0:443` |
+| `LISTEN_ADDR` | `:8080` | 監聽位址；一般不需設定，mTLS 模式需改為 `:8443` |
 | `PUID` | `1000` | 容器內行程的 UID；建議設為主機使用者的 `$(id -u)` |
 | `PGID` | `PUID` 同值 | 容器內行程的 GID；建議設為主機使用者的 `$(id -g)` |
 | `BLOCK_IPS` | — | 空格分隔的封鎖 IP 清單，支援 CIDR，例如 `1.2.3.4 10.0.0.0/8` |

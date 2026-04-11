@@ -29,7 +29,6 @@ COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
 ENV AUTH_MODE=none
-ENV LISTEN_ADDR=:8443
 
-EXPOSE 8443
+EXPOSE 8080
 CMD ["/entrypoint.sh"]
