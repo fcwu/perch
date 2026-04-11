@@ -168,10 +168,8 @@ export default function App() {
 
     ws.onopen = () => {
       fitAddon.fit()
-      if (tab === null) {
-        const { cols, rows } = term
-        ws.send(JSON.stringify({ type: 'resize', cols, rows }))
-      }
+      const { cols, rows } = term
+      ws.send(JSON.stringify({ type: 'resize', cols, rows }))
     }
 
     ws.onmessage = (e) => {
@@ -191,11 +189,9 @@ export default function App() {
 
     const sendResize = () => {
       fitAddon.fit()
-      if (tab === null) {
-        const { cols, rows } = term
-        if (ws.readyState === WebSocket.OPEN) {
-          ws.send(JSON.stringify({ type: 'resize', cols, rows }))
-        }
+      const { cols, rows } = term
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: 'resize', cols, rows }))
       }
     }
 

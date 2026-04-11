@@ -158,13 +158,22 @@ func (s *Server) handleSessionWS(w http.ResponseWriter, r *http.Request) {
 	}
 	defer conn.Close()
 
-	// Read-only: drain incoming messages without forwarding to PTY.
+	// Handle resize messages; discard all other input.
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
 		for {
-			if _, _, err := conn.ReadMessage(); err != nil {
+			_, msg, err := conn.ReadMessage()
+			if err != nil {
 				return
+			}
+			var resize struct {
+				Type string `json:"type"`
+				Cols uint16 `json:"cols"`
+				Rows uint16 `json:"rows"`
+			}
+			if json.Unmarshal(msg, &resize) == nil && resize.Type == "resize" {
+				s.sessions.ResizeSession(channelID, resize.Cols, resize.Rows)
 			}
 		}
 	}()

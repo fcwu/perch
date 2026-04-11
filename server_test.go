@@ -47,6 +47,7 @@ func (f *fakeSessionProvider) ListSessions() []SessionView { return f.sessions }
 func (f *fakeSessionProvider) SubscribeSession(channelID string) (<-chan []byte, func(), bool) {
 	return nil, nil, false
 }
+func (f *fakeSessionProvider) ResizeSession(_ string, _, _ uint16) {}
 
 func TestSessionsEndpointNoProvider(t *testing.T) {
 	pm := newPTYManager()

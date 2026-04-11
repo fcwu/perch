@@ -244,3 +244,13 @@ func (d *DiscordSessionManager) SubscribeSession(channelID string) (<-chan []byt
 	ch, unsub := sess.pty.subscribe()
 	return ch, unsub, true
 }
+
+// ResizeSession resizes the PTY for the given Discord channel.
+func (d *DiscordSessionManager) ResizeSession(channelID string, cols, rows uint16) {
+	d.mu.Lock()
+	sess, ok := d.sessions[channelID]
+	d.mu.Unlock()
+	if ok {
+		sess.pty.resize(cols, rows)
+	}
+}
