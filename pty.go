@@ -118,7 +118,7 @@ func (p *PTYManager) start(command string, args []string, workdir string, logger
 			"CLAUDE_CODE_NO_FLICKER=1",
 			"CLAUDE_CODE_DISABLE_MOUSE=1",
 		)
-		ptmx, err := pty.Start(cmd)
+		ptmx, err := pty.StartWithSize(cmd, &pty.Winsize{Cols: 220, Rows: 50})
 		if err != nil {
 			logger.Error("pty start failed", "err", err)
 			select {
