@@ -85,7 +85,7 @@ func main() {
 	rl := newRateLimiter(2, 5)
 
 	// --- Server ---
-	srv := newServer(pm, auth, sched, im, logger.Logger)
+	srv := newServer(pm, auth, sched, im, nil, logger.Logger)
 
 	// Apply rate limiting to sensitive endpoints only
 	sensitivePaths := map[string]bool{"/login": true, "/bootstrap": true}
