@@ -8,3 +8,17 @@ if (typeof PointerEvent === 'undefined') {
     }
   }
 }
+
+// jsdom does not implement matchMedia; stub it so Keyboard.tsx mobile detection
+// returns false (desktop mode) in tests.
+Object.defineProperty(window, 'matchMedia', {
+  writable: true,
+  value: (query: string) => ({
+    matches: false,
+    media: query,
+    onchange: null,
+    addEventListener: () => {},
+    removeEventListener: () => {},
+    dispatchEvent: () => false,
+  }),
+})

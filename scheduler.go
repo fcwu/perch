@@ -25,11 +25,15 @@ type Scheduler struct {
 	savePath string
 }
 
-func newScheduler(pm *PTYManager) *Scheduler {
+func newScheduler(pm *PTYManager, workdir string) *Scheduler {
+	savePath := "schedules.json"
+	if workdir != "" {
+		savePath = workdir + "/schedules.json"
+	}
 	return &Scheduler{
 		jobs:     make(map[string]*Job),
 		pty:      pm,
-		savePath: "schedules.json",
+		savePath: savePath,
 	}
 }
 

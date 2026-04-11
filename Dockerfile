@@ -24,10 +24,12 @@ RUN npm install -g @anthropic-ai/claude-code
 
 WORKDIR /app
 COPY --from=builder /app/perch .
-COPY claude/ /root/.claude/
+COPY claude/ /app/perch-claude/
+COPY entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
 
 ENV AUTH_MODE=none
 ENV LISTEN_ADDR=:8443
 
 EXPOSE 8443
-CMD ["/app/perch"]
+CMD ["/entrypoint.sh"]

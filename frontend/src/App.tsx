@@ -109,9 +109,19 @@ export default function App() {
     observer.observe(containerRef.current!)
     window.addEventListener('resize', sendResize)
 
+    // When the native mobile keyboard appears the visual viewport shrinks.
+    // Resize the terminal to fit the remaining space and scroll to bottom so
+    // the cursor line stays visible.
+    const handleViewportResize = () => {
+      sendResize()
+      term.scrollToBottom()
+    }
+    window.visualViewport?.addEventListener('resize', handleViewportResize)
+
     return () => {
       observer.disconnect()
       window.removeEventListener('resize', sendResize)
+      window.visualViewport?.removeEventListener('resize', handleViewportResize)
       ws.close()
       term.dispose()
     }

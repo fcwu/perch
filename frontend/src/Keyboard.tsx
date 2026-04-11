@@ -2,10 +2,6 @@ import { RefObject, useState } from 'react'
 import { Terminal } from '@xterm/xterm'
 
 const KEYS: [string, string][] = [
-  ['Tab', '\t'],
-  ['Ctrl+C', '\x03'],
-  ['Ctrl+D', '\x04'],
-  ['Ctrl+Z', '\x1a'],
   ['Esc', '\x1b'],
   ['↑', '\x1b[A'],
   ['↓', '\x1b[B'],
@@ -13,12 +9,17 @@ const KEYS: [string, string][] = [
   ['→', '\x1b[C'],
 ]
 
+const isMobile =
+  typeof window !== 'undefined' &&
+  typeof window.matchMedia === 'function' &&
+  window.matchMedia('(hover: none) and (pointer: coarse)').matches
+
 interface Props {
   termRef: RefObject<Terminal | null>
 }
 
 export function Keyboard({ termRef }: Props) {
-  const [collapsed, setCollapsed] = useState(false)
+  const [collapsed, setCollapsed] = useState(!isMobile)
 
   if (collapsed) {
     return (

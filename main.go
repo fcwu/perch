@@ -49,7 +49,7 @@ func main() {
 	go pm.start("claude", []string{}, workdir, logger.Logger)
 
 	// --- Scheduler ---
-	sched := newScheduler(pm)
+	sched := newScheduler(pm, workdir)
 	sched.loadFromFile()
 	go sched.run()
 

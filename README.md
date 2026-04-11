@@ -12,7 +12,7 @@ Perch 是一個輕量的 web terminal server，讓你不需要 SSH，直接用�
 - **即時串流**：所有連線共用同一個 PTY session，即時看到 Claude Code 輸出
 - **手機支援**：虛擬鍵盤（Tab、Ctrl+C/D/Z、Esc、方向鍵），視窗縮放自動調整
 - **三種認證模式**：無認證（內網測試）、密碼登入、mTLS 雙向憑證
-- **排程器**：設定每天幾點自動送指令進 terminal
+- **排程器**：用自然語言設定每天幾點自動送指令進 terminal（透過 `local-schedule` skill）
 - **IP 封鎖**：TCP 層封鎖惡意 IP
 - **限速**：HTTP 層限制登入/bootstrap 端點的請求頻率
 - **自動重啟**：Claude Code 崩潰後自動重啟
@@ -44,7 +44,6 @@ docker run -d \
   -v ~/.claude:/root/.claude \
   -v ~/.claude.json:/root/.claude.json \
   -v /your/workspace:/workspace \
-  -v perch-data:/app/data \
   ghcr.io/fcwu/perch:latest
 
 # mTLS 模式（最安全，正式對外使用）
@@ -54,9 +53,20 @@ docker run -d \
   -v ~/.claude:/root/.claude \
   -v ~/.claude.json:/root/.claude.json \
   -v /your/workspace:/workspace \
-  -v perch-data:/app/data \
   ghcr.io/fcwu/perch:latest
 ```
+
+---
+
+## Docker Mount 說明
+
+| Mount | 用途 |
+|-------|------|
+| `-v ~/.claude:/root/.claude` | Claude Code 登入憑證、設定、技能 |
+| `-v ~/.claude.json:/root/.claude.json` | Claude Code UI 狀態（主題、onboarding 記錄）；缺少此掛載會每次重跑主題 wizard |
+| `-v /your/workspace:/workspace` | Claude Code 工作目錄；排程資料也存於此 |
+
+Perch 的內建 skill（`local-schedule` 等）會在容器啟動時自動合併到掛載的 `~/.claude/skills/` 中，不需要手動複製。
 
 ---
 
@@ -143,49 +153,15 @@ Claude Code 使用 OAuth 登入。將主機的 `~/.claude` 掛載進容器，Cla
 
 ---
 
-## 排程器 API
+## 排程器
 
-可以設定每天特定時間自動送指令進 terminal（例如：每天早上 9 點叫 Claude 做 daily review）。
+Perch 內建排程功能，可以設定每天特定時間自動送指令進 terminal（例如：每天早上 9 點叫 Claude 做 daily review）。
 
-### 列出排程
+在 terminal 中直接用自然語言告訴 Claude，例如：
 
-```bash
-curl -s http://localhost:8080/schedule
-```
+> 「每天早上 9 點幫我做 daily standup 摘要」
 
-### 新增排程
-
-```bash
-curl -s -X POST http://localhost:8080/schedule \
-  -H "Content-Type: application/json" \
-  -d '{
-    "hour": 9,
-    "minute": 0,
-    "message": "幫我做今天的 daily standup 摘要",
-    "repeat": true
-  }'
-```
-
-`repeat: true` = 每天重複；`repeat: false` = 只執行一次。
-
-### 刪除排程
-
-```bash
-curl -s -X DELETE http://localhost:8080/schedule/<id>
-```
-
-排程資料存在 `schedules.json`，重啟後不遺失（Docker 需掛 volume）。
-
----
-
-## Docker Mount 說明
-
-| Mount | 用途 |
-|-------|------|
-| `-v ~/.claude:/root/.claude` | Claude Code 登入憑證、設定、技能 |
-| `-v ~/.claude.json:/root/.claude.json` | Claude Code UI 狀態（主題、onboarding 記錄）；缺少此掛載會每次重跑主題 wizard |
-| `-v /your/workspace:/workspace` | Claude Code 工作目錄 |
-| `-v perch-data:/app/data` | 排程資料持久化 |
+Claude 會透過內建的 `local-schedule` skill 設定排程。排程資料存在 workspace 目錄，重啟容器後不遺失。
 
 ---
 
@@ -242,6 +218,7 @@ docker run -d \
   -e DISCORD_BOT_TOKEN=your_bot_token \
   -e DISCORD_CHANNEL_ID=your_channel_id \
   -v ~/.claude:/root/.claude \
+  -v ~/.claude.json:/root/.claude.json \
   -v /your/workspace:/workspace \
   ghcr.io/fcwu/perch:latest
 ```
