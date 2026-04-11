@@ -16,6 +16,8 @@ type Job struct {
 	Minute  int    `json:"minute"`
 	Message string `json:"message"`
 	Repeat  bool   `json:"repeat"`
+
+	lastFiredAt time.Time // not persisted; prevents double-fire within the same minute
 }
 
 type Scheduler struct {
@@ -104,6 +106,11 @@ func (s *Scheduler) run() {
 		var toDelete []string
 		for id, job := range s.jobs {
 			if t.Hour() == job.Hour && t.Minute() == job.Minute {
+				// skip if already fired within this minute
+				if time.Since(job.lastFiredAt) < time.Minute {
+					continue
+				}
+				job.lastFiredAt = t
 				if s.pty != nil {
 					s.pty.write([]byte(job.Message + "\r"))
 				}
