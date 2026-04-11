@@ -1,9 +1,11 @@
 import { useEffect, useRef } from 'react'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
-import { WebLinksAddon } from '@xterm/addon-web-links'
 import '@xterm/xterm/css/xterm.css'
 import { Keyboard } from './Keyboard'
+
+// Matches http(s) URLs; stops at whitespace or control characters
+const URL_RE = /https?:\/\/[^\s\x00-\x1f\x7f]+/g
 
 export default function App() {
   const containerRef = useRef<HTMLDivElement>(null)
@@ -17,7 +19,60 @@ export default function App() {
     })
     const fitAddon = new FitAddon()
     term.loadAddon(fitAddon)
-    term.loadAddon(new WebLinksAddon((_e, uri) => { window.open(uri, '_blank') }))
+
+    // Custom link provider that handles URLs wrapping across multiple terminal
+    // rows. WebLinksAddon only matches within a single row; this uses
+    // IBufferLine.isWrapped to reconstruct the original URL first.
+    term.registerLinkProvider({
+      provideLinks(bufferRow, callback) {
+        const buffer = term.buffer.active
+        const cols = term.cols
+        // buffer.getLine() is 0-indexed; bufferRow is 1-indexed
+        const getLine = (r: number) => buffer.getLine(r - 1)
+
+        // Walk back to find the first row of this wrapped group
+        let startRow = bufferRow
+        while (startRow > 1 && getLine(startRow)?.isWrapped) startRow--
+
+        // Collect all rows belonging to this group
+        const rows: number[] = [startRow]
+        for (let r = startRow; r <= buffer.length; r++) {
+          const next = getLine(r + 1)
+          if (!next?.isWrapped) break
+          rows.push(r + 1)
+        }
+
+        if (!rows.includes(bufferRow)) { callback(undefined); return }
+
+        // Keep trailing spaces (trimRight=false) so each row is exactly `cols`
+        // chars wide and character offsets stay cols-aligned.
+        const combined = rows.map(r => getLine(r)?.translateToString(false) ?? '').join('')
+
+        // Map a character offset in `combined` back to buffer {x, y} coordinates
+        const toCoord = (off: number) => ({
+          y: startRow + Math.floor(off / cols),
+          x: (off % cols) + 1,
+        })
+
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const links: any[] = []
+        URL_RE.lastIndex = 0
+        let m: RegExpExecArray | null
+        while ((m = URL_RE.exec(combined)) !== null) {
+          const uri = m[0]
+          const s = m.index
+          const e = s + uri.length - 1
+          links.push({
+            text: uri,
+            range: { start: toCoord(s), end: toCoord(e) },
+            decorations: { pointerCursor: true, underline: true },
+            activate: (_: MouseEvent, text: string) => window.open(text, '_blank'),
+          })
+        }
+        callback(links.length ? links : undefined)
+      },
+    })
+
     term.open(containerRef.current!)
     fitAddon.fit()
     termRef.current = term
@@ -52,7 +107,6 @@ export default function App() {
 
     const observer = new ResizeObserver(sendResize)
     observer.observe(containerRef.current!)
-
     window.addEventListener('resize', sendResize)
 
     return () => {

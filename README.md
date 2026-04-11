@@ -31,6 +31,7 @@ docker run -d \
   -e AUTH_MODE=none \
   -e LISTEN_ADDR=:8080 \
   -v ~/.claude:/root/.claude \
+  -v ~/.claude.json:/root/.claude.json \
   -v /your/workspace:/workspace \
   ghcr.io/fcwu/perch:latest
 
@@ -41,6 +42,7 @@ docker run -d \
   -e AUTH_PASSWORD=你的密碼 \
   -e LISTEN_ADDR=:8080 \
   -v ~/.claude:/root/.claude \
+  -v ~/.claude.json:/root/.claude.json \
   -v /your/workspace:/workspace \
   -v perch-data:/app/data \
   ghcr.io/fcwu/perch:latest
@@ -50,6 +52,7 @@ docker run -d \
   -p 8443:8443 \
   -e AUTH_MODE=mtls \
   -v ~/.claude:/root/.claude \
+  -v ~/.claude.json:/root/.claude.json \
   -v /your/workspace:/workspace \
   -v perch-data:/app/data \
   ghcr.io/fcwu/perch:latest
@@ -179,7 +182,8 @@ curl -s -X DELETE http://localhost:8080/schedule/<id>
 
 | Mount | 用途 |
 |-------|------|
-| `-v ~/.claude:/root/.claude` | Claude Code 登入憑證 |
+| `-v ~/.claude:/root/.claude` | Claude Code 登入憑證、設定、技能 |
+| `-v ~/.claude.json:/root/.claude.json` | Claude Code UI 狀態（主題、onboarding 記錄）；缺少此掛載會每次重跑主題 wizard |
 | `-v /your/workspace:/workspace` | Claude Code 工作目錄 |
 | `-v perch-data:/app/data` | 排程資料持久化 |
 
