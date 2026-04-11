@@ -5,7 +5,9 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
+	"strconv"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/creack/pty"
@@ -118,6 +120,27 @@ func (p *PTYManager) start(command string, args []string, workdir string, logger
 			"CLAUDE_CODE_NO_FLICKER=1",
 			"CLAUDE_CODE_DISABLE_MOUSE=1",
 		)
+		if puidStr := os.Getenv("PUID"); puidStr != "" {
+			uid, err := strconv.ParseUint(puidStr, 10, 32)
+			if err == nil {
+				pgidStr := os.Getenv("PGID")
+				if pgidStr == "" {
+					pgidStr = puidStr
+				}
+				gid, err := strconv.ParseUint(pgidStr, 10, 32)
+				if err == nil {
+					// chown .claude config so claude can read auth files
+					_ = os.Lchown("/root/.claude", int(uid), int(gid))
+					_ = os.Lchown("/root/.claude.json", int(uid), int(gid))
+					cmd.SysProcAttr = &syscall.SysProcAttr{
+						Credential: &syscall.Credential{
+							Uid: uint32(uid),
+							Gid: uint32(gid),
+						},
+					}
+				}
+			}
+		}
 		ptmx, err := pty.Start(cmd)
 		if err != nil {
 			logger.Error("pty start failed", "err", err)
