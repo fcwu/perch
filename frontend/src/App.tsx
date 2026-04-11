@@ -26,7 +26,6 @@ export default function App() {
     term.registerLinkProvider({
       provideLinks(bufferRow, callback) {
         const buffer = term.buffer.active
-        const cols = term.cols
         // buffer.getLine() is 0-indexed; bufferRow is 1-indexed
         const getLine = (r: number) => buffer.getLine(r - 1)
 
