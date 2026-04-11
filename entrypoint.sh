@@ -1,16 +1,12 @@
 #!/bin/sh
 set -e
 
-# Drop from root to PUID:PGID so workspace files are not owned by root.
-# HOME stays /root so existing volume mounts (-v ~/.claude:/root/.claude) remain valid.
-if [ "$(id -u)" = "0" ]; then
-    PUID="${PUID:-1000}"
-    PGID="${PGID:-$(id -g "$PUID" 2>/dev/null || echo "$PUID")}"
-    # Fix ownership of Claude config files created by previous root containers.
-    # Without this, uid PUID cannot read root-owned .credentials.json and claude
-    # will fail to authenticate even if the OAuth token is present.
-    chown -R "${PUID}:${PGID}" /root/.claude /root/.claude.json 2>/dev/null || true
-    exec gosu "${PUID}:${PGID}" env HOME=/root "$0" "$@"
+# If PUID is set, create a home directory owned by PUID:PGID so the
+# non-root claude process has a writable home. perch itself stays root.
+if [ -n "$PUID" ]; then
+    PGID="${PGID:-$PUID}"
+    mkdir -p /home/perchuser
+    chown "${PUID}:${PGID}" /home/perchuser
 fi
 
 # Determine workspace directory (same logic as main.go)
