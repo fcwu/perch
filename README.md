@@ -25,7 +25,6 @@ Perch 是一個輕量的 web terminal server，讓你不需要 SSH，直接用�
 docker pull ghcr.io/fcwu/perch:latest
 
 # 無認證模式（內網測試）
-# 加 -e PUID=$(id -u) -e PGID=$(id -g) 可讓 workspace 檔案以你的使用者身份建立
 docker run -d \
   -p 8080:8080 \
   -e AUTH_MODE=none \
@@ -33,8 +32,8 @@ docker run -d \
   -e TZ=Asia/Taipei \
   -e PUID=$(id -u) \
   -e PGID=$(id -g) \
-  -v ~/.claude:/root/.claude \
-  -v ~/.claude.json:/root/.claude.json \
+  -v ~/.claude:/home/perchuser/.claude \
+  -v ~/.claude.json:/home/perchuser/.claude.json \
   -v /your/workspace:/workspace \
   ghcr.io/fcwu/perch:latest
 
@@ -45,8 +44,10 @@ docker run -d \
   -e AUTH_PASSWORD=你的密碼 \
   -e LISTEN_ADDR=:8080 \
   -e TZ=Asia/Taipei \
-  -v ~/.claude:/root/.claude \
-  -v ~/.claude.json:/root/.claude.json \
+  -e PUID=$(id -u) \
+  -e PGID=$(id -g) \
+  -v ~/.claude:/home/perchuser/.claude \
+  -v ~/.claude.json:/home/perchuser/.claude.json \
   -v /your/workspace:/workspace \
   ghcr.io/fcwu/perch:latest
 
@@ -55,8 +56,10 @@ docker run -d \
   -p 8443:8443 \
   -e AUTH_MODE=mtls \
   -e TZ=Asia/Taipei \
-  -v ~/.claude:/root/.claude \
-  -v ~/.claude.json:/root/.claude.json \
+  -e PUID=$(id -u) \
+  -e PGID=$(id -g) \
+  -v ~/.claude:/home/perchuser/.claude \
+  -v ~/.claude.json:/home/perchuser/.claude.json \
   -v /your/workspace:/workspace \
   ghcr.io/fcwu/perch:latest
 ```
@@ -65,13 +68,9 @@ docker run -d \
 
 | Mount | 用途 |
 |-------|------|
-| `-v ~/.claude:/root/.claude` | Claude Code 設定、技能；含 `.credentials.json`（OAuth token） |
-| `-v ~/.claude.json:/root/.claude.json` | 記錄 `hasCompletedOnboarding` 與 `userID`；缺少時 Claude Code 視為全新安裝，即使憑證存在也會要求重新登入 |
+| `-v ~/.claude:/home/perchuser/.claude` | Claude Code 設定、技能；含 `.credentials.json`（OAuth token） |
+| `-v ~/.claude.json:/home/perchuser/.claude.json` | 記錄 `hasCompletedOnboarding` 與 `userID`；缺少時 Claude Code 視為全新安裝，即使憑證存在也會要求重新登入 |
 | `-v /your/workspace:/workspace` | Claude Code 工作目錄；排程資料也存於此 |
-
-Perch 的內建 skill（`local-schedule` 等）會在容器啟動時自動合併到掛載的 `~/.claude/skills/` 中，不需要手動複製。
-
----
 
 ## 環境變數
 
@@ -80,14 +79,14 @@ Perch 的內建 skill（`local-schedule` 等）會在容器啟動時自動合併
 | `AUTH_MODE` | `none` | 認證模式：`none` / `password` / `mtls` |
 | `AUTH_PASSWORD` | — | 密碼（`AUTH_MODE=password` 時必填） |
 | `LISTEN_ADDR` | `:8443` | 監聽位址，例如 `:8443` 或 `0.0.0.0:443` |
+| `PUID` | `1000` | 容器內行程的 UID；建議設為主機使用者的 `$(id -u)` |
+| `PGID` | `PUID` 同值 | 容器內行程的 GID；建議設為主機使用者的 `$(id -g)` |
 | `BLOCK_IPS` | — | 空格分隔的封鎖 IP 清單，支援 CIDR，例如 `1.2.3.4 10.0.0.0/8` |
 | `CLAUDE_WORKDIR` | `/workspace`（若存在） | Claude Code 的起始工作目錄 |
 | `TZ` | `UTC` | 容器時區，影響排程觸發時間，例如 `Asia/Taipei` |
 | `ANTHROPIC_API_KEY` | — | Anthropic API 金鑰，直接傳給 Claude |
 | `DISCORD_BOT_TOKEN` | — | Discord bot token（啟用 Discord 整合） |
 | `DISCORD_CHANNEL_ID` | — | 要監聽的 Discord channel ID |
-| `TELEGRAM_BOT_TOKEN` | — | Telegram bot token（啟用 Telegram 整合） |
-| `TELEGRAM_CHAT_ID` | — | 要監聽的 Telegram chat ID |
 
 ---
 
@@ -135,20 +134,20 @@ Claude 會透過內建的 `local-schedule` skill 設定排程。排程資料存�
 
 ---
 
-## IM 整合（Discord / Telegram）
+## Discord 整合
 
-訊息從 Discord / Telegram 進來，寫進 PTY，Claude 處理完後透過 Claude Code Hooks 把結果送回 IM。
+訊息從 Discord 進來，寫進 PTY，Claude 處理完後透過 Claude Code Hooks 把結果送回 Discord。
 
 ### Hook 與 Reaction 對應
 
-| Claude Hook 事件 | Discord | Telegram |
-|------------------|---------|----------|
-| 收到訊息（進入 PTY）| 👀 | — |
-| `PreToolUse` | ⚙️ | — |
-| `PostToolUse` 成功 | ✅ | — |
-| `PostToolUse` 失敗 | ❌ | — |
-| `Stop`（回應完成）| 💬 + 文字訊息 | 文字訊息 |
-| 回應超過 2000 字 | 📎 附件 | 文件 |
+| Claude Hook 事件 | 行為 |
+|------------------|------|
+| 收到訊息（進入 PTY）| 👀 |
+| `PreToolUse` | ⚙️ |
+| `PostToolUse` 成功 | ✅ |
+| `PostToolUse` 失敗 | ❌ |
+| `Stop`（回應完成）| 💬 + 文字訊息 |
+| 回應超過 2000 字 | 📎 附件 |
 
 ---
 
@@ -188,14 +187,10 @@ Claude 會透過內建的 `local-schedule` skill 設定排程。排程資料存�
 
 ```bash
 docker run -d \
-  -p 8080:8080 \
-  -e AUTH_MODE=none \
-  -e LISTEN_ADDR=:8080 \
+  ...
   -e DISCORD_BOT_TOKEN=your_bot_token \
   -e DISCORD_CHANNEL_ID=your_channel_id \
-  -v ~/.claude:/root/.claude \
-  -v ~/.claude.json:/root/.claude.json \
-  -v /your/workspace:/workspace \
+  ...
   ghcr.io/fcwu/perch:latest
 ```
 

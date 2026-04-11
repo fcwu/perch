@@ -1,6 +1,6 @@
 # Perch 測試案例
 
-> 更新日期：2026-04-11（rev 2）
+> 更新日期：2026-04-11（rev 3）
 
 ---
 
@@ -221,7 +221,7 @@ docker run -d \
   -p 8080:8080 \
   -e AUTH_MODE=none \
   -e LISTEN_ADDR=:8080 \
-  -v ~/.claude:/root/.claude \
+  -v ~/.claude:/home/perchuser/.claude \
   -v /your/workspace:/workspace \
   ghcr.io/fcwu/perch:latest
 ```
@@ -255,7 +255,7 @@ ls /workspace
 
 ## T15 — 掛載 ~/.claude → Claude Code 已登入
 
-**目的**：確認 `-v ~/.claude:/root/.claude` 能讓 Claude Code 直接使用主機的登入憑證，不需重新登入。
+**目的**：確認 `-v ~/.claude:/home/perchuser/.claude` 能讓 Claude Code 直接使用主機的登入憑證，不需重新登入。
 
 **前置條件**：主機的 `~/.claude` 目錄中已有有效的 Claude Code 憑證（執行過 `claude` 並完成登入）。
 
@@ -265,7 +265,7 @@ docker run -d \
   -p 8080:8080 \
   -e AUTH_MODE=none \
   -e LISTEN_ADDR=:8080 \
-  -v ~/.claude:/root/.claude \
+  -v ~/.claude:/home/perchuser/.claude \
   -v /your/workspace:/workspace \
   ghcr.io/fcwu/perch:latest
 ```
@@ -298,7 +298,7 @@ docker run -d \
 - Claude Code 啟動後出現登入提示（例如 `Please log in` 或引導使用者執行 `claude` 登入指令）
 - **不自動進入** Ready 狀態
 
-**反向驗證**：掛載 `-v ~/.claude:/root/.claude` 後重建 container，應進入 T15 的已登入狀態。
+**反向驗證**：掛載 `-v ~/.claude:/home/perchuser/.claude` 後重建 container，應進入 T15 的已登入狀態。
 
 ---
 
@@ -334,7 +334,7 @@ docker run -d \
   -e LISTEN_ADDR=:8080 \
   -e DISCORD_BOT_TOKEN=your_token \
   -e DISCORD_CHANNEL_ID=your_channel_id \
-  -v ~/.claude:/root/.claude \
+  -v ~/.claude:/home/perchuser/.claude \
   ghcr.io/fcwu/perch:latest
 ```
 
@@ -450,7 +450,7 @@ docker run -d \
   -p 8080:8080 \
   -e AUTH_MODE=none \
   -e LISTEN_ADDR=:8080 \
-  -v ~/.claude:/root/.claude \
+  -v ~/.claude:/home/perchuser/.claude \
   -v /your/workspace:/workspace \
   ghcr.io/fcwu/perch:latest
 ```
@@ -483,6 +483,86 @@ docker run -d \
 **預期**：
 - 第一次：`.perch/schedules.json` 存在，內含剛設定的 job
 - 重啟後：同一個 job 仍在
+
+---
+
+## T28 — Discord Session Web Viewer（分頁顯示）
+
+**目的**：確認 Web UI 可以在分頁中即時觀看 Discord channel 的 PTY 輸出（唯讀）。
+
+**前置條件**：同 T18，Discord Bot 已連線，`DISCORD_CHANNEL_ID` 已設定。
+
+**步驟**：
+1. 啟動 container（含 Discord 環境變數）
+2. 瀏覽器開啟 `http://localhost:8080`
+3. 觀察頁面上方是否出現 tab 列
+4. 點擊 Discord channel tab
+
+**預期**：
+- Tab 列出現，顯示「discord:<channel_id>」tab 與原本的主 terminal tab
+- 點擊 Discord tab → terminal 畫面切換為該 Discord channel 的 PTY 輸出
+- 從 Discord 傳送訊息後，web viewer 可看到 Claude 回應的輸出
+- Discord tab **無法輸入**（鍵盤輸入不寫入 PTY）
+
+**反向驗證**：未設定 Discord 環境變數時，tab 列不顯示（只有主 terminal）。
+
+---
+
+## T29 — Discord Session PTY Resize
+
+**目的**：確認在 web viewer 中調整視窗大小時，Discord session 的 PTY 也同步 resize。
+
+**前置條件**：同 T28，正在檢視 Discord channel tab。
+
+**步驟**：
+1. 切換到 Discord channel tab
+2. 調整瀏覽器視窗大小
+3. 在 Discord 傳送一個指令觸發長輸出
+
+**預期**：
+- `GET /sessions` 端點回傳 JSON 陣列，含 `channel_id` 與 `session_uuid`
+- Terminal 畫面填滿調整後的視窗，無空白邊緣
+- PTY 的 cols/rows 已隨視窗正確更新（輸出換行位置正確）
+
+---
+
+## T30 — 非 root 容器（PUID/PGID）
+
+**目的**：確認容器以指定的使用者身份執行，workspace 檔案不被 root 所有，且 `bypassPermissions` 正常運作。
+
+**步驟**：
+```bash
+docker run -d \
+  -p 8080:8080 \
+  -e AUTH_MODE=none \
+  -e LISTEN_ADDR=:8080 \
+  -e PUID=$(id -u) \
+  -e PGID=$(id -g) \
+  -v ~/.claude:/home/perchuser/.claude \
+  -v ~/.claude.json:/home/perchuser/.claude.json \
+  -v /your/workspace:/workspace \
+  ghcr.io/fcwu/perch:latest
+```
+
+容器啟動後：
+```bash
+# 確認行程執行身份
+docker exec <container> id
+
+# 確認 workspace 新建檔案的擁有者
+docker exec <container> touch /workspace/test-owner.txt
+ls -la /your/workspace/test-owner.txt
+```
+
+在 web terminal 中讓 Claude 執行一個需要 bypassPermissions 的指令（例如讀取/寫入檔案）。
+
+**預期**：
+- `id` 回傳的 uid/gid 與主機 `$(id -u)` / `$(id -g)` 一致，**不是 0（root）**
+- `test-owner.txt` 的擁有者為主機使用者，而非 root
+- Claude 不出現 `--dangerously-skip-permissions cannot be used with root` 錯誤
+- Claude 能正常執行工具操作（bypassPermissions 有效）
+
+**反向驗證**：不帶 PUID/PGID，重啟後 `id` 應顯示 uid=1000（預設值），workspace 檔案仍非 root。
 
 ---
 

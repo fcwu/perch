@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "curl -sf -X POST \"http://localhost${LISTEN_ADDR}/hook\" -H 'Content-Type: application/json' -d @-"
+            "command": "[ -z \"${LISTEN_ADDR}\" ] || curl -sf -X POST \"http://localhost${LISTEN_ADDR}/hook\" -H 'Content-Type: application/json' -d @-"
           }
         ]
       }
@@ -17,7 +17,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "curl -sf -X POST \"http://localhost${LISTEN_ADDR}/hook\" -H 'Content-Type: application/json' -d @-"
+            "command": "[ -z \"${LISTEN_ADDR}\" ] || curl -sf -X POST \"http://localhost${LISTEN_ADDR}/hook\" -H 'Content-Type: application/json' -d @-"
           }
         ]
       }
@@ -28,7 +28,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "curl -sf -X POST \"http://localhost${LISTEN_ADDR}/hook\" -H 'Content-Type: application/json' -d @-"
+            "command": "[ -z \"${LISTEN_ADDR}\" ] || curl -sf -X POST \"http://localhost${LISTEN_ADDR}/hook\" -H 'Content-Type: application/json' -d @-"
           }
         ]
       }
