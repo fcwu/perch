@@ -43,13 +43,12 @@ type discordSession struct {
 }
 
 func newDiscordSession(channelID string, logger *slog.Logger, workdir string) *discordSession {
-	uuid := channelSessionID(channelID)
 	pty := newPTYManager()
-	go pty.start("claude", []string{"--session-id", uuid, "--name", "discord:" + channelID}, workdir, logger)
+	go pty.start("claude", []string{"--name", "discord:" + channelID}, workdir, logger)
 	return &discordSession{
-		channelID:   channelID,
-		sessionUUID: uuid,
-		pty:         pty,
+		channelID: channelID,
+		// sessionUUID is empty until the first hook event claims it.
+		pty: pty,
 	}
 }
 
@@ -163,13 +162,31 @@ func (d *DiscordSessionManager) Notify(event HookEvent, lastText string) error {
 			target = sess
 			break
 		}
+		// Claim an unassigned session that has a message pending.
+		if sess.sessionUUID == "" {
+			sess.mu.Lock()
+			hasPending := sess.last != nil
+			sess.mu.Unlock()
+			if hasPending {
+				sess.sessionUUID = event.SessionID
+				target = sess
+				break
+			}
+		}
 	}
 	dgo := d.dgo
 	d.mu.Unlock()
 	if target == nil {
 		return nil
 	}
-	return target.notify(dgo, event, lastText, d.logger)
+	err := target.notify(dgo, event, lastText, d.logger)
+	// After Stop, clear sessionUUID so the next conversation can be tracked.
+	if event.EventName == "Stop" {
+		d.mu.Lock()
+		target.sessionUUID = ""
+		d.mu.Unlock()
+	}
+	return err
 }
 
 func (sess *discordSession) notify(s *discordgo.Session, event HookEvent, lastText string, logger *slog.Logger) error {
