@@ -1,16 +1,42 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState, useCallback } from 'react'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
 import { Keyboard } from './Keyboard'
 
-// Matches http(s) URLs; stops at whitespace or control characters
 const URL_RE = /https?:\/\/[^\s\x00-\x1f\x7f]+/g
+
+interface SessionView {
+  channel_id: string
+  session_uuid: string
+}
+
+type ActiveTab = null | string  // null = main PTY; string = discord channelID
+
+function useDiscordSessions() {
+  const [sessions, setSessions] = useState<SessionView[]>([])
+  useEffect(() => {
+    const poll = async () => {
+      try {
+        const r = await fetch('/sessions')
+        if (r.ok) setSessions(await r.json())
+      } catch { /* ignore network errors */ }
+    }
+    poll()
+    const id = setInterval(poll, 5000)
+    return () => clearInterval(id)
+  }, [])
+  return sessions
+}
 
 export default function App() {
   const containerRef = useRef<HTMLDivElement>(null)
   const termRef = useRef<Terminal | null>(null)
+  const fitAddonRef = useRef<FitAddon | null>(null)
+  const sessions = useDiscordSessions()
+  const [activeTab, setActiveTab] = useState<ActiveTab>(null)
 
+  // Initial terminal setup — runs once on mount
   useEffect(() => {
     const term = new Terminal({
       cursorBlink: true,
@@ -114,32 +140,59 @@ export default function App() {
     term.open(containerRef.current!)
     fitAddon.fit()
     termRef.current = term
+    fitAddonRef.current = fitAddon
+
+    return () => {
+      term.dispose()
+      termRef.current = null
+      fitAddonRef.current = null
+    }
+  }, [])
+
+  // Connect/reconnect WebSocket whenever active tab changes
+  const connectWS = useCallback((tab: ActiveTab) => {
+    const term = termRef.current
+    const fitAddon = fitAddonRef.current
+    if (!term || !fitAddon || !containerRef.current) return
 
     const proto = location.protocol === 'https:' ? 'wss' : 'ws'
-    const ws = new WebSocket(`${proto}://${location.host}/ws`)
+    const url = tab === null
+      ? `${proto}://${location.host}/ws`
+      : `${proto}://${location.host}/ws/session?id=${encodeURIComponent(tab)}`
+
+    const ws = new WebSocket(url)
     ws.binaryType = 'arraybuffer'
 
     ws.onopen = () => {
       fitAddon.fit()
-      const { cols, rows } = term
-      ws.send(JSON.stringify({ type: 'resize', cols, rows }))
+      if (tab === null) {
+        const { cols, rows } = term
+        ws.send(JSON.stringify({ type: 'resize', cols, rows }))
+      }
     }
 
     ws.onmessage = (e) => {
       term.write(new Uint8Array(e.data as ArrayBuffer))
     }
 
-    term.onData((data) => {
-      if (ws.readyState === WebSocket.OPEN) {
-        ws.send(new TextEncoder().encode(data))
-      }
-    })
+    // Main PTY is writable; Discord session tabs are read-only
+    let disposeOnData: (() => void) | undefined
+    if (tab === null) {
+      const disposable = term.onData((data) => {
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(new TextEncoder().encode(data))
+        }
+      })
+      disposeOnData = () => disposable.dispose()
+    }
 
     const sendResize = () => {
       fitAddon.fit()
-      const { cols, rows } = term
-      if (ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ type: 'resize', cols, rows }))
+      if (tab === null) {
+        const { cols, rows } = term
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: 'resize', cols, rows }))
+        }
       }
     }
 
@@ -160,13 +213,45 @@ export default function App() {
       observer.disconnect()
       window.removeEventListener('resize', sendResize)
       window.visualViewport?.removeEventListener('resize', handleViewportResize)
+      disposeOnData?.()
       ws.close()
-      term.dispose()
     }
   }, [])
 
+  useEffect(() => {
+    return connectWS(activeTab)
+  }, [activeTab, connectWS])
+
+  const tabStyle = (active: boolean): React.CSSProperties => ({
+    padding: '4px 12px',
+    cursor: 'pointer',
+    background: active ? '#333' : '#111',
+    color: active ? '#fff' : '#888',
+    border: 'none',
+    borderBottom: active ? '2px solid #4af' : '2px solid transparent',
+    fontSize: 12,
+    fontFamily: 'monospace',
+    flexShrink: 0,
+  })
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100dvh', background: '#000' }}>
+      {sessions.length > 0 && (
+        <div style={{ display: 'flex', background: '#111', flexShrink: 0, overflowX: 'auto' }}>
+          <button style={tabStyle(activeTab === null)} onClick={() => setActiveTab(null)}>
+            Terminal
+          </button>
+          {sessions.map(sess => (
+            <button
+              key={sess.channel_id}
+              style={tabStyle(activeTab === sess.channel_id)}
+              onClick={() => setActiveTab(sess.channel_id)}
+            >
+              Discord {sess.channel_id}
+            </button>
+          ))}
+        </div>
+      )}
       <div ref={containerRef} style={{ flex: 1, overflow: 'hidden' }} />
       <Keyboard termRef={termRef} />
     </div>
