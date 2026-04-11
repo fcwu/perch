@@ -1,6 +1,14 @@
 #!/bin/sh
 set -e
 
+# If PUID is set, chown claude config files so the non-root claude process
+# can read auth credentials. perch itself stays root.
+if [ -n "$PUID" ]; then
+    PGID="${PGID:-$PUID}"
+    mkdir -p /home/perchuser
+    chown "${PUID}:${PGID}" /home/perchuser
+fi
+
 # Determine workspace directory (same logic as main.go)
 WORKDIR="${CLAUDE_WORKDIR}"
 if [ -z "$WORKDIR" ] && [ -d /workspace ]; then

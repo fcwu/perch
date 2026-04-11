@@ -114,12 +114,7 @@ func (p *PTYManager) start(command string, args []string, workdir string, logger
 		if workdir != "" {
 			cmd.Dir = workdir
 		}
-		cmd.Env = append(os.Environ(),
-			"TERM=xterm-256color",
-			"HOME=/root",
-			"CLAUDE_CODE_NO_FLICKER=1",
-			"CLAUDE_CODE_DISABLE_MOUSE=1",
-		)
+		home := "/root"
 		if puidStr := os.Getenv("PUID"); puidStr != "" {
 			uid, err := strconv.ParseUint(puidStr, 10, 32)
 			if err == nil {
@@ -129,9 +124,7 @@ func (p *PTYManager) start(command string, args []string, workdir string, logger
 				}
 				gid, err := strconv.ParseUint(pgidStr, 10, 32)
 				if err == nil {
-					// chown .claude config so claude can read auth files
-					_ = os.Lchown("/root/.claude", int(uid), int(gid))
-					_ = os.Lchown("/root/.claude.json", int(uid), int(gid))
+					home = "/home/perchuser"
 					cmd.SysProcAttr = &syscall.SysProcAttr{
 						Credential: &syscall.Credential{
 							Uid: uint32(uid),
@@ -141,6 +134,12 @@ func (p *PTYManager) start(command string, args []string, workdir string, logger
 				}
 			}
 		}
+		cmd.Env = append(os.Environ(),
+			"TERM=xterm-256color",
+			"HOME="+home,
+			"CLAUDE_CODE_NO_FLICKER=1",
+			"CLAUDE_CODE_DISABLE_MOUSE=1",
+		)
 		ptmx, err := pty.Start(cmd)
 		if err != nil {
 			logger.Error("pty start failed", "err", err)
