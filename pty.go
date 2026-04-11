@@ -139,6 +139,9 @@ func (p *PTYManager) start(command string, args []string, workdir string, logger
 		// when not already set by the caller (e.g. via Docker -e flags).
 		// Node.js uses the last duplicate entry, so we must not append defaults
 		// unconditionally or user-supplied values would be silently overridden.
+		//
+		// HOME is always overridden: it is computed from PUID and must point to
+		// the correct directory regardless of what the container env has.
 		env := os.Environ()
 		set := make(map[string]bool, len(env))
 		for _, e := range env {
@@ -148,7 +151,6 @@ func (p *PTYManager) start(command string, args []string, workdir string, logger
 		}
 		for _, d := range []string{
 			"TERM=xterm-256color",
-			"HOME=" + home,
 			"CLAUDE_CODE_NO_FLICKER=1",
 			"CLAUDE_CODE_DISABLE_MOUSE=1",
 		} {
@@ -156,6 +158,8 @@ func (p *PTYManager) start(command string, args []string, workdir string, logger
 				env = append(env, d)
 			}
 		}
+		// Always append HOME last so Node.js picks it up over the container default.
+		env = append(env, "HOME="+home)
 		cmd.Env = env
 		cmd.Env = append(cmd.Env, extraEnv...)
 		ptmx, err := pty.StartWithSize(cmd, &pty.Winsize{Cols: 220, Rows: 50})
