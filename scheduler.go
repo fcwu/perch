@@ -26,9 +26,12 @@ type Scheduler struct {
 }
 
 func newScheduler(pm *PTYManager, workdir string) *Scheduler {
-	savePath := "schedules.json"
+	savePath := ""
 	if workdir != "" {
-		savePath = workdir + "/schedules.json"
+		dir := workdir + "/.perch"
+		if err := os.MkdirAll(dir, 0700); err == nil {
+			savePath = dir + "/schedules.json"
+		}
 	}
 	return &Scheduler{
 		jobs:     make(map[string]*Job),

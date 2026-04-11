@@ -1,6 +1,6 @@
 # Perch 測試案例
 
-> 更新日期：2026-04-11
+> 更新日期：2026-04-11（rev 2）
 
 ---
 
@@ -99,16 +99,35 @@ curl -s http://localhost:8080/schedule
 
 ---
 
-## T08 — 手機虛擬鍵盤
+## T08 — 虛擬鍵盤
 
-**目的**：虛擬鍵盤按鈕可見且能送出特殊按鍵。
+**目的**：虛擬鍵盤行為符合裝置類型預期，按鈕能正確送出按鍵序列。
 
-**步驟**：觀察瀏覽器底部虛擬鍵盤列；點擊各按鈕。
+**步驟（電腦瀏覽器）**：
+1. 開啟 `http://localhost:8080`
+2. 觀察畫面右下角
 
-**預期**：
-- 顯示：Tab、Ctrl+C、Ctrl+D、Ctrl+Z、Esc、↑↓←→、▼
-- 點擊 Tab → terminal 觸發補全
-- 點擊 Ctrl+C → 中斷目前輸入
+**預期（電腦）**：
+- 預設顯示 ⌨ 浮動按鈕（鍵盤列已收合）
+- 點擊 ⌨ → 底部展開虛擬鍵盤列
+- 鍵盤列顯示：Esc、↑、↓、←、→、▼
+
+**步驟（手機瀏覽器）**：
+1. 手機開啟 `http://<server-ip>:8080`
+2. 觀察畫面底部
+
+**預期（手機）**：
+- 預設展開顯示虛擬鍵盤列（無需點擊 ⌨）
+- 鍵盤列顯示：Esc、↑、↓、←、→、▼
+- 點擊 ▼ → 鍵盤收合，改顯示 ⌨
+- 點擊各方向鍵 → terminal 對應移動游標／歷史指令
+- 點擊 Esc → terminal 收到 Escape
+
+**步驟（手機原生鍵盤彈出）**：
+1. 手機點擊 terminal 觸發原生鍵盤彈出
+2. 觀察 terminal 重繪
+
+**預期**：terminal 縮小至剩餘可視區域，底部游標行保持可見（不被鍵盤遮住）
 
 ---
 
@@ -396,6 +415,74 @@ docker run -d \
 **目的**：`/bootstrap` 是取得 client cert 的唯一管道，若也要求 client cert 則永遠無法 bootstrap（雞生蛋問題）。TLS 層設為 `RequestClientCert`（optional），application layer 對 `/bootstrap` 不檢查憑證。
 
 **預期**：`/bootstrap` 在無 client cert 時 → 非 401（可到達 handler）。
+
+---
+
+---
+
+## T25 — 多行 URL 偵測與點擊
+
+**目的**：terminal 中超過一行的 URL 能正確偵測為可點擊連結。
+
+**步驟**：
+1. 在 terminal 中輸入或觀察一個長 URL（長到折行），例如：
+   ```
+   https://example.com/very/long/path/that/wraps/across/two/lines/abc123
+   ```
+2. 滑鼠 hover 該 URL
+
+**預期**：
+- URL 帶底線且顯示 pointer 游標（即使跨多行）
+- 點擊後在新 tab 開啟正確的完整 URL
+- 不因換行切斷 URL
+
+---
+
+## T26 — Entrypoint Skill 合併
+
+**目的**：掛載自己的 `~/.claude` 後，perch 內建 skill 仍可用，且不修改 `~/.claude/settings.json`。
+
+**前置條件**：有一個 `local-schedule` skill 不在主機 `~/.claude/skills/` 中（可確認 `ls ~/.claude/skills/` 不含此 skill）。
+
+**步驟**：
+```bash
+docker run -d \
+  -p 8080:8080 \
+  -e AUTH_MODE=none \
+  -e LISTEN_ADDR=:8080 \
+  -v ~/.claude:/root/.claude \
+  -v /your/workspace:/workspace \
+  ghcr.io/fcwu/perch:latest
+```
+
+**預期**：
+- `/your/workspace/.claude/skills/local-schedule/` 目錄存在（skill 已複製進 workspace）
+- 主機的 `~/.claude/settings.json` 內容**未被修改**
+- 在 terminal 中告訴 Claude 設定排程，Claude 能使用 `local-schedule` skill
+
+**反向驗證（IM 未設定時）**：
+- 不設 `DISCORD_BOT_TOKEN` / `TELEGRAM_BOT_TOKEN`
+- 重啟後確認 `/your/workspace/.claude/settings.json` 不存在（hooks 未被寫入）
+
+---
+
+## T27 — 排程資料存入 workspace 隱藏目錄
+
+**目的**：排程資料儲存在 `workspace/.perch/schedules.json`，不影響工作區內容，重啟後不遺失。
+
+**步驟**：
+1. 啟動 container 並設定一個排程（透過 Claude 自然語言或 API）
+2. 確認檔案位置：
+   ```bash
+   ls /your/workspace/.perch/
+   cat /your/workspace/.perch/schedules.json
+   ```
+3. 重啟 container
+4. 再次確認排程仍存在
+
+**預期**：
+- 第一次：`.perch/schedules.json` 存在，內含剛設定的 job
+- 重啟後：同一個 job 仍在
 
 ---
 

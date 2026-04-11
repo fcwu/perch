@@ -14,6 +14,19 @@ const isMobile =
   typeof window.matchMedia === 'function' &&
   window.matchMedia('(hover: none) and (pointer: coarse)').matches
 
+const btn: React.CSSProperties = {
+  padding: '6px 14px',
+  fontFamily: 'monospace',
+  fontSize: 14,
+  cursor: 'pointer',
+  background: '#1c1c1c',
+  color: '#c8c8c8',
+  border: '1px solid #3a3a3a',
+  borderRadius: 5,
+  flexShrink: 0,
+  userSelect: 'none',
+}
+
 interface Props {
   termRef: RefObject<Terminal | null>
 }
@@ -25,7 +38,7 @@ export function Keyboard({ termRef }: Props) {
     return (
       <button
         onClick={() => setCollapsed(false)}
-        style={{ position: 'fixed', bottom: 8, right: 8, zIndex: 10, padding: '8px 12px' }}
+        style={{ ...btn, position: 'fixed', bottom: 10, right: 10, zIndex: 10 }}
       >
         ⌨
       </button>
@@ -33,7 +46,15 @@ export function Keyboard({ termRef }: Props) {
   }
 
   return (
-    <div style={{ display: 'flex', flexWrap: 'wrap', background: '#111', padding: 4, gap: 4 }}>
+    <div style={{
+      display: 'flex',
+      flexWrap: 'nowrap',
+      alignItems: 'center',
+      background: '#000',
+      borderTop: '1px solid #2a2a2a',
+      padding: '6px 8px',
+      gap: 6,
+    }}>
       {KEYS.map(([label, seq]) => (
         <button
           key={label}
@@ -41,12 +62,15 @@ export function Keyboard({ termRef }: Props) {
             e.preventDefault()
             termRef.current?.input(seq, true)
           }}
-          style={{ padding: '6px 10px', fontFamily: 'monospace', fontSize: 13, cursor: 'pointer' }}
+          style={btn}
         >
           {label}
         </button>
       ))}
-      <button onClick={() => setCollapsed(true)} style={{ marginLeft: 'auto', padding: '6px 10px' }}>
+      <button
+        onClick={() => setCollapsed(true)}
+        style={{ ...btn, marginLeft: 'auto', background: 'transparent', border: 'none', color: '#555' }}
+      >
         ▼
       </button>
     </div>

@@ -10,7 +10,6 @@ Perch 是一個輕量的 web terminal server，讓你不需要 SSH，直接用�
 
 - **完整 terminal**：基於 xterm.js，支援顏色、滾動、可點擊的 URL
 - **即時串流**：所有連線共用同一個 PTY session，即時看到 Claude Code 輸出
-- **手機支援**：虛擬鍵盤（Tab、Ctrl+C/D/Z、Esc、方向鍵），視窗縮放自動調整
 - **三種認證模式**：無認證（內網測試）、密碼登入、mTLS 雙向憑證
 - **排程器**：用自然語言設定每天幾點自動送指令進 terminal（透過 `local-schedule` skill）
 - **IP 封鎖**：TCP 層封鎖惡意 IP
@@ -56,9 +55,7 @@ docker run -d \
   ghcr.io/fcwu/perch:latest
 ```
 
----
-
-## Docker Mount 說明
+#### Mount 說明
 
 | Mount | 用途 |
 |-------|------|
@@ -84,20 +81,6 @@ Perch 的內建 skill（`local-schedule` 等）會在容器啟動時自動合併
 | `DISCORD_CHANNEL_ID` | — | 要監聽的 Discord channel ID |
 | `TELEGRAM_BOT_TOKEN` | — | Telegram bot token（啟用 Telegram 整合） |
 | `TELEGRAM_CHAT_ID` | — | 要監聽的 Telegram chat ID |
-
-### Claude 認證
-
-Claude Code 使用 OAuth 登入。將主機的 `~/.claude` 掛載進容器，Claude 即可直接使用已登入的憑證：
-
-```bash
--v ~/.claude:/root/.claude
-```
-
-若 OAuth 憑證無法使用（例如跨平台或憑證過期），可改用 API 金鑰：
-
-```bash
--e ANTHROPIC_API_KEY=your_key_here
-```
 
 ---
 
@@ -128,28 +111,6 @@ Claude Code 使用 OAuth 登入。將主機的 `~/.claude` 掛載進容器，Cla
 
 **iOS Safari 安裝憑證：**
 - 下載後跳出安裝提示 → 去「設定 → 一般 → VPN 與裝置管理」安裝
-
----
-
-## 在手機上使用
-
-1. 確認手機與電腦 / server 在同一網路（或 server 有公網 IP）
-2. 手機 Chrome 開啟：
-   - `none` / `password` 模式：`http://<server-ip>:8080`
-   - `mtls` 模式：`https://<server-ip>:8443`
-3. 畫面下方有虛擬鍵盤，點擊按鈕送出特殊按鍵
-
-虛擬鍵盤按鍵：
-
-| 按鈕 | 送出 |
-|------|------|
-| Tab | Tab 補全 |
-| Ctrl+C | 中斷目前程序 |
-| Ctrl+D | EOF / 登出 |
-| Ctrl+Z | 暫停程序 |
-| Esc | Escape |
-| ↑ ↓ ← → | 方向鍵（歷史指令等） |
-| ▼ | 收合鍵盤 |
 
 ---
 
