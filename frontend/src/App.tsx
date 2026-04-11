@@ -21,33 +21,55 @@ export default function App() {
     term.loadAddon(fitAddon)
 
     // Custom link provider that handles URLs wrapping across multiple terminal
-    // rows. WebLinksAddon only matches within a single row; this uses
-    // IBufferLine.isWrapped to reconstruct the original URL first.
+    // rows. WebLinksAddon only matches within a single row; this handles two
+    // cases: (1) isWrapped=true terminal wrapping, and (2) explicit \n splits
+    // used by Claude Code for long OAuth URLs where each line has no whitespace.
     term.registerLinkProvider({
       provideLinks(bufferRow, callback) {
         const buffer = term.buffer.active
         // buffer.getLine() is 0-indexed; bufferRow is 1-indexed
         const getLine = (r: number) => buffer.getLine(r - 1)
+        const rowText = (r: number) => (getLine(r)?.translateToString(false) ?? '').trimEnd()
+        // A row with no whitespace looks like a URL fragment (percent-encoded, no spaces)
+        const noSpace = (s: string) => s.length > 0 && !/\s/.test(s)
 
-        // Walk back to find the first row of this wrapped group
+        // Walk back to find the first row of this group.
+        // Handles isWrapped=true continuations AND explicit-newline URL splits:
+        // if the current row has no spaces and doesn't start a new URL, and
+        // the previous row also has no spaces, they're likely parts of the same URL.
         let startRow = bufferRow
-        while (startRow > 1 && getLine(startRow)?.isWrapped) startRow--
+        while (startRow > 1) {
+          if (getLine(startRow)?.isWrapped) { startRow--; continue }
+          const t = rowText(startRow)
+          if (noSpace(t) && !t.startsWith('http') && noSpace(rowText(startRow - 1))) {
+            startRow--; continue
+          }
+          break
+        }
 
-        // Collect all rows belonging to this group
+        // Collect all rows going forward (isWrapped continuations + no-space URL fragments)
         const rows: number[] = [startRow]
         for (let r = startRow; r <= buffer.length; r++) {
           const next = getLine(r + 1)
-          if (!next?.isWrapped) break
-          rows.push(r + 1)
+          if (!next) break
+          if (next.isWrapped) {
+            rows.push(r + 1)
+          } else {
+            // Extend for explicit-newline URL fragments: both current and next row
+            // must have no whitespace, and next must not start a new URL.
+            const nextT = rowText(r + 1)
+            if (noSpace(rowText(r)) && noSpace(nextT) && !nextT.startsWith('http')) {
+              rows.push(r + 1)
+            } else {
+              break
+            }
+          }
         }
 
         if (!rows.includes(bufferRow)) { callback(undefined); return }
 
-        // Get each row's text, trimming trailing spaces so that padding
-        // characters don't break URL matching across wrapped lines.
-        // (translateToString(false) pads rows to `cols` width; those spaces
-        // would truncate the regex match at the first line boundary.)
-        const trimmed = rows.map(r => (getLine(r)?.translateToString(false) ?? '').trimEnd())
+        // Get each row's text trimmed of padding spaces
+        const trimmed = rows.map(r => rowText(r))
         const combined = trimmed.join('')
 
         // Cumulative character lengths (for offset → coordinate mapping)
@@ -75,7 +97,14 @@ export default function App() {
             text: uri,
             range: { start: toCoord(s), end: toCoord(e) },
             decorations: { pointerCursor: true, underline: true },
-            activate: (_: MouseEvent, text: string) => window.open(text, '_blank'),
+            activate: (_: MouseEvent, text: string) => {
+              // Use anchor click instead of window.open to avoid popup blockers
+              const a = document.createElement('a')
+              a.href = text
+              a.target = '_blank'
+              a.rel = 'noopener noreferrer'
+              a.click()
+            },
           })
         }
         callback(links.length ? links : undefined)
