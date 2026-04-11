@@ -1,6 +1,14 @@
 #!/bin/sh
 set -e
 
+# Drop from root to PUID:PGID so workspace files are not owned by root.
+# HOME stays /root so existing volume mounts (-v ~/.claude:/root/.claude) remain valid.
+if [ "$(id -u)" = "0" ]; then
+    PUID="${PUID:-1000}"
+    PGID="${PGID:-$(id -g "$PUID" 2>/dev/null || echo "$PUID")}"
+    exec gosu "${PUID}:${PGID}" env HOME=/root "$0" "$@"
+fi
+
 # Determine workspace directory (same logic as main.go)
 WORKDIR="${CLAUDE_WORKDIR}"
 if [ -z "$WORKDIR" ] && [ -d /workspace ]; then

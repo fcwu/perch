@@ -18,7 +18,7 @@ RUN CGO_ENABLED=0 GOOS=linux go build -o perch .
 # Stage 3: Runtime
 FROM ubuntu:24.04
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    ca-certificates curl git nodejs npm && \
+    ca-certificates curl git nodejs npm gosu && \
     rm -rf /var/lib/apt/lists/*
 RUN npm install -g @anthropic-ai/claude-code
 

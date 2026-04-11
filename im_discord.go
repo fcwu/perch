@@ -44,7 +44,7 @@ type discordSession struct {
 
 func newDiscordSession(channelID string, logger *slog.Logger, workdir string) *discordSession {
 	pty := newPTYManager()
-	go pty.start("claude", []string{"--permission-mode", "dontAsk", "--name", "discord:" + channelID}, workdir, logger)
+	go pty.start("claude", []string{"--permission-mode", "bypassPermissions", "--name", "discord:" + channelID}, workdir, logger)
 	return &discordSession{
 		channelID: channelID,
 		// sessionUUID is empty until the first hook event claims it.

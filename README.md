@@ -25,11 +25,14 @@ Perch 是一個輕量的 web terminal server，讓你不需要 SSH，直接用�
 docker pull ghcr.io/fcwu/perch:latest
 
 # 無認證模式（內網測試）
+# 加 -e PUID=$(id -u) -e PGID=$(id -g) 可讓 workspace 檔案以你的使用者身份建立
 docker run -d \
   -p 8080:8080 \
   -e AUTH_MODE=none \
   -e LISTEN_ADDR=:8080 \
   -e TZ=Asia/Taipei \
+  -e PUID=$(id -u) \
+  -e PGID=$(id -g) \
   -v ~/.claude:/root/.claude \
   -v ~/.claude.json:/root/.claude.json \
   -v /your/workspace:/workspace \
