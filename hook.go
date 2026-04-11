@@ -2,7 +2,6 @@ package main
 
 import (
 	"encoding/json"
-	"log/slog"
 	"net/http"
 )
 
@@ -28,9 +27,6 @@ func (h *hookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if err := json.Unmarshal(raw, &event); err != nil {
 		http.Error(w, "bad request", http.StatusBadRequest)
 		return
-	}
-	if event.EventName == "Stop" {
-		slog.Info("hook Stop event", "json", string(raw))
 	}
 	if h.im != nil {
 		h.im.notify(event)

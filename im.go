@@ -15,7 +15,8 @@ type HookEvent struct {
 	ToolInput    json.RawMessage  `json:"tool_input,omitempty"`
 	ToolResponse json.RawMessage  `json:"tool_response,omitempty"`
 	IsError      bool             `json:"is_error,omitempty"`
-	Transcript   []TranscriptMsg  `json:"transcript,omitempty"`
+	Transcript           []TranscriptMsg `json:"transcript,omitempty"`
+	LastAssistantMessage string          `json:"last_assistant_message,omitempty"`
 }
 
 // TranscriptMsg is one entry in a Stop hook transcript.
@@ -83,7 +84,11 @@ func (m *IMManager) stop() {
 func (m *IMManager) notify(event HookEvent) {
 	lastText := ""
 	if event.EventName == "Stop" {
-		lastText = extractLastAssistantText(event.Transcript)
+		if event.LastAssistantMessage != "" {
+			lastText = event.LastAssistantMessage
+		} else {
+			lastText = extractLastAssistantText(event.Transcript)
+		}
 	}
 	m.mu.Lock()
 	adapters := make([]IMAdapter, len(m.adapters))
