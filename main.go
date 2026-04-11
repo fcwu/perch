@@ -11,6 +11,12 @@ import (
 	"syscall"
 )
 
+// claudeArgs parses CLAUDE_ARGS into a slice of CLI arguments for the claude
+// process. Example: CLAUDE_ARGS="--model claude-opus-4-5 --dangerously-skip-permissions"
+func claudeArgs() []string {
+	return strings.Fields(os.Getenv("CLAUDE_ARGS"))
+}
+
 func main() {
 	logger := newLogger(nil, nil)
 
@@ -49,7 +55,7 @@ func main() {
 			workdir = "/workspace"
 		}
 	}
-	go pm.start("claude", []string{}, workdir, logger.Logger)
+	go pm.start("claude", claudeArgs(), workdir, logger.Logger)
 
 	// --- Scheduler ---
 	sched := newScheduler(pm, workdir)
@@ -81,6 +87,9 @@ func main() {
 	}
 	if im != nil {
 		im.start(pm)
+	}
+	if discordSess != nil {
+		sched.ptyLookup = discordSess.PTYForTarget
 	}
 
 	// --- Auth ---

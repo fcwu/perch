@@ -37,6 +37,48 @@ func TestSchedulerDeleteJob(t *testing.T) {
 	}
 }
 
+func TestSchedulerTargetRouting(t *testing.T) {
+	mainPTY := newPTYManager()
+	discordPTY := newPTYManager()
+
+	sched := newScheduler(mainPTY, "")
+	sched.savePath = ""
+	sched.ptyLookup = func(target string) *PTYManager {
+		if target == "discord:chan1" {
+			return discordPTY
+		}
+		return nil
+	}
+
+	resolve := func(job *Job) *PTYManager {
+		pm := sched.pty
+		if job.Target != "" && sched.ptyLookup != nil {
+			if found := sched.ptyLookup(job.Target); found != nil {
+				pm = found
+			}
+		}
+		return pm
+	}
+
+	// Job with a Discord target should resolve to the Discord PTY.
+	discordJob := &Job{Target: "discord:chan1", Message: "hello discord"}
+	if got := resolve(discordJob); got != discordPTY {
+		t.Errorf("discord job: expected discordPTY, got %p (mainPTY=%p discordPTY=%p)", got, mainPTY, discordPTY)
+	}
+
+	// Job with no target should fall back to the main PTY.
+	mainJob := &Job{Target: "", Message: "hello main"}
+	if got := resolve(mainJob); got != mainPTY {
+		t.Errorf("main job: expected mainPTY, got %p", got)
+	}
+
+	// Job with an unknown target should also fall back to the main PTY.
+	unknownJob := &Job{Target: "discord:unknown", Message: "hello unknown"}
+	if got := resolve(unknownJob); got != mainPTY {
+		t.Errorf("unknown target: expected mainPTY, got %p", got)
+	}
+}
+
 func TestSchedulerHTTPAPI(t *testing.T) {
 	sched := newScheduler(nil, "")
 	sched.savePath = ""

@@ -4,6 +4,7 @@ import (
 	"crypto/sha1"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 
 	"github.com/bwmarrin/discordgo"
@@ -44,7 +45,8 @@ type discordSession struct {
 
 func newDiscordSession(channelID string, logger *slog.Logger, workdir string) *discordSession {
 	pty := newPTYManager()
-	go pty.start("claude", []string{"--permission-mode", "bypassPermissions", "--name", "discord:" + channelID}, workdir, logger)
+	go pty.start("claude", []string{"--permission-mode", "bypassPermissions", "--name", "discord:" + channelID}, workdir, logger,
+		"PERCH_SESSION_TARGET=discord:"+channelID)
 	return &discordSession{
 		channelID: channelID,
 		// sessionUUID is empty until the first hook event claims it.
@@ -260,6 +262,23 @@ func (d *DiscordSessionManager) SubscribeSession(channelID string) (<-chan []byt
 	}
 	ch, unsub := sess.pty.subscribe()
 	return ch, unsub, true
+}
+
+// PTYForTarget returns the PTYManager for a session target string (e.g. "discord:<channelID>").
+// Returns nil if the target is not a known Discord session.
+func (d *DiscordSessionManager) PTYForTarget(target string) *PTYManager {
+	const prefix = "discord:"
+	if !strings.HasPrefix(target, prefix) {
+		return nil
+	}
+	channelID := target[len(prefix):]
+	d.mu.Lock()
+	sess, ok := d.sessions[channelID]
+	d.mu.Unlock()
+	if !ok {
+		return nil
+	}
+	return sess.pty
 }
 
 // ResizeSession resizes the PTY for the given Discord channel.

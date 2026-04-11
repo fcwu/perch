@@ -16,15 +16,20 @@ type Job struct {
 	Minute  int    `json:"minute"`
 	Message string `json:"message"`
 	Repeat  bool   `json:"repeat"`
+	// Target identifies which PTY to write to when the job fires.
+	// Empty string means the main PTY. "discord:<channelID>" routes to that Discord session.
+	// Claude running inside a Discord PTY can read PERCH_SESSION_TARGET to obtain this value.
+	Target string `json:"target,omitempty"`
 
 	lastFiredAt time.Time // not persisted; prevents double-fire within the same minute
 }
 
 type Scheduler struct {
-	mu       sync.Mutex
-	jobs     map[string]*Job
-	pty      *PTYManager
-	savePath string
+	mu          sync.Mutex
+	jobs        map[string]*Job
+	pty         *PTYManager
+	ptyLookup   func(target string) *PTYManager // optional; routes jobs with a non-empty Target
+	savePath    string
 }
 
 func newScheduler(pm *PTYManager, workdir string) *Scheduler {
@@ -111,8 +116,14 @@ func (s *Scheduler) run() {
 					continue
 				}
 				job.lastFiredAt = t
-				if s.pty != nil {
-					s.pty.write([]byte(job.Message + "\r"))
+				pm := s.pty
+				if job.Target != "" && s.ptyLookup != nil {
+					if found := s.ptyLookup(job.Target); found != nil {
+						pm = found
+					}
+				}
+				if pm != nil {
+					pm.write([]byte(job.Message + "\r"))
 				}
 				if !job.Repeat {
 					toDelete = append(toDelete, id)

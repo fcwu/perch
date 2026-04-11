@@ -84,6 +84,9 @@ docker run -d \
 | `CLAUDE_WORKDIR` | `/workspace`（若存在） | Claude Code 的起始工作目錄 |
 | `TZ` | `UTC` | 容器時區，影響排程觸發時間，例如 `Asia/Taipei` |
 | `ANTHROPIC_API_KEY` | — | Anthropic API 金鑰，直接傳給 Claude |
+| `CLAUDE_ARGS` | — | 傳給 `claude` 指令的額外 CLI 參數，空格分隔，例如 `--model claude-opus-4-5 --dangerously-skip-permissions` |
+| `CLAUDE_CODE_NO_FLICKER` | `1` | 停用 Claude Code 的畫面閃爍動畫（預設啟用，設 `0` 可關閉） |
+| `CLAUDE_CODE_DISABLE_MOUSE` | `1` | 停用 Claude Code 的滑鼠事件捕捉（預設啟用，設 `0` 可關閉） |
 | `DISCORD_BOT_TOKEN` | — | Discord bot token（啟用 Discord 整合） |
 | `DISCORD_CHANNEL_ID` | — | 要監聽的 Discord channel ID |
 
@@ -116,6 +119,49 @@ docker run -d \
 
 **iOS Safari 安裝憑證：**
 - 下載後跳出安裝提示 → 去「設定 → 一般 → VPN 與裝置管理」安裝
+
+---
+
+## Claude 啟動設定
+
+### 傳入 CLI 參數
+
+透過 `CLAUDE_ARGS` 可以在啟動時將額外參數傳給 `claude` 指令：
+
+```bash
+# 指定模型
+docker run -d \
+  -e CLAUDE_ARGS="--model claude-opus-4-5" \
+  ...
+
+# 跳過權限確認（適合全自動場景）
+docker run -d \
+  -e CLAUDE_ARGS="--dangerously-skip-permissions" \
+  ...
+
+# 同時多個參數
+docker run -d \
+  -e CLAUDE_ARGS="--model claude-opus-4-5 --dangerously-skip-permissions" \
+  ...
+```
+
+### 覆蓋預設環境變數
+
+Perch 預設替 Claude 設定兩個環境變數，可透過 Docker `-e` 直接覆蓋：
+
+| 變數 | 預設 | 說明 |
+|------|------|------|
+| `CLAUDE_CODE_NO_FLICKER` | `1` | 停用畫面閃爍動畫，減少 terminal 雜訊 |
+| `CLAUDE_CODE_DISABLE_MOUSE` | `1` | 停用滑鼠事件，讓瀏覽器文字選取正常運作 |
+
+```bash
+# 例：恢復滑鼠事件（若你的用途需要）
+docker run -d \
+  -e CLAUDE_CODE_DISABLE_MOUSE=0 \
+  ...
+```
+
+> Perch 傳給 Claude 的所有環境變數均繼承自容器環境，任何以 `-e` 設定的變數都會直接傳入 Claude 行程。
 
 ---
 

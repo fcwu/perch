@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"strconv"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -98,7 +99,7 @@ func (p *PTYManager) resize(cols, rows uint16) error {
 	return pty.Setsize(ptmx, &pty.Winsize{Cols: cols, Rows: rows})
 }
 
-func (p *PTYManager) start(command string, args []string, workdir string, logger *slog.Logger) {
+func (p *PTYManager) start(command string, args []string, workdir string, logger *slog.Logger, extraEnv ...string) {
 	for {
 		select {
 		case <-p.done:
@@ -134,12 +135,29 @@ func (p *PTYManager) start(command string, args []string, workdir string, logger
 				}
 			}
 		}
-		cmd.Env = append(os.Environ(),
+		// Build env: inherit parent env; apply perch-specific defaults only
+		// when not already set by the caller (e.g. via Docker -e flags).
+		// Node.js uses the last duplicate entry, so we must not append defaults
+		// unconditionally or user-supplied values would be silently overridden.
+		env := os.Environ()
+		set := make(map[string]bool, len(env))
+		for _, e := range env {
+			if k, _, ok := strings.Cut(e, "="); ok {
+				set[k] = true
+			}
+		}
+		for _, d := range []string{
 			"TERM=xterm-256color",
-			"HOME="+home,
+			"HOME=" + home,
 			"CLAUDE_CODE_NO_FLICKER=1",
 			"CLAUDE_CODE_DISABLE_MOUSE=1",
-		)
+		} {
+			if k, _, ok := strings.Cut(d, "="); ok && !set[k] {
+				env = append(env, d)
+			}
+		}
+		cmd.Env = env
+		cmd.Env = append(cmd.Env, extraEnv...)
 		ptmx, err := pty.StartWithSize(cmd, &pty.Winsize{Cols: 220, Rows: 50})
 		if err != nil {
 			logger.Error("pty start failed", "err", err)
