@@ -35,6 +35,12 @@ type IMAdapter interface {
 	Notify(event HookEvent, lastText string) error
 }
 
+// SessionProvider is implemented by IM adapters that expose viewable PTY sessions.
+type SessionProvider interface {
+	ListSessions() []SessionView
+	SubscribeSession(channelID string) (<-chan []byte, func(), bool)
+}
+
 // IMManager owns all adapters and dispatches hook events.
 type IMManager struct {
 	mu       sync.Mutex
@@ -88,6 +94,18 @@ func (m *IMManager) notify(event HookEvent) {
 			m.logger.Warn("IM notify error", "err", err)
 		}
 	}
+}
+
+// Sessions returns the first SessionProvider found among adapters, or nil.
+func (m *IMManager) Sessions() SessionProvider {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, a := range m.adapters {
+		if sp, ok := a.(SessionProvider); ok {
+			return sp
+		}
+	}
+	return nil
 }
 
 // extractLastAssistantText pulls the last assistant message text from a transcript.

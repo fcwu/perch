@@ -86,3 +86,11 @@ func (c *captureAdapter) Notify(e HookEvent, text string) error {
 	}
 	return nil
 }
+
+func TestIMManagerSessionsReturnsNilWhenNoDiscord(t *testing.T) {
+	im := newIMManager(nil)
+	im.addAdapter(&captureAdapter{})
+	if im.Sessions() != nil {
+		t.Fatal("expected nil SessionProvider when no Discord adapter")
+	}
+}
