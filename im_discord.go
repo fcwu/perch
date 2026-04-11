@@ -1,6 +1,8 @@
 package main
 
 import (
+	"crypto/sha1"
+	"fmt"
 	"log/slog"
 	"sync"
 
@@ -8,12 +10,21 @@ import (
 )
 
 const (
-	emojiEyes     = "👀"
-	emojiGear     = "⚙️"
-	emojiCheck    = "✅"
-	emojiCross    = "❌"
-	emojiSpeech   = "💬"
+	emojiEyes   = "👀"
+	emojiGear   = "⚙️"
+	emojiCheck  = "✅"
+	emojiCross  = "❌"
+	emojiSpeech = "💬"
 )
+
+// channelSessionID derives a deterministic UUID v5-like string from a Discord channel ID.
+func channelSessionID(channelID string) string {
+	h := sha1.Sum([]byte("perch-discord-v1:" + channelID))
+	b := h[:16]
+	b[6] = (b[6] & 0x0f) | 0x50 // version 5
+	b[8] = (b[8] & 0x3f) | 0x80 // RFC 4122 variant
+	return fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:16])
+}
 
 type discordPending struct {
 	MessageID string
@@ -21,103 +32,157 @@ type discordPending struct {
 	GuildID   string
 }
 
-// DiscordAdapter listens on a Discord channel and proxies messages to the PTY.
-type DiscordAdapter struct {
-	token     string
-	channelID string
-	logger    *slog.Logger
+// discordSession is one per Discord channel: its own PTY + pending state.
+type discordSession struct {
+	channelID   string
+	sessionUUID string
+	pty         *PTYManager
 
-	mu      sync.Mutex
-	session *discordgo.Session
-	pty     *PTYManager
-	last    *discordPending
+	mu   sync.Mutex
+	last *discordPending
 }
 
-func newDiscordAdapter(token, channelID string, logger *slog.Logger) *DiscordAdapter {
-	return &DiscordAdapter{token: token, channelID: channelID, logger: logger}
+func newDiscordSession(channelID string, logger *slog.Logger, workdir string) *discordSession {
+	uuid := channelSessionID(channelID)
+	pty := newPTYManager()
+	go pty.start("claude", []string{"--session-id", uuid, "--name", "discord:" + channelID}, workdir, logger)
+	return &discordSession{
+		channelID:   channelID,
+		sessionUUID: uuid,
+		pty:         pty,
+	}
 }
 
-func (d *DiscordAdapter) Start(pty *PTYManager) error {
-	d.mu.Lock()
-	d.pty = pty
-	d.mu.Unlock()
+// SessionView is the JSON representation of a live Discord session.
+type SessionView struct {
+	ChannelID   string `json:"channel_id"`
+	SessionUUID string `json:"session_uuid"`
+}
 
+// DiscordSessionManager listens on Discord and routes each channel to its own PTY.
+type DiscordSessionManager struct {
+	token            string
+	allowedChannelID string
+	logger           *slog.Logger
+	workdir          string
+
+	mu       sync.Mutex
+	dgo      *discordgo.Session
+	sessions map[string]*discordSession // channelID → session
+}
+
+func newDiscordSessionManager(token, channelID, workdir string, logger *slog.Logger) *DiscordSessionManager {
+	return &DiscordSessionManager{
+		token:            token,
+		allowedChannelID: channelID,
+		logger:           logger,
+		workdir:          workdir,
+		sessions:         make(map[string]*discordSession),
+	}
+}
+
+func (d *DiscordSessionManager) Start(_ *PTYManager) error {
 	session, err := discordgo.New("Bot " + d.token)
 	if err != nil {
 		return err
 	}
 	session.Identify.Intents = discordgo.IntentsGuildMessages | discordgo.IntentsDirectMessages
 	session.AddHandler(d.onMessage)
-
 	if err := session.Open(); err != nil {
 		return err
 	}
 	d.mu.Lock()
-	d.session = session
+	d.dgo = session
 	d.mu.Unlock()
-	d.logger.Info("Discord bot connected")
+	d.logger.Info("Discord bot connected (per-channel PTY mode)")
 	return nil
 }
 
-func (d *DiscordAdapter) Stop() {
+func (d *DiscordSessionManager) Stop() {
 	d.mu.Lock()
-	s := d.session
+	s := d.dgo
 	d.mu.Unlock()
 	if s != nil {
 		s.Close()
 	}
 }
 
-func (d *DiscordAdapter) onMessage(s *discordgo.Session, m *discordgo.MessageCreate) {
+func (d *DiscordSessionManager) onMessage(s *discordgo.Session, m *discordgo.MessageCreate) {
 	if m.Author == nil || m.Author.Bot {
 		return
 	}
-	if m.ChannelID != d.channelID {
+	if d.allowedChannelID != "" && m.ChannelID != d.allowedChannelID {
 		return
 	}
 
-	d.mu.Lock()
-	d.last = &discordPending{
+	sess := d.getOrCreateSession(m.ChannelID)
+
+	sess.mu.Lock()
+	sess.last = &discordPending{
 		MessageID: m.ID,
 		ChannelID: m.ChannelID,
 		GuildID:   m.GuildID,
 	}
-	pty := d.pty
-	d.mu.Unlock()
+	sess.mu.Unlock()
 
-	// Add 👀 reaction to signal message received.
-	d.react(s, m.ChannelID, m.ID, emojiEyes)
-
-	if pty != nil {
-		pty.write([]byte(m.Content + "\r"))
+	if err := s.MessageReactionAdd(m.ChannelID, m.ID, emojiEyes); err != nil {
+		d.logger.Warn("Discord add reaction failed", "emoji", emojiEyes, "err", err)
 	}
+	sess.pty.write([]byte(m.Content + "\r"))
 }
 
-func (d *DiscordAdapter) Notify(event HookEvent, lastText string) error {
+func (d *DiscordSessionManager) getOrCreateSession(channelID string) *discordSession {
 	d.mu.Lock()
-	s := d.session
-	pending := d.last
+	defer d.mu.Unlock()
+	if sess, ok := d.sessions[channelID]; ok {
+		return sess
+	}
+	sess := newDiscordSession(channelID, d.logger, d.workdir)
+	d.sessions[channelID] = sess
+	return sess
+}
+
+func (d *DiscordSessionManager) Notify(event HookEvent, lastText string) error {
+	d.mu.Lock()
+	var target *discordSession
+	for _, sess := range d.sessions {
+		if sess.sessionUUID == event.SessionID {
+			target = sess
+			break
+		}
+	}
+	dgo := d.dgo
 	d.mu.Unlock()
+	if target == nil {
+		return nil
+	}
+	return target.notify(dgo, event, lastText, d.logger)
+}
+
+func (sess *discordSession) notify(s *discordgo.Session, event HookEvent, lastText string, logger *slog.Logger) error {
+	sess.mu.Lock()
+	pending := sess.last
+	sess.mu.Unlock()
 	if s == nil || pending == nil {
 		return nil
 	}
 
 	switch event.EventName {
 	case "PreToolUse":
-		d.react(s, pending.ChannelID, pending.MessageID, emojiGear)
+		s.MessageReactionAdd(pending.ChannelID, pending.MessageID, emojiGear)
 
 	case "PostToolUse":
-		d.unreact(s, pending.ChannelID, pending.MessageID, emojiGear)
+		s.MessageReactionRemove(pending.ChannelID, pending.MessageID, emojiGear, "@me")
 		if event.IsError {
-			d.react(s, pending.ChannelID, pending.MessageID, emojiCross)
+			s.MessageReactionAdd(pending.ChannelID, pending.MessageID, emojiCross)
 		} else {
-			d.react(s, pending.ChannelID, pending.MessageID, emojiCheck)
+			s.MessageReactionAdd(pending.ChannelID, pending.MessageID, emojiCheck)
 		}
 
 	case "Stop":
-		d.unreact(s, pending.ChannelID, pending.MessageID, emojiEyes)
-		d.unreact(s, pending.ChannelID, pending.MessageID, emojiGear)
-		d.react(s, pending.ChannelID, pending.MessageID, emojiSpeech)
+		s.MessageReactionRemove(pending.ChannelID, pending.MessageID, emojiEyes, "@me")
+		s.MessageReactionRemove(pending.ChannelID, pending.MessageID, emojiGear, "@me")
+		s.MessageReactionAdd(pending.ChannelID, pending.MessageID, emojiSpeech)
 
 		text := lastText
 		if text == "" {
@@ -131,24 +196,38 @@ func (d *DiscordAdapter) Notify(event HookEvent, lastText string) error {
 			Reference: &discordgo.MessageReference{MessageID: pending.MessageID},
 		})
 		if err != nil {
-			d.logger.Warn("Discord send reply failed", "err", err)
+			logger.Warn("Discord send reply failed", "err", err)
 		}
 
-		d.mu.Lock()
-		d.last = nil
-		d.mu.Unlock()
+		sess.mu.Lock()
+		sess.last = nil
+		sess.mu.Unlock()
 	}
 	return nil
 }
 
-func (d *DiscordAdapter) react(s *discordgo.Session, channelID, messageID, emoji string) {
-	if err := s.MessageReactionAdd(channelID, messageID, emoji); err != nil {
-		d.logger.Warn("Discord add reaction failed", "emoji", emoji, "err", err)
+// ListSessions returns all active Discord sessions (implements SessionProvider).
+func (d *DiscordSessionManager) ListSessions() []SessionView {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	out := make([]SessionView, 0, len(d.sessions))
+	for _, sess := range d.sessions {
+		out = append(out, SessionView{
+			ChannelID:   sess.channelID,
+			SessionUUID: sess.sessionUUID,
+		})
 	}
+	return out
 }
 
-func (d *DiscordAdapter) unreact(s *discordgo.Session, channelID, messageID, emoji string) {
-	if err := s.MessageReactionRemove(channelID, messageID, emoji, "@me"); err != nil {
-		d.logger.Warn("Discord remove reaction failed", "emoji", emoji, "err", err)
+// SubscribeSession returns a read channel for the PTY output of channelID.
+func (d *DiscordSessionManager) SubscribeSession(channelID string) (<-chan []byte, func(), bool) {
+	d.mu.Lock()
+	sess, ok := d.sessions[channelID]
+	d.mu.Unlock()
+	if !ok {
+		return nil, nil, false
 	}
+	ch, unsub := sess.pty.subscribe()
+	return ch, unsub, true
 }
