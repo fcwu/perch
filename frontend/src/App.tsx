@@ -155,6 +155,9 @@ export default function App() {
     const fitAddon = fitAddonRef.current
     if (!term || !fitAddon || !containerRef.current) return
 
+    // Clear terminal buffer so the new session starts with a clean view.
+    term.reset()
+
     const proto = location.protocol === 'https:' ? 'wss' : 'ws'
     const url = tab === null
       ? `${proto}://${location.host}/ws`
