@@ -1,6 +1,6 @@
 # Perch 測試案例
 
-> 更新日期：2026-04-11（rev 3）
+> 更新日期：2026-04-12（rev 4）
 
 ---
 
@@ -563,6 +563,69 @@ ls -la /your/workspace/test-owner.txt
 - Claude 能正常執行工具操作（bypassPermissions 有效）
 
 **反向驗證**：不帶 PUID/PGID，重啟後 `id` 應顯示 uid=1000（預設值），workspace 檔案仍非 root。
+
+---
+
+---
+
+## T31 — Discord 排程觸發回傳到正確 Channel
+
+**目的**：確認 `target: "discord:<channelID>"` 的排程 job 在觸發時，Claude 的回應正確出現在 Discord channel，而非 main terminal。
+
+**前置條件**：同 T18，Discord Bot 已連線。
+
+**步驟**：
+1. 在 Discord channel 設定一個一次性排程（`repeat: false`），時間設為當前時間後 1 分鐘：
+   ```bash
+   TARGET="discord:<your_channel_id>"
+   curl -s -X POST http://localhost:8080/schedule \
+     -H "Content-Type: application/json" \
+     -d "{\"hour\": HH, \"minute\": MM, \"message\": \"請說一句簡短的鼓勵\", \"repeat\": false, \"target\": \"$TARGET\"}"
+   ```
+2. 等待觸發時間到來
+
+**預期**：
+- Discord channel 出現 `📅 local schedule > 請說一句簡短的鼓勵`
+- Claude 回應後，Discord 收到 reply 訊息，thread 到上面那則 header
+- Main terminal tab 無任何新輸出（訊息沒有跑到主 PTY）
+- `repeat: false` 的 job 觸發後從 `GET /schedule` 消失
+
+**反向驗證**：若 `target` 欄位為空，訊息應出現在 main terminal，Discord 無反應。
+
+---
+
+## T32 — Discord 排程 Header 訊息格式
+
+**目的**：確認排程觸發時，Discord 先顯示 header 訊息，Claude 回覆以 thread reply 形式附在 header 下方。
+
+**前置條件**：同 T31，排程已設定並等待觸發。
+
+**步驟**：觀察 T31 觸發後 Discord channel 的訊息結構。
+
+**預期**：
+- Header 訊息格式：`📅 local schedule > {排程訊息內容}`
+- Claude 的回覆：以 Discord reply（reply reference）附在 header 訊息下方
+- 可清楚辨識此次輸出是由排程觸發，而非使用者手動輸入
+
+---
+
+## T33 — Build Time 顯示在啟動 Log
+
+**目的**：確認 perch 啟動時 log 中包含 build time，方便確認部署的版本。
+
+**步驟**：
+```bash
+docker run --rm \
+  -e AUTH_MODE=none \
+  ghcr.io/fcwu/perch:latest 2>&1 | head -5
+```
+
+**預期**：啟動 log 中包含 `built=` 欄位，值為 ISO 8601 格式的 UTC 時間，例如：
+```
+time=... level=INFO msg="perch listening" addr=:8080 auth=none built=2026-04-12T10:30:00Z
+```
+
+**反向驗證**：本機直接 `go build` 後執行（不帶 ldflags），`built=unknown` 應出現在 log 中。
 
 ---
 
