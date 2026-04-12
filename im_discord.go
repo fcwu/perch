@@ -132,6 +132,7 @@ func (d *DiscordSessionManager) onMessage(s *discordgo.Session, m *discordgo.Mes
 	sess := d.getOrCreateSession(m.ChannelID)
 
 	sess.mu.Lock()
+	idle := sess.last == nil
 	sess.last = &discordPending{
 		MessageID: m.ID,
 		ChannelID: m.ChannelID,
@@ -139,10 +140,24 @@ func (d *DiscordSessionManager) onMessage(s *discordgo.Session, m *discordgo.Mes
 	}
 	sess.mu.Unlock()
 
+	// If the session was idle, the previous sessionUUID may be stale (e.g.
+	// claude exited without firing a Stop hook).  Clear it so the new claude
+	// invocation can claim the session when its first hook event arrives.
+	if idle {
+		d.mu.Lock()
+		if sess.sessionUUID != "" {
+			d.logger.Info("Discord clearing stale sessionUUID", "channel", m.ChannelID, "uuid", sess.sessionUUID)
+			sess.sessionUUID = ""
+		}
+		d.mu.Unlock()
+	}
+
 	if err := s.MessageReactionAdd(m.ChannelID, m.ID, emojiEyes); err != nil {
 		d.logger.Warn("Discord add reaction failed", "emoji", emojiEyes, "err", err)
 	}
-	sess.pty.write([]byte(m.Content + "\r"))
+	if err := sess.pty.write([]byte(m.Content + "\r")); err != nil {
+		d.logger.Warn("Discord PTY write failed", "channel", m.ChannelID, "msgID", m.ID, "err", err)
+	}
 }
 
 func (d *DiscordSessionManager) getOrCreateSession(channelID string) *discordSession {
@@ -181,6 +196,8 @@ func (d *DiscordSessionManager) Notify(event HookEvent, lastText string) error {
 	dgo := d.dgo
 	d.mu.Unlock()
 	if target == nil {
+		d.logger.Debug("Discord Notify: no session matched, dropping event",
+			"event", event.EventName, "sessionID", event.SessionID)
 		return nil
 	}
 	err := target.notify(dgo, event, lastText, d.logger)
@@ -223,20 +240,34 @@ func (sess *discordSession) notify(s *discordgo.Session, event HookEvent, lastTe
 
 	switch event.EventName {
 	case "PreToolUse":
-		s.MessageReactionAdd(pending.ChannelID, pending.MessageID, emojiGear)
+		if err := s.MessageReactionAdd(pending.ChannelID, pending.MessageID, emojiGear); err != nil {
+			logger.Warn("Discord reaction add failed", "emoji", emojiGear, "err", err)
+		}
 
 	case "PostToolUse":
-		s.MessageReactionRemove(pending.ChannelID, pending.MessageID, emojiGear, "@me")
+		if err := s.MessageReactionRemove(pending.ChannelID, pending.MessageID, emojiGear, "@me"); err != nil {
+			logger.Warn("Discord reaction remove failed", "emoji", emojiGear, "err", err)
+		}
 		if event.IsError {
-			s.MessageReactionAdd(pending.ChannelID, pending.MessageID, emojiCross)
+			if err := s.MessageReactionAdd(pending.ChannelID, pending.MessageID, emojiCross); err != nil {
+				logger.Warn("Discord reaction add failed", "emoji", emojiCross, "err", err)
+			}
 		} else {
-			s.MessageReactionAdd(pending.ChannelID, pending.MessageID, emojiCheck)
+			if err := s.MessageReactionAdd(pending.ChannelID, pending.MessageID, emojiCheck); err != nil {
+				logger.Warn("Discord reaction add failed", "emoji", emojiCheck, "err", err)
+			}
 		}
 
 	case "Stop":
-		s.MessageReactionRemove(pending.ChannelID, pending.MessageID, emojiEyes, "@me")
-		s.MessageReactionRemove(pending.ChannelID, pending.MessageID, emojiGear, "@me")
-		s.MessageReactionAdd(pending.ChannelID, pending.MessageID, emojiSpeech)
+		if err := s.MessageReactionRemove(pending.ChannelID, pending.MessageID, emojiEyes, "@me"); err != nil {
+			logger.Warn("Discord reaction remove failed", "emoji", emojiEyes, "err", err)
+		}
+		if err := s.MessageReactionRemove(pending.ChannelID, pending.MessageID, emojiGear, "@me"); err != nil {
+			logger.Warn("Discord reaction remove failed", "emoji", emojiGear, "err", err)
+		}
+		if err := s.MessageReactionAdd(pending.ChannelID, pending.MessageID, emojiSpeech); err != nil {
+			logger.Warn("Discord reaction add failed", "emoji", emojiSpeech, "err", err)
+		}
 
 		text := lastText
 		if text == "" {
@@ -245,12 +276,13 @@ func (sess *discordSession) notify(s *discordgo.Session, event HookEvent, lastTe
 		if len(text) > 1900 {
 			text = text[:1900] + "\n…(truncated)"
 		}
+		logger.Info("Discord sending Stop reply", "channel", sess.channelID, "replyTo", pending.MessageID, "textLen", len(text))
 		_, err := s.ChannelMessageSendComplex(pending.ChannelID, &discordgo.MessageSend{
 			Content:   text,
 			Reference: &discordgo.MessageReference{MessageID: pending.MessageID},
 		})
 		if err != nil {
-			logger.Warn("Discord send reply failed", "err", err)
+			logger.Warn("Discord send reply failed", "channel", sess.channelID, "err", err)
 		}
 
 		sess.mu.Lock()

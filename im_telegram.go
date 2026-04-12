@@ -72,7 +72,9 @@ func (t *TelegramAdapter) onText(c telebot.Context) error {
 	t.mu.Unlock()
 
 	if pty != nil {
-		pty.write([]byte(c.Text() + "\r"))
+		if err := pty.write([]byte(c.Text() + "\r")); err != nil {
+			t.logger.Warn("Telegram PTY write failed", "chatID", c.Chat().ID, "err", err)
+		}
 	}
 	return nil
 }

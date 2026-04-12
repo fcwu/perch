@@ -313,7 +313,9 @@ func (s *Scheduler) run() {
 					if s.onFire != nil && job.Target != "" {
 						s.onFire(job.Target, job.Message)
 					}
-					pm.write([]byte(job.Message + "\r"))
+					if err := pm.write([]byte(job.Message + "\r")); err != nil {
+						s.logger.Warn("scheduler PTY write failed", "jobID", id, "target", job.Target, "err", err)
+					}
 				}
 				if !job.Repeat {
 					toDelete = append(toDelete, id)

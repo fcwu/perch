@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"io"
 	"log/slog"
 	"os"
@@ -13,6 +14,9 @@ import (
 
 	"github.com/creack/pty"
 )
+
+// errPTYNotReady is returned by write when the PTY process has not started yet.
+var errPTYNotReady = errors.New("PTY not ready")
 
 const maxFramebuf = 1 << 20 // 1 MB cap
 
@@ -83,7 +87,7 @@ func (p *PTYManager) write(data []byte) error {
 	ptmx := p.ptmx
 	p.mu.Unlock()
 	if ptmx == nil {
-		return nil
+		return errPTYNotReady
 	}
 	_, err := ptmx.Write(data)
 	return err
