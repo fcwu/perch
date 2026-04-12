@@ -619,6 +619,132 @@ time=... level=INFO msg="perch listening" addr=:8080 auth=none built=2026-04-12T
 
 ---
 
+## T34 — Discord Open-Channel 模式：僅設 BOT_TOKEN 即可啟動
+
+**目的**：確認移除 `DISCORD_CHANNEL_ID` 後，Bot 仍能正常啟動並連上 Discord。
+
+**步驟**：
+```bash
+docker run --rm \
+  -e DISCORD_BOT_TOKEN=<token> \
+  -e AUTH_MODE=none \
+  -e TZ=Asia/Taipei \
+  -e PUID=$(id -u) \
+  -e PGID=$(id -g) \
+  -v ~/.claude:/home/perchuser/.claude \
+  -v ~/.claude.json:/home/perchuser/.claude.json \
+  -v ./:/workspace \
+  -p 8081:8080 \
+  perch:local 2>&1 | head -10
+```
+
+**預期**：
+- Log 出現 `Discord bot connected (per-channel PTY mode)` 或類似訊息
+- 無 `DISCORD_CHANNEL_ID required` 或啟動失敗訊息
+- 瀏覽器開啟 `http://localhost:8081` 正常顯示 terminal
+
+---
+
+## T35 — Discord Open-Channel：Public 頻道需 @mention
+
+**目的**：未設 `DISCORD_CHANNEL_ID` 時，在 public Guild 頻道不 @mention Bot 應無回應；@mention 後才回應。
+
+**前置條件**：container 以純 `DISCORD_BOT_TOKEN`（不帶 `DISCORD_CHANNEL_ID`）啟動，且測試頻道為 public（@everyone 可見）。
+
+**步驟**：
+1. 在 public 頻道直接傳送訊息（不 @mention）：「你好」
+2. 觀察 30 秒，確認無任何 reaction 或回應
+3. 在同一頻道傳送 @mention 訊息：`@Perch 你好`
+4. 觀察 reaction 與回應
+
+**預期**：
+- 步驟 1–2：訊息無 👀 reaction，Bot 無任何回應（silent ignore）
+- 步驟 3–4：訊息出現 👀 reaction；Claude 處理完後 Discord 收到 reply
+
+---
+
+## T36 — Discord Open-Channel：Private 頻道直接回應（不需 @mention）
+
+**目的**：未設 `DISCORD_CHANNEL_ID` 時，在 private Guild 頻道（@everyone ViewChannel 被 deny）不需 @mention 即可直接對話。
+
+**前置條件**：container 以純 `DISCORD_BOT_TOKEN` 啟動；測試頻道為 private（Server 設定中 @everyone 無法查看此頻道，但 Bot role 可以）。
+
+**步驟**：
+1. 在 private 頻道直接傳送訊息（不 @mention）：「你是誰？」
+2. 觀察 reaction 與回應
+
+**預期**：
+- 訊息出現 👀 reaction（不需 @mention）
+- Claude 處理後 Discord 收到 reply，內容回答問題
+- PTY content 中可見訊息文字（無 `<@...>` 前綴）
+
+---
+
+## T37 — Discord Open-Channel：DM 直接回應（不需 @mention）
+
+**目的**：使用者私訊 Bot 時，不需 @mention 即可直接對話。
+
+**前置條件**：container 以純 `DISCORD_BOT_TOKEN` 啟動。
+
+**步驟**：
+1. 在 Discord 開啟與 Bot 的 DM
+2. 直接傳送訊息：「今天日期是？」
+
+**預期**：
+- 訊息出現 👀 reaction
+- Claude 回應後，Bot 在 DM 中回覆正確日期
+- Web terminal 可看到對應的 Discord DM session tab（tab 名稱含 channel ID）
+
+---
+
+## T38 — Discord Backward Compat：設定 DISCORD_CHANNEL_ID 維持原行為
+
+**目的**：同時設定 `DISCORD_BOT_TOKEN` 與 `DISCORD_CHANNEL_ID` 時，Bot 只回應指定頻道，其他頻道訊息被忽略（原有行為不變）。
+
+**前置條件**：container 同時帶 `DISCORD_BOT_TOKEN` 與 `DISCORD_CHANNEL_ID`（指向特定頻道）。
+
+**步驟**：
+```bash
+docker run --rm \
+  -e DISCORD_BOT_TOKEN=<token> \
+  -e DISCORD_CHANNEL_ID=<channel_id> \
+  -e AUTH_MODE=none \
+  -e TZ=Asia/Taipei \
+  -e PUID=$(id -u) \
+  -e PGID=$(id -g) \
+  -v ~/.claude:/home/perchuser/.claude \
+  -v ~/.claude.json:/home/perchuser/.claude.json \
+  -v ./:/workspace \
+  -p 8081:8080 \
+  perch:local
+```
+
+1. 在**指定頻道**傳送訊息（不需 @mention）：「你好」
+2. 在**另一個頻道**傳送訊息（不需 @mention）：「你好」
+
+**預期**：
+- 步驟 1：👀 出現，Claude 正常回應（原有行為）
+- 步驟 2：無任何 reaction 或回應（channel filter 生效）
+
+---
+
+## T39 — Discord mention prefix 剝除（Public 頻道）
+
+**目的**：Public 頻道 @mention 觸發時，Claude 收到的訊息不含 `<@BOT_ID>` 前綴，只有實際問題內容。
+
+**前置條件**：container 以純 `DISCORD_BOT_TOKEN` 啟動（無 channel filter）。
+
+**步驟**：
+1. 在 public 頻道傳送：`@Perch 列出 /workspace 下的檔案`
+2. 觀察 Web terminal 的 PTY 輸出
+
+**預期**：
+- PTY 中出現的文字為 `列出 /workspace 下的檔案`
+- **不出現** `<@1234567890> 列出 /workspace 下的檔案`
+- Claude 正常執行對應指令並回覆
+
+---
+
 ## 已知 Bug 清單
 
 ### T12 — mTLS generateClientP12 key mismatch

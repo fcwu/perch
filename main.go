@@ -74,10 +74,10 @@ func main() {
 	telegramToken := os.Getenv("TELEGRAM_BOT_TOKEN")
 	telegramChatStr := os.Getenv("TELEGRAM_CHAT_ID")
 
-	if discordToken != "" && discordChannel != "" || telegramToken != "" && telegramChatStr != "" {
+	if discordToken != "" || telegramToken != "" && telegramChatStr != "" {
 		im = newIMManager(logger.Logger)
 	}
-	if im != nil && discordToken != "" && discordChannel != "" {
+	if im != nil && discordToken != "" {
 		discordSess = newDiscordSessionManager(discordToken, discordChannel, workdir, logger.Logger)
 		im.addAdapter(discordSess)
 	}

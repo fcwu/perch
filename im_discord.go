@@ -4,11 +4,16 @@ import (
 	"crypto/sha1"
 	"fmt"
 	"log/slog"
+	"regexp"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/bwmarrin/discordgo"
 )
+
+// mentionRe matches Discord user mention tokens like <@123456789> or <@!123456789>.
+var mentionRe = regexp.MustCompile(`<@!?\d+>`)
 
 const (
 	emojiEyes   = "👀"
@@ -41,6 +46,7 @@ type discordSession struct {
 
 	mu   sync.Mutex
 	last *discordPending
+	warm bool // true after the first message has been successfully written to the PTY
 }
 
 func newDiscordSession(channelID string, logger *slog.Logger, workdir string) *discordSession {
@@ -67,9 +73,10 @@ type DiscordSessionManager struct {
 	logger           *slog.Logger
 	workdir          string
 
-	mu       sync.Mutex
-	dgo      *discordgo.Session
-	sessions map[string]*discordSession // channelID → session
+	mu             sync.Mutex
+	dgo            *discordgo.Session
+	sessions       map[string]*discordSession // channelID → session
+	channelPrivate map[string]bool            // channelID → isPrivate, cached
 }
 
 func newDiscordSessionManager(token, channelID, workdir string, logger *slog.Logger) *DiscordSessionManager {
@@ -79,7 +86,40 @@ func newDiscordSessionManager(token, channelID, workdir string, logger *slog.Log
 		logger:           logger,
 		workdir:          workdir,
 		sessions:         make(map[string]*discordSession),
+		channelPrivate:   make(map[string]bool),
 	}
+}
+
+// isPrivateChannel returns true if the channel is not visible to @everyone.
+// The result is cached so the Discord API is called at most once per channel.
+func (d *DiscordSessionManager) isPrivateChannel(s *discordgo.Session, channelID string) bool {
+	d.mu.Lock()
+	if v, ok := d.channelPrivate[channelID]; ok {
+		d.mu.Unlock()
+		return v
+	}
+	d.mu.Unlock()
+
+	ch, err := s.Channel(channelID)
+	if err != nil {
+		d.logger.Warn("Discord isPrivateChannel: channel lookup failed", "channel", channelID, "err", err)
+		return false // treat as public on error
+	}
+	isPrivate := false
+	for _, ow := range ch.PermissionOverwrites {
+		// @everyone role has the same ID as the guild
+		if ow.ID == ch.GuildID && ow.Type == discordgo.PermissionOverwriteTypeRole {
+			if ow.Deny&discordgo.PermissionViewChannel != 0 {
+				isPrivate = true
+			}
+			break
+		}
+	}
+
+	d.mu.Lock()
+	d.channelPrivate[channelID] = isPrivate
+	d.mu.Unlock()
+	return isPrivate
 }
 
 func (d *DiscordSessionManager) Start(_ *PTYManager) error {
@@ -92,7 +132,7 @@ func (d *DiscordSessionManager) Start(_ *PTYManager) error {
 	if err != nil {
 		return err
 	}
-	session.Identify.Intents = discordgo.IntentsGuildMessages | discordgo.IntentsDirectMessages
+	session.Identify.Intents = discordgo.IntentsGuildMessages | discordgo.IntentsDirectMessages | discordgo.IntentsMessageContent
 	session.AddHandler(d.onMessage)
 	if err := session.Open(); err != nil {
 		return err
@@ -122,11 +162,49 @@ func (d *DiscordSessionManager) Stop() {
 }
 
 func (d *DiscordSessionManager) onMessage(s *discordgo.Session, m *discordgo.MessageCreate) {
+	d.logger.Debug("Discord onMessage received", "channel", m.ChannelID, "guild", m.GuildID, "author", m.Author.Username, "content", m.Content, "mentions", len(m.Mentions))
 	if m.Author == nil || m.Author.Bot {
 		return
 	}
 	if d.allowedChannelID != "" && m.ChannelID != d.allowedChannelID {
 		return
+	}
+
+	isDM := m.GuildID == ""
+	isPrivate := !isDM && d.isPrivateChannel(s, m.ChannelID)
+
+	var botID string
+	if s.State.User != nil {
+		botID = s.State.User.ID
+	}
+	d.logger.Debug("Discord onMessage routing", "isDM", isDM, "isPrivate", isPrivate, "botID", botID, "mentions", len(m.Mentions))
+
+	content := m.Content
+	if !isDM && !isPrivate {
+		// Public Guild channel: require @mention.
+		// Discord may not populate m.Mentions for bots without Message Content
+		// Intent fully active, so also check the raw content for <@BOTID> or
+		// <@!BOTID> tokens as a reliable fallback.
+		mentioned := false
+		for _, user := range m.Mentions {
+			if s.State.User != nil && user.ID == s.State.User.ID {
+				mentioned = true
+				break
+			}
+		}
+		if !mentioned && botID != "" {
+			mentioned = strings.Contains(content, "<@"+botID+">") ||
+				strings.Contains(content, "<@!"+botID+">")
+		}
+		d.logger.Debug("Discord onMessage public channel check", "mentioned", mentioned, "stateUser_nil", s.State.User == nil, "botID", botID)
+		if !mentioned {
+			return
+		}
+		// Strip all mention prefixes (e.g. "<@1234567890> ")
+		content = strings.TrimSpace(mentionRe.ReplaceAllString(content, ""))
+		if content == "" {
+			return
+		}
 	}
 
 	sess := d.getOrCreateSession(m.ChannelID)
@@ -155,8 +233,88 @@ func (d *DiscordSessionManager) onMessage(s *discordgo.Session, m *discordgo.Mes
 	if err := s.MessageReactionAdd(m.ChannelID, m.ID, emojiEyes); err != nil {
 		d.logger.Warn("Discord add reaction failed", "emoji", emojiEyes, "err", err)
 	}
-	if err := sess.pty.write([]byte(m.Content + "\r")); err != nil {
-		d.logger.Warn("Discord PTY write failed", "channel", m.ChannelID, "msgID", m.ID, "err", err)
+
+	// If this is a brand-new PTY session (empty framebuffer), Claude Code has not
+	// If Claude Code is not yet warm (first message on this session), we must
+	// wait for it to finish initialising before writing.  Writing too early
+	// causes the welcome-screen TUI to consume the '\r' terminator, discarding
+	// the message.
+	//
+	// We use sess.warm (set after the first successful write) rather than
+	// checking framebuf length to avoid a race: the 👀 reaction Discord API
+	// call above takes ~100 ms, during which the PTY goroutine may already
+	// have produced output, making framebuf non-empty before we check it.
+	sess.mu.Lock()
+	needsWarm := !sess.warm
+	sess.mu.Unlock()
+
+	writeToPTY := func() {
+		if err := sess.pty.write([]byte(content + "\r")); err != nil {
+			d.logger.Warn("Discord PTY write failed", "channel", m.ChannelID, "msgID", m.ID, "err", err)
+			return
+		}
+		sess.mu.Lock()
+		sess.warm = true
+		sess.mu.Unlock()
+	}
+	if needsWarm {
+		go func() {
+			ch, unsub := sess.pty.subscribe()
+			defer unsub()
+			deadline := time.After(120 * time.Second)
+			chunks := 0
+
+			// Phase 1: wait for the Claude Code interactive TUI to be fully
+			// rendered.  "bypass permissions" appears in the status bar only
+			// after MCPs have loaded and the readline is active, making it a
+			// reliable marker that the PTY is ready for input.
+			// We also accept the raw ❯ prompt as a fallback for non-bypass modes.
+			foundPrompt := false
+			for !foundPrompt {
+				select {
+				case data := <-ch:
+					chunks++
+					s := string(data)
+					if strings.Contains(s, "bypass permissions") || strings.Contains(s, "❯") {
+						foundPrompt = true
+						d.logger.Debug("Discord needsWarm: prompt detected", "channel", m.ChannelID, "chunk", chunks, "bytes", len(data))
+					}
+				case <-deadline:
+					d.logger.Debug("Discord needsWarm: deadline before prompt", "channel", m.ChannelID, "chunks", chunks)
+					writeToPTY()
+					return
+				}
+			}
+
+			// Phase 2: wait for output to settle (no new PTY data for 2 s).
+			// This ensures any final rendering has finished before we inject
+			// the user's message.
+			stable := time.NewTimer(2 * time.Second)
+			defer stable.Stop()
+			for {
+				select {
+				case <-ch:
+					// More output arrived — reset the stability window.
+					if !stable.Stop() {
+						select {
+						case <-stable.C:
+						default:
+						}
+					}
+					stable.Reset(2 * time.Second)
+				case <-stable.C:
+					d.logger.Debug("Discord needsWarm: stable, writing", "channel", m.ChannelID)
+					writeToPTY()
+					return
+				case <-deadline:
+					d.logger.Debug("Discord needsWarm: deadline in phase2", "channel", m.ChannelID)
+					writeToPTY()
+					return
+				}
+			}
+		}()
+	} else {
+		writeToPTY()
 	}
 }
 

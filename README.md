@@ -110,7 +110,7 @@ docker run -d \
 | `CLAUDE_CODE_NO_FLICKER` | `1` | 停用 Claude Code 的畫面閃爍動畫（預設啟用，設 `0` 可關閉） |
 | `CLAUDE_CODE_DISABLE_MOUSE` | `1` | 停用 Claude Code 的滑鼠事件捕捉（預設啟用，設 `0` 可關閉） |
 | `DISCORD_BOT_TOKEN` | — | Discord bot token（啟用 Discord 整合） |
-| `DISCORD_CHANNEL_ID` | — | 要監聽的 Discord channel ID |
+| `DISCORD_CHANNEL_ID` | — | **選填**。限制只監聽指定 channel ID；不設定時監聽所有頻道（公開頻道需 @mention，私密頻道與 DM 直接回應） |
 
 ---
 
@@ -245,12 +245,34 @@ Claude 會透過內建的 `local-schedule` skill 設定排程。排程資料存�
    - `Add Reactions`
 4. 複製頁面下方產生的 URL → 在瀏覽器開啟 → 選擇要加入的 Server → Authorize
 
-### 步驟三：取得 Channel ID
+### 步驟三：取得 Channel ID（選填）
+
+不設定 `DISCORD_CHANNEL_ID` 時，Bot 會監聽所有有權限的頻道，行為如下：
+
+| 頻道類型 | 觸發方式 |
+|----------|----------|
+| 公開頻道（@everyone 可見） | 需要 @mention Bot |
+| 私密頻道（@everyone 不可見） | 直接對話，不需 @mention |
+| DM（私訊） | 直接對話，不需 @mention |
+
+如果只想監聽單一頻道：
 
 1. Discord 開啟 **User Settings → Advanced** → 啟用 **Developer Mode**
 2. 右鍵點擊要監聽的 channel → **Copy Channel ID** → 存為 `DISCORD_CHANNEL_ID`
 
 ### 步驟四：啟動
+
+**Open-channel 模式**（推薦）：
+
+```bash
+docker run -d \
+  ...
+  -e DISCORD_BOT_TOKEN=your_bot_token \
+  ...
+  ghcr.io/fcwu/perch:latest
+```
+
+**指定單一頻道模式**（向下相容）：
 
 ```bash
 docker run -d \
