@@ -57,45 +57,41 @@ curl -v https://localhost:8080
 
 ---
 
-## T05 — 排程器 GET
+## T05 — 排程器 列出
 
-**目的**：`GET /schedule` 回傳正確 JSON 格式。
+**目的**：確認排程資料以 JSONL 格式儲存，可直接讀取。
 
-**步驟**：
-```bash
-curl -s http://localhost:8080/schedule
-```
+**步驟**：在 terminal 中詢問 Claude：「目前有哪些排程？」
 
-**預期**：回傳 JSON 陣列（空陣列或現有 jobs），HTTP 200。
-
----
-
-## T06 — 排程器 POST
-
-**目的**：`POST /schedule` 新增 job 並回傳 ID。
-
-**步驟**：
-```bash
-curl -s -X POST http://localhost:8080/schedule \
-  -H "Content-Type: application/json" \
-  -d '{"hour": 9, "minute": 0, "message": "test job", "repeat": true}'
-```
-
-**預期**：HTTP 201，`GET /schedule` 後可看到新 job 含 `id` 欄位。
+**預期**：
+- Claude 執行 `cat .perch/schedules.jsonl`（或顯示 no schedules）
+- 回傳的每一行均為合法 JSON object，含 `id`、`hour`、`minute`、`message` 欄位
 
 ---
 
-## T07 — 排程器 DELETE
+## T06 — 排程器 新增
 
-**目的**：`DELETE /schedule/:id` 刪除指定 job。
+**目的**：確認透過自然語言可新增排程，Perch 立即偵測並載入。
 
-**步驟**：
-```bash
-curl -s -X DELETE http://localhost:8080/schedule/<id>
-curl -s http://localhost:8080/schedule
-```
+**步驟**：在 terminal 中告訴 Claude：「每天早上 9 點提醒我喝水，重複執行」
 
-**預期**：DELETE 回傳 HTTP 204，GET 後該 job 消失。
+**預期**：
+- Claude 使用 `local-schedule` skill，append 一行 JSON 到 `.perch/schedules.jsonl`
+- Perch log 出現 `schedule added id=... hour=9 minute=0 ...`
+- `cat .perch/schedules.jsonl` 可看到新 job 含 `id` 欄位
+
+---
+
+## T07 — 排程器 刪除
+
+**目的**：確認透過自然語言可刪除排程，Perch 立即偵測並移除。
+
+**步驟**：在 terminal 中告訴 Claude：「刪除剛才那個喝水提醒」
+
+**預期**：
+- Claude 找到對應 `id`，從 `.perch/schedules.jsonl` 移除該行
+- Perch log 出現 `schedule deleted id=...`
+- `cat .perch/schedules.jsonl` 該 job 消失
 
 ---
 
@@ -468,20 +464,20 @@ docker run -d \
 
 ## T27 — 排程資料存入 workspace 隱藏目錄
 
-**目的**：排程資料儲存在 `workspace/.perch/schedules.json`，不影響工作區內容，重啟後不遺失。
+**目的**：排程資料儲存在 `workspace/.perch/schedules.jsonl`，不影響工作區內容，重啟後不遺失。
 
 **步驟**：
-1. 啟動 container 並設定一個排程（透過 Claude 自然語言或 API）
+1. 啟動 container，透過自然語言告訴 Claude 設定一個排程
 2. 確認檔案位置：
    ```bash
    ls /your/workspace/.perch/
-   cat /your/workspace/.perch/schedules.json
+   cat /your/workspace/.perch/schedules.jsonl
    ```
 3. 重啟 container
 4. 再次確認排程仍存在
 
 **預期**：
-- 第一次：`.perch/schedules.json` 存在，內含剛設定的 job
+- 第一次：`.perch/schedules.jsonl` 存在，內含剛設定的 job
 - 重啟後：同一個 job 仍在
 
 ---
@@ -575,13 +571,7 @@ ls -la /your/workspace/test-owner.txt
 **前置條件**：同 T18，Discord Bot 已連線。
 
 **步驟**：
-1. 在 Discord channel 設定一個一次性排程（`repeat: false`），時間設為當前時間後 1 分鐘：
-   ```bash
-   TARGET="discord:<your_channel_id>"
-   curl -s -X POST http://localhost:8080/schedule \
-     -H "Content-Type: application/json" \
-     -d "{\"hour\": HH, \"minute\": MM, \"message\": \"請說一句簡短的鼓勵\", \"repeat\": false, \"target\": \"$TARGET\"}"
-   ```
+1. 在 Discord channel 傳送訊息，請 Claude 建立一個一次性排程（`repeat: false`），時間設為當前時間後 1 分鐘，例如：「一分鐘後說一句鼓勵的話，只說一次」
 2. 等待觸發時間到來
 
 **預期**：
@@ -631,4 +621,12 @@ time=... level=INFO msg="perch listening" addr=:8080 auth=none built=2026-04-12T
 
 ## 已知 Bug 清單
 
-無。
+### T12 — mTLS generateClientP12 key mismatch
+
+`AUTH_MODE=mtls` 下執行 `/bootstrap`，`tls.go` 的 `generateClientP12` 內部產生 RSA key pair 後，cert 與 private key 不匹配，導致 TLS handshake 失敗：
+
+```
+x509: provided PrivateKey doesn't match parent's PublicKey
+```
+
+影響範圍：T12 整個流程無法完成。其他認證模式（none、password）不受影響。
