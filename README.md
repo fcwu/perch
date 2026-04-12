@@ -14,15 +14,11 @@ Perch 是一個輕量的 web terminal server，讓你不需要 SSH，直接用�
 
 ![Web Terminal 排程設定](docs/images/schedule-setup.png)
 
----
-
 ### Web Terminal 監看 Discord
 
 瀏覽器內切換 tab，即時觀看 Discord channel 的 Claude PTY 輸出。
 
 ![Web Terminal 監看 Discord](docs/images/discord-tab.png)
-
----
 
 ### Discord 排程觸發
 
