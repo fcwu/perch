@@ -45,6 +45,13 @@ if [ -n "$WORKDIR" ]; then
         PERCH_MERGE_TARGET="$WORKDIR/.claude/settings.json" \
         node /app/perch-claude/merge-settings.js
     fi
+
+    # Fix ownership of anything created above under .claude/ (mkdir/cp/node all
+    # run as root).  Only applies when PUID is set; harmless if .claude/ doesn't
+    # exist yet.
+    if [ -n "$PUID" ] && [ -d "$WORKDIR/.claude" ]; then
+        chown -R "${PUID}:${PGID}" "$WORKDIR/.claude"
+    fi
 fi
 
 exec /app/perch
