@@ -15,6 +15,13 @@ if [ -z "$WORKDIR" ] && [ -d /workspace ]; then
     WORKDIR="/workspace"
 fi
 
+if [ -n "$WORKDIR" ] && [ -n "$PUID" ]; then
+    # Pre-create .perch with PUID:PGID ownership so the scheduler's MkdirAll
+    # is a no-op and the directory is writable by the non-root claude process.
+    mkdir -p "$WORKDIR/.perch"
+    chown "${PUID}:${PGID}" "$WORKDIR/.perch"
+fi
+
 if [ -n "$WORKDIR" ]; then
     # Copy perch-bundled skills into $WORKDIR/.claude/skills/ (no-overwrite).
     # Claude Code discovers skills from both ~/.claude/skills/ (global) and
