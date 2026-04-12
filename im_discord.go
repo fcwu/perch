@@ -164,12 +164,18 @@ func (d *DiscordSessionManager) Notify(event HookEvent, lastText string) error {
 			target = sess
 			break
 		}
-		// Claim an unassigned session: user-triggered (has pending message) or
-		// scheduler-triggered (no pending message but Claude is running in this PTY).
+		// Claim an unassigned session only when there is a pending message
+		// (user-triggered via Discord or scheduler-triggered via OnScheduledFire).
+		// This prevents main-PTY hook events from being routed to Discord.
 		if sess.sessionUUID == "" {
-			sess.sessionUUID = event.SessionID
-			target = sess
-			break
+			sess.mu.Lock()
+			hasPending := sess.last != nil
+			sess.mu.Unlock()
+			if hasPending {
+				sess.sessionUUID = event.SessionID
+				target = sess
+				break
+			}
 		}
 	}
 	dgo := d.dgo
