@@ -29,6 +29,7 @@ type Scheduler struct {
 	jobs        map[string]*Job
 	pty         *PTYManager
 	ptyLookup   func(target string) *PTYManager // optional; routes jobs with a non-empty Target
+	onFire      func(target, message string)    // optional; called before writing to the PTY (e.g. Discord header)
 	savePath    string
 }
 
@@ -123,6 +124,9 @@ func (s *Scheduler) run() {
 					}
 				}
 				if pm != nil {
+					if s.onFire != nil && job.Target != "" {
+						s.onFire(job.Target, job.Message)
+					}
 					pm.write([]byte(job.Message + "\r"))
 				}
 				if !job.Repeat {

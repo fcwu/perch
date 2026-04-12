@@ -60,6 +60,17 @@ Check `id` is present — if the response contains an `id` field, the schedule w
 | `minute` | 0–59 | Server local time |
 | `message` | string | Task prompt sent to Claude Code (newline appended automatically) |
 | `repeat` | bool | `true` = daily, `false` = run once then auto-delete |
+| `target` | string | **Required when running inside a Discord session.** Use the value of `$PERCH_SESSION_TARGET`. Omit (or leave empty) for the main web PTY. |
+
+**Important — Discord sessions:** If the env var `PERCH_SESSION_TARGET` is set (it is always set inside a Discord PTY), you **must** include `"target": "$PERCH_SESSION_TARGET"` in the POST body so the scheduled message fires back to this Discord channel, not the main session.
+
+```bash
+# Inside a Discord PTY — read the target from the environment
+TARGET="${PERCH_SESSION_TARGET}"
+curl -s -X POST "$BASE/schedule" \
+  -H "Content-Type: application/json" \
+  -d "{\"hour\": 9, \"minute\": 0, \"message\": \"幫我做今天的 daily standup 摘要\", \"repeat\": true, \"target\": \"$TARGET\"}"
+```
 
 ### Delete schedule
 
@@ -72,10 +83,20 @@ Returns 204 No Content on success.
 ## Full example — Daily standup at 09:00
 
 ```bash
+# Detect whether we are inside a Discord session
+TARGET="${PERCH_SESSION_TARGET:-}"
+
+# Build the JSON body (include target only when non-empty)
+if [ -n "$TARGET" ]; then
+  BODY="{\"hour\": 9, \"minute\": 0, \"message\": \"幫我做今天的 daily standup 摘要\", \"repeat\": true, \"target\": \"$TARGET\"}"
+else
+  BODY='{"hour": 9, "minute": 0, "message": "幫我做今天的 daily standup 摘要", "repeat": true}'
+fi
+
 # Create
 curl -s -X POST "$BASE/schedule" \
   -H "Content-Type: application/json" \
-  -d '{"hour": 9, "minute": 0, "message": "幫我做今天的 daily standup 摘要", "repeat": true}'
+  -d "$BODY"
 
 # Verify
 curl -s "$BASE/schedule"

@@ -13,7 +13,7 @@ COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
 COPY --from=frontend /app/frontend/dist ./frontend/dist
-RUN CGO_ENABLED=0 GOOS=linux go build -o perch .
+RUN CGO_ENABLED=0 GOOS=linux go build -ldflags "-X main.buildTime=$(date -u +%Y-%m-%dT%H:%M:%SZ)" -o perch .
 
 # Stage 3: Runtime
 FROM ubuntu:24.04

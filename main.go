@@ -11,6 +11,9 @@ import (
 	"syscall"
 )
 
+// buildTime is injected at build time via -ldflags "-X main.buildTime=..."
+var buildTime = "unknown"
+
 // claudeArgs parses CLAUDE_ARGS into a slice of CLI arguments for the claude
 // process. Example: CLAUDE_ARGS="--model claude-opus-4-5 --dangerously-skip-permissions"
 func claudeArgs() []string {
@@ -90,6 +93,7 @@ func main() {
 	}
 	if discordSess != nil {
 		sched.ptyLookup = discordSess.PTYForTarget
+		sched.onFire = discordSess.OnScheduledFire
 	}
 
 	// --- Auth ---
@@ -158,7 +162,7 @@ func main() {
 	defer cancel()
 
 	go func() {
-		logger.Info("perch listening", "addr", addr, "auth", authMode)
+		logger.Info("perch listening", "addr", addr, "auth", authMode, "built", buildTime)
 		if err := httpSrv.Serve(finalListener); err != nil && err != http.ErrServerClosed {
 			logger.Error("server error", "err", err)
 		}

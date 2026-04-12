@@ -164,16 +164,12 @@ func (d *DiscordSessionManager) Notify(event HookEvent, lastText string) error {
 			target = sess
 			break
 		}
-		// Claim an unassigned session that has a message pending.
+		// Claim an unassigned session: user-triggered (has pending message) or
+		// scheduler-triggered (no pending message but Claude is running in this PTY).
 		if sess.sessionUUID == "" {
-			sess.mu.Lock()
-			hasPending := sess.last != nil
-			sess.mu.Unlock()
-			if hasPending {
-				sess.sessionUUID = event.SessionID
-				target = sess
-				break
-			}
+			sess.sessionUUID = event.SessionID
+			target = sess
+			break
 		}
 	}
 	dgo := d.dgo
@@ -195,8 +191,28 @@ func (sess *discordSession) notify(s *discordgo.Session, event HookEvent, lastTe
 	sess.mu.Lock()
 	pending := sess.last
 	sess.mu.Unlock()
-	if s == nil || pending == nil {
+	if s == nil {
 		return nil
+	}
+
+	// Scheduler-triggered (no pending user message): only handle Stop,
+	// send response directly to the channel without a reply reference.
+	if pending == nil {
+		if event.EventName != "Stop" {
+			return nil
+		}
+		text := lastText
+		if text == "" {
+			text = "✓ Claude finished."
+		}
+		if len(text) > 1900 {
+			text = text[:1900] + "\n…(truncated)"
+		}
+		_, err := s.ChannelMessageSend(sess.channelID, text)
+		if err != nil {
+			logger.Warn("Discord send autonomous reply failed", "err", err)
+		}
+		return err
 	}
 
 	switch event.EventName {
@@ -262,6 +278,38 @@ func (d *DiscordSessionManager) SubscribeSession(channelID string) (<-chan []byt
 	}
 	ch, unsub := sess.pty.subscribe()
 	return ch, unsub, true
+}
+
+// OnScheduledFire is called by the scheduler before writing a job message to a Discord PTY.
+// It sends a header message to Discord so the scheduled run is visible, and stores the
+// message ID as sess.last so Claude's reply threads back to it.
+func (d *DiscordSessionManager) OnScheduledFire(target, message string) {
+	const prefix = "discord:"
+	if !strings.HasPrefix(target, prefix) {
+		return
+	}
+	channelID := target[len(prefix):]
+
+	d.mu.Lock()
+	dgo := d.dgo
+	d.mu.Unlock()
+	if dgo == nil {
+		return
+	}
+
+	sent, err := dgo.ChannelMessageSend(channelID, "📅 local schedule > "+message)
+	if err != nil {
+		d.logger.Warn("Discord schedule header send failed", "err", err)
+		return
+	}
+
+	sess := d.getOrCreateSession(channelID)
+	sess.mu.Lock()
+	sess.last = &discordPending{
+		MessageID: sent.ID,
+		ChannelID: channelID,
+	}
+	sess.mu.Unlock()
 }
 
 // PTYForTarget returns the PTYManager for a session target string (e.g. "discord:<channelID>").
