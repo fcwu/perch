@@ -164,8 +164,12 @@ func (s *Scheduler) reloadAndDiff() {
 	}
 	newJobs, err := readJobsFromFile(s.savePath)
 	if err != nil {
-		s.logger.Warn("schedule reload: cannot read file", "err", err)
-		return
+		if os.IsNotExist(err) {
+			newJobs = []Job{} // no file = no schedules
+		} else {
+			s.logger.Warn("schedule reload: cannot read file", "err", err)
+			return
+		}
 	}
 
 	// Auto-assign IDs to any jobs that lack one.

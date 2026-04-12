@@ -12,10 +12,12 @@ Perch's built-in scheduler injects a line of text into the active PTY at a speci
 Schedules are stored as **JSONL** (one JSON object per line) in:
 
 ```
-$WORKDIR/.perch/schedules.jsonl
+.perch/schedules.jsonl          # relative to Claude's working directory
 ```
 
 Perch watches this file with `fsnotify`. Any time you write to it — add a line, remove a line, or change a field — Perch reloads immediately and logs what changed (`added` / `deleted` / `modified`). **There is no HTTP API.** All schedule management is done by reading and writing this file.
+
+If the file does not exist, there are no schedules.
 
 ## File format
 
@@ -59,7 +61,7 @@ echo $PERCH_SESSION_TARGET   # e.g. "discord:1492464386219184200"
 ### List schedules
 
 ```bash
-cat "$WORKDIR/.perch/schedules.jsonl"
+cat .perch/schedules.jsonl 2>/dev/null || echo "(no schedules)"
 ```
 
 ### Add a schedule
@@ -77,7 +79,7 @@ else
   LINE='{"hour":9,"minute":0,"message":"幫我做今天的 daily standup 摘要","repeat":true}'
 fi
 
-echo "$LINE" >> "$WORKDIR/.perch/schedules.jsonl"
+echo "$LINE" >> ".perch/schedules.jsonl"
 ```
 
 Perch detects the change and logs: `schedule added id=... hour=9 minute=0 ...`
@@ -88,8 +90,8 @@ Remove the line with the matching `id`:
 
 ```bash
 # Remove the job with id "a1b2c3d4"
-grep -v '"id":"a1b2c3d4"' "$WORKDIR/.perch/schedules.jsonl" > /tmp/_sched.jsonl \
-  && mv /tmp/_sched.jsonl "$WORKDIR/.perch/schedules.jsonl"
+grep -v '"id":"a1b2c3d4"' ".perch/schedules.jsonl" > /tmp/_sched.jsonl \
+  && mv /tmp/_sched.jsonl ".perch/schedules.jsonl"
 ```
 
 Perch detects the change and logs: `schedule deleted id=a1b2c3d4 ...`
@@ -105,12 +107,12 @@ TARGET="${PERCH_SESSION_TARGET:-}"
 
 if [ -n "$TARGET" ]; then
   echo "{\"hour\":9,\"minute\":0,\"message\":\"幫我做今天的 daily standup 摘要\",\"repeat\":true,\"target\":\"$TARGET\"}" \
-    >> "$WORKDIR/.perch/schedules.jsonl"
+    >> ".perch/schedules.jsonl"
 else
   echo '{"hour":9,"minute":0,"message":"幫我做今天的 daily standup 摘要","repeat":true}' \
-    >> "$WORKDIR/.perch/schedules.jsonl"
+    >> ".perch/schedules.jsonl"
 fi
 
 # Verify
-cat "$WORKDIR/.perch/schedules.jsonl"
+cat ".perch/schedules.jsonl"
 ```
