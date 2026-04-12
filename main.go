@@ -61,9 +61,10 @@ func main() {
 	go pm.start("claude", claudeArgs(), workdir, logger.Logger)
 
 	// --- Scheduler ---
-	sched := newScheduler(pm, workdir)
+	sched := newScheduler(pm, workdir, logger.Logger)
 	sched.loadFromFile()
 	go sched.run()
+	go sched.watch()
 
 	// --- IM bots (optional) ---
 	var im *IMManager
@@ -107,7 +108,7 @@ func main() {
 	if discordSess != nil {
 		sessProvider = discordSess
 	}
-	srv := newServer(pm, auth, sched, im, sessProvider, logger.Logger)
+	srv := newServer(pm, auth, im, sessProvider, logger.Logger)
 
 	// Apply rate limiting to sensitive endpoints only
 	sensitivePaths := map[string]bool{"/login": true, "/bootstrap": true}

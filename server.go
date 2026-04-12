@@ -16,18 +16,17 @@ var upgrader = websocket.Upgrader{
 type Server struct {
 	pty      *PTYManager
 	auth     *AuthMiddleware
-	sched    *Scheduler
 	im       *IMManager
 	sessions SessionProvider
 	logger   *slog.Logger
 	mux      *http.ServeMux
 }
 
-func newServer(pm *PTYManager, auth *AuthMiddleware, sched *Scheduler, im *IMManager, sessions SessionProvider, logger *slog.Logger) *Server {
+func newServer(pm *PTYManager, auth *AuthMiddleware, im *IMManager, sessions SessionProvider, logger *slog.Logger) *Server {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	s := &Server{pty: pm, auth: auth, sched: sched, im: im, sessions: sessions, logger: logger, mux: http.NewServeMux()}
+	s := &Server{pty: pm, auth: auth, im: im, sessions: sessions, logger: logger, mux: http.NewServeMux()}
 	s.mux.HandleFunc("/ws", s.handleWS)
 	s.mux.HandleFunc("/input", s.handleInput)
 	s.mux.HandleFunc("/sessions", s.handleSessions)
@@ -38,10 +37,6 @@ func newServer(pm *PTYManager, auth *AuthMiddleware, sched *Scheduler, im *IMMan
 	s.mux.Handle("/hook", newHookHandler(im))
 	if auth != nil && auth.mode == "password" {
 		s.mux.HandleFunc("/login", auth.handleLogin)
-	}
-	if sched != nil {
-		s.mux.Handle("/schedule", sched)
-		s.mux.Handle("/schedule/", sched)
 	}
 	distFS, err := fs.Sub(frontendFS, "frontend/dist")
 	if err == nil {
