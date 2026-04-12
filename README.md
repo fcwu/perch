@@ -6,6 +6,32 @@ Perch 是一個輕量的 web terminal server，讓你不需要 SSH，直接用�
 
 ---
 
+## 亮點
+
+### Web Terminal 排程
+
+用自然語言告訴 Claude 設排程，直接生效。排程以 JSONL 存在 workspace，容器重啟不遺失。
+
+![Web Terminal 排程設定](docs/images/schedule-setup.png)
+
+---
+
+### Web Terminal 監看 Discord
+
+瀏覽器內切換 tab，即時觀看 Discord channel 的 Claude PTY 輸出。
+
+![Web Terminal 監看 Discord](docs/images/discord-tab.png)
+
+---
+
+### Discord 排程觸發
+
+排程在指定時間自動觸發，Discord channel 先出現來源提示，Claude 回覆以 thread 形式附在下方。
+
+![Discord 排程回覆](docs/images/discord-reply.png)
+
+---
+
 ## 功能
 
 - **完整 terminal**：基於 xterm.js，支援顏色、滾動、可點擊的 URL
