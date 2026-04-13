@@ -111,6 +111,7 @@ docker run -d \
 | `CLAUDE_CODE_DISABLE_MOUSE` | `1` | 停用 Claude Code 的滑鼠事件捕捉（預設啟用，設 `0` 可關閉） |
 | `DISCORD_BOT_TOKEN` | — | Discord bot token（啟用 Discord 整合） |
 | `DISCORD_CHANNEL_ID` | — | **選填**。限制只監聽指定 channel ID；不設定時監聽所有頻道（公開頻道需 @mention，私密頻道與 DM 直接回應） |
+| `DISCORD_ALLOWED_USER_IDS` | — | **選填**。逗號分隔的 Discord 用戶 ID 白名單，限制哪些用戶可透過 DM 使用 Bot；**未設定時 DM 功能完全關閉**（安全預設值） |
 
 ---
 
@@ -253,7 +254,12 @@ Claude 會透過內建的 `local-schedule` skill 設定排程。排程資料存�
 |----------|----------|
 | 公開頻道（@everyone 可見） | 需要 @mention Bot |
 | 私密頻道（@everyone 不可見） | 直接對話，不需 @mention |
-| DM（私訊） | 直接對話，不需 @mention |
+| DM（私訊） | 需設定 `DISCORD_ALLOWED_USER_IDS`，未設定時 **DM 功能關閉** |
+
+> **安全提示：** DM 功能預設關閉。任何知道 Bot 用戶 ID 的人都可以傳送 DM，若未限制則任何人皆可控制 Claude Code。如需開啟 DM，請透過 `DISCORD_ALLOWED_USER_IDS` 明確指定允許的用戶 ID：
+> ```
+> -e DISCORD_ALLOWED_USER_IDS=你的Discord用戶ID
+> ```
 
 如果只想監聽單一頻道：
 

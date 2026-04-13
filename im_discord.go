@@ -68,10 +68,11 @@ type SessionView struct {
 
 // DiscordSessionManager listens on Discord and routes each channel to its own PTY.
 type DiscordSessionManager struct {
-	token            string
-	allowedChannelID string
-	logger           *slog.Logger
-	workdir          string
+	token              string
+	allowedChannelID   string
+	allowedDMUserIDs   map[string]struct{} // nil/empty = DM disabled
+	logger             *slog.Logger
+	workdir            string
 
 	mu             sync.Mutex
 	dgo            *discordgo.Session
@@ -79,10 +80,15 @@ type DiscordSessionManager struct {
 	channelPrivate map[string]bool            // channelID → isPrivate, cached
 }
 
-func newDiscordSessionManager(token, channelID, workdir string, logger *slog.Logger) *DiscordSessionManager {
+func newDiscordSessionManager(token, channelID string, allowedDMUsers []string, workdir string, logger *slog.Logger) *DiscordSessionManager {
+	dmIDs := make(map[string]struct{}, len(allowedDMUsers))
+	for _, id := range allowedDMUsers {
+		dmIDs[id] = struct{}{}
+	}
 	return &DiscordSessionManager{
 		token:            token,
 		allowedChannelID: channelID,
+		allowedDMUserIDs: dmIDs,
 		logger:           logger,
 		workdir:          workdir,
 		sessions:         make(map[string]*discordSession),
@@ -171,6 +177,12 @@ func (d *DiscordSessionManager) onMessage(s *discordgo.Session, m *discordgo.Mes
 	}
 
 	isDM := m.GuildID == ""
+	if isDM {
+		// DM is deny-by-default: only respond if the sender is in the allowlist.
+		if _, ok := d.allowedDMUserIDs[m.Author.ID]; !ok {
+			return
+		}
+	}
 	isPrivate := !isDM && d.isPrivateChannel(s, m.ChannelID)
 
 	var botID string

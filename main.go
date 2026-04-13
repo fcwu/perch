@@ -71,14 +71,22 @@ func main() {
 	var discordSess *DiscordSessionManager
 	discordToken := os.Getenv("DISCORD_BOT_TOKEN")
 	discordChannel := os.Getenv("DISCORD_CHANNEL_ID")
+	discordAllowedDMRaw := os.Getenv("DISCORD_ALLOWED_USER_IDS")
 	telegramToken := os.Getenv("TELEGRAM_BOT_TOKEN")
 	telegramChatStr := os.Getenv("TELEGRAM_CHAT_ID")
+
+	var discordAllowedDMUsers []string
+	for _, id := range strings.Split(discordAllowedDMRaw, ",") {
+		if id := strings.TrimSpace(id); id != "" {
+			discordAllowedDMUsers = append(discordAllowedDMUsers, id)
+		}
+	}
 
 	if discordToken != "" || telegramToken != "" && telegramChatStr != "" {
 		im = newIMManager(logger.Logger)
 	}
 	if im != nil && discordToken != "" {
-		discordSess = newDiscordSessionManager(discordToken, discordChannel, workdir, logger.Logger)
+		discordSess = newDiscordSessionManager(discordToken, discordChannel, discordAllowedDMUsers, workdir, logger.Logger)
 		im.addAdapter(discordSess)
 	}
 	if im != nil && telegramToken != "" && telegramChatStr != "" {
