@@ -1,6 +1,7 @@
 package main
 
 import (
+	"log/slog"
 	"regexp"
 	"strings"
 	"testing"
@@ -133,5 +134,30 @@ func TestExtractReplyFromSnapshot(t *testing.T) {
 	want := "Thinking...\nHere is line one\nHere is line two"
 	if got != want {
 		t.Fatalf("want %q, got %q", want, got)
+	}
+}
+
+func TestWriteSessionNotFound(t *testing.T) {
+	mgr := newDiscordSessionManager(AgentRuntime{}, "tok", "", nil, t.TempDir(), slog.Default())
+	err := mgr.WriteSession("nonexistent", []byte("hello"))
+	if err == nil {
+		t.Fatal("expected error for missing session, got nil")
+	}
+}
+
+func TestWriteSessionExists(t *testing.T) {
+	mgr := newDiscordSessionManager(AgentRuntime{}, "tok", "", nil, t.TempDir(), slog.Default())
+	// Insert a session with a no-op PTY (ptmx nil) to verify the path is reached.
+	mgr.mu.Lock()
+	mgr.sessions["ch1"] = &discordSession{pty: newPTYManager()}
+	mgr.mu.Unlock()
+	// PTY not started → write returns errPTYNotReady, not "session not found".
+	err := mgr.WriteSession("ch1", []byte("hello"))
+	if err == nil {
+		// Would only succeed if PTY is running; in test it returns errPTYNotReady.
+		t.Fatal("expected error from unstarted PTY, got nil")
+	}
+	if err.Error() == "session not found: ch1" {
+		t.Fatalf("got session-not-found but session was inserted: %v", err)
 	}
 }

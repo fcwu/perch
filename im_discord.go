@@ -911,3 +911,14 @@ func (d *DiscordSessionManager) ResizeSession(channelID string, cols, rows uint1
 		sess.pty.resize(cols, rows)
 	}
 }
+
+// WriteSession writes data to the PTY stdin for the given Discord channel.
+func (d *DiscordSessionManager) WriteSession(channelID string, data []byte) error {
+	d.mu.Lock()
+	sess, ok := d.sessions[channelID]
+	d.mu.Unlock()
+	if !ok {
+		return fmt.Errorf("session not found: %s", channelID)
+	}
+	return sess.pty.write(data)
+}

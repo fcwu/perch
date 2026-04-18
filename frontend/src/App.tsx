@@ -176,16 +176,12 @@ export default function App() {
       term.write(new Uint8Array(e.data as ArrayBuffer))
     }
 
-    // Main PTY is writable; Discord session tabs are read-only
-    let disposeOnData: (() => void) | undefined
-    if (tab === null) {
-      const disposable = term.onData((data) => {
-        if (ws.readyState === WebSocket.OPEN) {
-          ws.send(new TextEncoder().encode(data))
-        }
-      })
-      disposeOnData = () => disposable.dispose()
-    }
+    const disposable = term.onData((data) => {
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send(new TextEncoder().encode(data))
+      }
+    })
+    const disposeOnData = () => disposable.dispose()
 
     const sendResize = () => {
       fitAddon.fit()

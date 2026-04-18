@@ -153,7 +153,7 @@ func (s *Server) handleSessionWS(w http.ResponseWriter, r *http.Request) {
 	}
 	defer conn.Close()
 
-	// Handle resize messages; discard all other input.
+	// Handle resize messages; forward all other input to the PTY.
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
@@ -169,6 +169,10 @@ func (s *Server) handleSessionWS(w http.ResponseWriter, r *http.Request) {
 			}
 			if json.Unmarshal(msg, &resize) == nil && resize.Type == "resize" {
 				s.sessions.ResizeSession(channelID, resize.Cols, resize.Rows)
+			} else {
+				if err := s.sessions.WriteSession(channelID, msg); err != nil {
+					s.logger.Warn("ws session write", "channel", channelID, "err", err)
+				}
 			}
 		}
 	}()

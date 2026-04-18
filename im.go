@@ -41,6 +41,7 @@ type SessionProvider interface {
 	ListSessions() []SessionView
 	SubscribeSession(channelID string) (<-chan []byte, func(), bool)
 	ResizeSession(channelID string, cols, rows uint16)
+	WriteSession(channelID string, data []byte) error
 }
 
 // IMManager owns all adapters and dispatches hook events.
