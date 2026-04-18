@@ -67,7 +67,7 @@ func isGitRepo(path string) bool {
 
 // isDirty reports whether the git repo at path has uncommitted changes.
 func isDirty(path string) (bool, error) {
-	out, err := runGit(context.Background(), path, "status", "--porcelain")
+	out, err := runGit(context.Background(), path, "status", "--porcelain", "--ignore-submodules")
 	if err != nil {
 		return false, err
 	}
