@@ -826,6 +826,164 @@ docker run --rm \
 
 ---
 
+## T44 — Workspace Git Sync：功能停用（預設行為）
+
+**目的**：確認未設定 `WORKSPACE_GIT_SYNC_ENABLED` 時，sync loop 不啟動，log 中無任何 `workspace_sync` 訊息。
+
+**步驟**：
+```bash
+# workspace 為一個 git repo，但不設定 sync env var
+docker run --rm \
+  -e AUTH_MODE=none \
+  -v /your/git-workspace:/workspace \
+  -p 8080:8080 \
+  perch:local 2>&1 | grep workspace_sync
+```
+
+**預期**：
+- grep 無任何輸出（sync loop 未啟動）
+- 啟動 log 中無 `workspace_sync:` 前綴的訊息
+
+---
+
+## T45 — Workspace Git Sync：HTTPS remote 正常 pull + push
+
+**目的**：確認 HTTPS remote + token 設定後，定時 sync 能成功 pull 和 push。
+
+**前置條件**：
+- `/workspace` 是一個 git repo，remote 為 HTTPS（如 `https://github.com/user/repo.git`）
+- Remote 上有新的 commit（手動在另一機器 push 一個測試 commit）
+
+**步驟**：
+```bash
+docker run --rm \
+  -e AUTH_MODE=none \
+  -e WORKSPACE_GIT_SYNC_ENABLED=true \
+  -e WORKSPACE_GIT_SYNC_INTERVAL=15 \
+  -e WORKSPACE_GIT_TOKEN=<your_github_pat> \
+  -v /your/git-workspace:/workspace \
+  -p 8080:8080 \
+  perch:local 2>&1 | grep workspace_sync
+```
+
+**預期**：
+- Log 出現 `workspace_sync: injecting git token for host github.com`（不含 token 值）
+- Log 出現 `workspace_sync: git credential helper set to store`
+- Log 出現 `workspace_sync: credential injection complete`
+- 15 秒後出現 `workspace_sync: starting sync`
+- Log 出現 `workspace_sync: pull output: ...`（含遠端 commit 資訊）
+- Log 出現 `workspace_sync: push output: ...`
+- Log 出現 `workspace_sync: sync complete`
+- `git log` 在 workspace 中顯示遠端的新 commit 已拉下
+
+**反向驗證（不設 token）**：
+- Log 出現 `workspace_sync: no WORKSPACE_GIT_TOKEN set, skipping credential injection`
+- pull/push 是否成功取決於系統 credential（可能失敗，但不 panic）
+
+---
+
+## T46 — Workspace Git Sync：rebase 衝突偵測與通知
+
+**目的**：確認衝突時系統 abort rebase、記錄完整 log，並發 Discord 通知。
+
+**前置條件**：
+- `/workspace` 是一個 git repo，已設定 HTTPS remote + token
+- 已設定 `WORKSPACE_GIT_SYNC_NOTIFY_CHANNEL=<discord_channel_id>`
+- 準備在遠端和本地修改同一行以製造衝突
+
+**步驟**：
+1. 在 workspace 的某個檔案某行寫入「version A」並 commit（但不 push）
+2. 在遠端同一行寫入「version B」並 push（模擬另一使用者）
+3. 啟動 perch 並等待 sync tick
+
+```bash
+docker run --rm \
+  -e AUTH_MODE=none \
+  -e WORKSPACE_GIT_SYNC_ENABLED=true \
+  -e WORKSPACE_GIT_SYNC_INTERVAL=15 \
+  -e WORKSPACE_GIT_TOKEN=<token> \
+  -e WORKSPACE_GIT_SYNC_NOTIFY_CHANNEL=<channel_id> \
+  -e DISCORD_BOT_TOKEN=<bot_token> \
+  -v /your/git-workspace:/workspace \
+  -p 8080:8080 \
+  perch:local 2>&1 | grep workspace_sync
+```
+
+**預期（log）**：
+- `workspace_sync: starting sync`
+- `workspace_sync: pull output: ...CONFLICT...` 或 `workspace_sync: rebase in progress, aborting`
+- `workspace_sync: rebase abort output: <git output>`
+- `workspace_sync: rebase abort succeeded`（或 `failed`）
+- Discord 指定 channel 收到 `⚠️ git sync conflict` 訊息
+
+**Debounce 驗證**：等待第二個 sync tick（15 秒後），確認 Discord 不再發第二則相同通知。
+
+---
+
+## T47 — Workspace Git Sync：push 失敗通知
+
+**目的**：確認 push 被 remote reject 時，log 有完整錯誤輸出且 Discord 收到通知。
+
+**前置條件**：同 T46，但不製造 rebase 衝突，改用 `--force-with-lease` 在遠端 force push，讓 workspace 的 push 被拒絕。
+
+**步驟**：
+1. 在遠端執行 `git push --force` 強制移動 branch HEAD
+2. 啟動 perch 等待 sync tick
+
+**預期**：
+- `workspace_sync: push failed: ...` 出現在 log，含 git 的 stderr（`! [rejected]` 或 `Updates were rejected`）
+- Discord channel 收到 `⚠️ git sync: git push failed` 通知
+
+---
+
+## T48 — Workspace Git Sync：SSH remote 忽略 token
+
+**目的**：確認 SSH remote 下設定 `WORKSPACE_GIT_TOKEN` 不會影響行為，且 log 有 warning。
+
+**前置條件**：`/workspace` 的 remote 為 `git@github.com:user/repo.git`（SSH）。
+
+**步驟**：
+```bash
+docker run --rm \
+  -e AUTH_MODE=none \
+  -e WORKSPACE_GIT_SYNC_ENABLED=true \
+  -e WORKSPACE_GIT_SYNC_INTERVAL=30 \
+  -e WORKSPACE_GIT_TOKEN=sometoken \
+  -v /your/git-workspace:/workspace \
+  -p 8080:8080 \
+  perch:local 2>&1 | grep workspace_sync
+```
+
+**預期**：
+- Log 出現 `workspace_sync: git token ignored for SSH remote`
+- **不出現** `workspace_sync: injecting git token`
+- `~/.git-credentials` 未被修改（容器內可確認）
+
+---
+
+## T49 — Workspace Git Sync：非 git 目錄不啟動
+
+**目的**：確認 `/workspace` 不是 git repo 時，sync loop 靜默跳過，不 crash。
+
+**前置條件**：`/workspace` 存在但不含 `.git` 目錄。
+
+**步驟**：
+```bash
+docker run --rm \
+  -e AUTH_MODE=none \
+  -e WORKSPACE_GIT_SYNC_ENABLED=true \
+  -v /tmp/empty-dir:/workspace \
+  -p 8080:8080 \
+  perch:local 2>&1 | grep workspace_sync
+```
+
+**預期**：
+- Log 出現 `workspace_sync: workspace is not a git repo, skipping sync`
+- 無任何 `workspace_sync: starting sync` 訊息
+- perch 正常啟動，無 crash
+
+---
+
 ## 已知 Bug 清單
 
 ### T12 — mTLS generateClientP12 key mismatch

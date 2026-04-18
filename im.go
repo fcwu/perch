@@ -36,6 +36,12 @@ type IMAdapter interface {
 	Notify(event HookEvent, lastText string) error
 }
 
+// TextSender is implemented by IM adapters that can send an arbitrary text message
+// to a specific channel by ID (used for out-of-band notifications like git sync errors).
+type TextSender interface {
+	SendToChannel(channelID string, msg string) error
+}
+
 // SessionProvider is implemented by IM adapters that expose viewable PTY sessions.
 type SessionProvider interface {
 	ListSessions() []SessionView
@@ -101,6 +107,18 @@ func (m *IMManager) notify(event HookEvent) {
 			m.logger.Warn("IM notify error", "err", err)
 		}
 	}
+}
+
+// SendText sends msg to channelID via the first adapter that implements TextSender.
+func (m *IMManager) SendText(channelID string, msg string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, a := range m.adapters {
+		if ts, ok := a.(TextSender); ok {
+			return ts.SendToChannel(channelID, msg)
+		}
+	}
+	return nil
 }
 
 // Sessions returns the first SessionProvider found among adapters, or nil.

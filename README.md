@@ -114,6 +114,12 @@ docker run -d \
 | `DISCORD_BOT_TOKEN` | — | Discord bot token（啟用 Discord 整合） |
 | `DISCORD_CHANNEL_ID` | — | **選填**。限制只監聽指定 channel ID；不設定時監聽所有頻道（公開頻道需 @mention，私密頻道與 DM 直接回應） |
 | `DISCORD_ALLOWED_USER_IDS` | — | **選填**。逗號分隔的 Discord 用戶 ID 白名單，限制哪些用戶可透過 DM 使用 Bot；**未設定時 DM 功能完全關閉**（安全預設值） |
+| `WORKSPACE_GIT_SYNC_ENABLED` | `false` | 設為 `true` 或 `1` 啟用 workspace 自動 git sync |
+| `WORKSPACE_GIT_SYNC_INTERVAL` | `60` | Sync 間隔秒數（純數字，例如 `60`；也支援 Go duration 格式如 `2m`） |
+| `WORKSPACE_PATH` | `/workspace` | 要同步的 git repo 路徑 |
+| `WORKSPACE_GIT_TOKEN` | — | HTTPS remote 的 git token（寫入 `~/.git-credentials`） |
+| `WORKSPACE_GIT_SYNC_NOTIFY_CHANNEL` | — | 同步失敗時送通知的 Discord channel ID |
+| `WORKSPACE_GIT_SYNC_SUBMODULES` | `false` | 設為 `true` 或 `1` 在每次 pull 後自動執行 `git submodule update --init --recursive` |
 
 ---
 
@@ -320,6 +326,70 @@ docker run -d \
   ...
   ghcr.io/fcwu/perch:latest
 ```
+
+---
+
+## Workspace Git Sync
+
+Perch 可以自動定時將 `/workspace` 的 git repo 與 remote 同步（pull + push），讓 Claude 的工作成果即時備份到 remote，也能在多個 container 間共享最新狀態。
+
+### 啟用方式
+
+```bash
+docker run -d \
+  -e WORKSPACE_GIT_SYNC_ENABLED=true \
+  -e WORKSPACE_GIT_SYNC_INTERVAL=60 \
+  -e WORKSPACE_GIT_TOKEN=ghp_your_token \
+  -e WORKSPACE_GIT_SYNC_NOTIFY_CHANNEL=your_discord_channel_id \
+  -v ./:/workspace \
+  ghcr.io/fcwu/perch:latest
+```
+
+### 行為說明
+
+每隔 `WORKSPACE_GIT_SYNC_INTERVAL` 秒執行一次 sync：
+
+1. **偵測 rebase 狀態**：若 `.git/rebase-merge` 或 `.git/rebase-apply` 存在，執行 `git rebase --abort` 並通知 Discord
+2. **Stash dirty 工作區**：若有未提交的變更，先 `git stash`
+3. **Pull rebase**：執行 `git pull --rebase`
+4. **Submodule 更新**（若啟用）：執行 `git submodule update --init --recursive`
+5. **Stash pop**：若 step 2 有 stash，還原工作區
+6. **Push**：執行 `git push`
+
+### HTTPS Token 設定
+
+`WORKSPACE_GIT_TOKEN` 只適用於 HTTPS remote。啟動時 Perch 會自動：
+
+- 將 token 寫入 `~/.git-credentials`（格式：`https://x-token-auth:<token>@<host>`）
+- 執行 `git config --global credential.helper store`
+
+SSH remote 不需要 token，設定了也會被忽略（並記錄 Warning）。
+
+### 錯誤處理與通知
+
+| 情況 | 行為 |
+|------|------|
+| rebase 衝突 | abort rebase → Discord 通知（建議手動 pull） |
+| pull 失敗 | 記錄 log → Discord 通知（含 git 輸出） |
+| stash pop 失敗 | 記錄 log + stash ref → Discord 通知 |
+| push 失敗 | 記錄 log → Discord 通知（含 git 輸出） |
+| submodule 更新失敗 | 記錄 log → Discord 通知，不中斷後續 sync |
+
+同一類型的錯誤在 **5 分鐘內只通知一次**（debounce），避免每 60 秒重複轟炸 Discord。
+
+### Submodule 支援
+
+```bash
+-e WORKSPACE_GIT_SYNC_SUBMODULES=true
+```
+
+啟用後，每次 `git pull --rebase` 成功後會自動執行：
+
+```
+git submodule update --init --recursive
+```
+
+submodule 更新失敗只記錄 log + Discord 通知，不影響主 repo 的 push。
 
 ---
 

@@ -912,6 +912,19 @@ func (d *DiscordSessionManager) ResizeSession(channelID string, cols, rows uint1
 	}
 }
 
+// SendToChannel sends a plain-text message to a Discord channel by ID.
+// It is independent of allowedChannelID and intended for out-of-band notifications.
+func (d *DiscordSessionManager) SendToChannel(channelID string, msg string) error {
+	d.mu.Lock()
+	dgo := d.dgo
+	d.mu.Unlock()
+	if dgo == nil {
+		return fmt.Errorf("discord session not ready")
+	}
+	_, err := dgo.ChannelMessageSend(channelID, msg)
+	return err
+}
+
 // WriteSession writes data to the PTY stdin for the given Discord channel.
 func (d *DiscordSessionManager) WriteSession(channelID string, data []byte) error {
 	d.mu.Lock()

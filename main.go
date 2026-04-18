@@ -169,6 +169,23 @@ func main() {
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer cancel()
 
+	// --- Workspace git auto-sync (optional) ---
+	syncCfg := LoadSyncConfig()
+	if syncCfg.Enabled {
+		if err := injectGitToken(syncCfg.GitToken, syncCfg.WorkspacePath, logger.Logger); err != nil {
+			logger.Warn("workspace_sync: credential injection error", "err", err)
+		}
+		var notifyFn NotifyFunc
+		if im != nil && syncCfg.NotifyChannelID != "" {
+			notifyFn = func(errType string, msg string) {
+				if err := im.SendText(syncCfg.NotifyChannelID, msg); err != nil {
+					logger.Warn("workspace_sync: discord notify failed", "errType", errType, "err", err)
+				}
+			}
+		}
+		StartWorkspaceSync(ctx, syncCfg, logger.Logger, notifyFn)
+	}
+
 	go func() {
 		logger.Info("perch listening", "addr", addr, "auth", authMode, "built", buildTime)
 		if err := httpSrv.Serve(finalListener); err != nil && err != http.ErrServerClosed {
