@@ -25,12 +25,14 @@ fi
 if [ -n "$WORKDIR" ]; then
     AGENT_RUNTIME="${AGENT_RUNTIME:-claude}"
     if [ "$AGENT_RUNTIME" = "opencode" ]; then
-        mkdir -p "$WORKDIR/.opencode"
-        if [ -f /app/perch-opencode/package.json ] && [ ! -f "$WORKDIR/.opencode/package.json" ]; then
-            cp /app/perch-opencode/package.json "$WORKDIR/.opencode/package.json"
-        fi
-        if [ -f /app/perch-opencode/package-lock.json ] && [ ! -f "$WORKDIR/.opencode/package-lock.json" ]; then
-            cp /app/perch-opencode/package-lock.json "$WORKDIR/.opencode/package-lock.json"
+        if [ -d /app/perch-opencode/skills ]; then
+            mkdir -p "$WORKDIR/.opencode/skills"
+            for skill_dir in /app/perch-opencode/skills/*/; do
+                skill_name=$(basename "$skill_dir")
+                if [ ! -d "$WORKDIR/.opencode/skills/$skill_name" ]; then
+                    cp -r "$skill_dir" "$WORKDIR/.opencode/skills/$skill_name"
+                fi
+            done
         fi
         if [ -n "$PUID" ] && [ -d "$WORKDIR/.opencode" ]; then
             chown -R "${PUID}:${PGID}" "$WORKDIR/.opencode"
