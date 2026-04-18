@@ -1,0 +1,12 @@
+{
+  "jira": {
+    "url": "https://qnap-jira.qnap.com.tw",
+    "token": "your-jira-personal-access-token",
+    "skip_ssl_verify": true
+  },
+  "confluence": {
+    "url": "https://qnap-confluence.qnap.com.tw",
+    "token": "your-confluence-personal-access-token",
+    "skip_ssl_verify": true
+  }
+}
