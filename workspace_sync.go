@@ -83,7 +83,8 @@ func isRebasing(path string) bool {
 // runGit runs a git command in the given working directory and returns combined stdout+stderr.
 // GIT_TERMINAL_PROMPT=0 prevents git from hanging waiting for interactive credential input.
 func runGit(ctx context.Context, dir string, args ...string) (string, error) {
-	cmd := exec.CommandContext(ctx, "git", args...)
+	allArgs := append([]string{"-c", "safe.directory=*"}, args...)
+	cmd := exec.CommandContext(ctx, "git", allArgs...)
 	cmd.Dir = dir
 	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
 	var buf bytes.Buffer
