@@ -24,6 +24,8 @@ type WorkspaceSyncConfig struct {
 	Interval        time.Duration
 	WorkspacePath   string
 	GitToken        string
+	GitUserName     string
+	GitUserEmail    string
 	NotifyChannelID string
 	SyncSubmodules  bool
 }
@@ -48,6 +50,8 @@ func LoadSyncConfig() WorkspaceSyncConfig {
 		cfg.WorkspacePath = v
 	}
 	cfg.GitToken = os.Getenv("WORKSPACE_GIT_TOKEN")
+	cfg.GitUserName = os.Getenv("WORKSPACE_GIT_USER_NAME")
+	cfg.GitUserEmail = os.Getenv("WORKSPACE_GIT_USER_EMAIL")
 	cfg.NotifyChannelID = os.Getenv("WORKSPACE_GIT_SYNC_NOTIFY_CHANNEL")
 	if v := os.Getenv("WORKSPACE_GIT_SYNC_SUBMODULES"); v == "true" || v == "1" {
 		cfg.SyncSubmodules = true
@@ -220,7 +224,15 @@ func syncOnce(ctx context.Context, cfg WorkspaceSyncConfig, notify NotifyFunc, d
 			return fmt.Errorf("git add -A: %w", addErr)
 		}
 		ts := time.Now().Format("2006-01-02 15:04:05")
-		commitOut, commitErr := runGit(ctx, path, "commit", "-m", "auto-sync: "+ts)
+		commitArgs := []string{}
+		if cfg.GitUserName != "" {
+			commitArgs = append(commitArgs, "-c", "user.name="+cfg.GitUserName)
+		}
+		if cfg.GitUserEmail != "" {
+			commitArgs = append(commitArgs, "-c", "user.email="+cfg.GitUserEmail)
+		}
+		commitArgs = append(commitArgs, "commit", "-m", "auto-sync: "+ts)
+		commitOut, commitErr := runGit(ctx, path, commitArgs...)
 		logger.Info("workspace_sync: commit output", "output", strings.TrimSpace(commitOut))
 		if commitErr != nil {
 			logger.Error("workspace_sync: commit failed", "output", strings.TrimSpace(commitOut), "err", commitErr)
