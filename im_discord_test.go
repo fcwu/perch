@@ -118,3 +118,20 @@ func TestChannelSessionIDUnique(t *testing.T) {
 		t.Fatal("different channels got the same UUID")
 	}
 }
+
+func TestExtractReplyFromSnapshot(t *testing.T) {
+	snapshot := strings.Join([]string{
+		"\x1b[32mThinking...\x1b[0m",
+		"Here is line one",
+		"Here is line two",
+		"❯",
+		"Here is line two",
+		"",
+	}, "\n")
+
+	got := extractReplyFromSnapshot(snapshot)
+	want := "Thinking...\nHere is line one\nHere is line two"
+	if got != want {
+		t.Fatalf("want %q, got %q", want, got)
+	}
+}

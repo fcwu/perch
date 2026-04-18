@@ -271,15 +271,119 @@ func (sess *discordSession) stopPTYWatcher() {
 	sess.watcherMu.Unlock()
 }
 
+func (sess *discordSession) startRuntimeFallbackReply(s *discordgo.Session, pending *discordPending, logger *slog.Logger) {
+	if sess.runtime.SupportsHooks || pending == nil || !pending.AutoReply {
+		return
+	}
+	go func() {
+		ch, unsub := sess.pty.subscribe()
+		defer unsub()
+		idle := time.NewTimer(20 * time.Second)
+		defer idle.Stop()
+		deadline := time.NewTimer(2 * time.Minute)
+		defer deadline.Stop()
+		for {
+			select {
+			case _, ok := <-ch:
+				if !ok {
+					return
+				}
+				if !idle.Stop() {
+					select {
+					case <-idle.C:
+					default:
+					}
+				}
+				idle.Reset(20 * time.Second)
+			case <-idle.C:
+				sess.sendRuntimeFallbackReply(s, pending, logger)
+				return
+			case <-deadline.C:
+				sess.sendRuntimeFallbackReply(s, pending, logger)
+				return
+			}
+		}
+	}()
+}
+
+func (sess *discordSession) sendRuntimeFallbackReply(s *discordgo.Session, pending *discordPending, logger *slog.Logger) {
+	if s == nil || pending == nil {
+		return
+	}
+	text := extractReplyFromSnapshot(string(sess.pty.snapshot()))
+	if text == "" {
+		text = "✓ OpenCode finished."
+	}
+	if err := s.MessageReactionRemove(pending.ChannelID, pending.MessageID, emojiEyes, "@me"); err != nil {
+		logger.Warn("Discord reaction remove failed", "emoji", emojiEyes, "err", err)
+	}
+	if err := s.MessageReactionAdd(pending.ChannelID, pending.MessageID, emojiSpeech); err != nil {
+		logger.Warn("Discord reaction add failed", "emoji", emojiSpeech, "err", err)
+	}
+	chunks := splitForDiscord(text)
+	for i, chunk := range chunks {
+		if i == 0 {
+			_, err := s.ChannelMessageSendComplex(pending.ChannelID, &discordgo.MessageSend{
+				Content:   chunk,
+				Reference: &discordgo.MessageReference{MessageID: pending.MessageID},
+			})
+			if err != nil {
+				logger.Warn("Discord send fallback reply failed", "channel", sess.channelID, "err", err)
+			}
+			continue
+		}
+		if _, err := s.ChannelMessageSend(pending.ChannelID, chunk); err != nil {
+			logger.Warn("Discord send fallback continuation failed", "channel", sess.channelID, "part", i, "err", err)
+		}
+	}
+	sess.mu.Lock()
+	if sess.last != nil && sess.last.MessageID == pending.MessageID {
+		sess.last = nil
+	}
+	sess.mu.Unlock()
+}
+
+func extractReplyFromSnapshot(snapshot string) string {
+	lines := strings.Split(snapshot, "\n")
+	collected := make([]string, 0, 12)
+	seen := make(map[string]struct{})
+	for i := len(lines) - 1; i >= 0; i-- {
+		line := strings.TrimSpace(stripANSIEscape(lines[i]))
+		if line == "" || strings.HasPrefix(line, "❯") || strings.Contains(line, "bypass permissions") {
+			continue
+		}
+		if _, ok := seen[line]; ok {
+			continue
+		}
+		seen[line] = struct{}{}
+		collected = append(collected, line)
+		if len(collected) == 12 {
+			break
+		}
+	}
+	for i, j := 0, len(collected)-1; i < j; i, j = i+1, j-1 {
+		collected[i], collected[j] = collected[j], collected[i]
+	}
+	return strings.TrimSpace(strings.Join(collected, "\n"))
+}
+
+var ansiRE = regexp.MustCompile(`\x1b\[[0-9;?]*[ -/]*[@-~]`)
+
+func stripANSIEscape(s string) string {
+	return ansiRE.ReplaceAllString(s, "")
+}
+
 type discordPending struct {
 	MessageID string
 	ChannelID string
 	GuildID   string
+	AutoReply bool
 }
 
 // discordSession is one per Discord channel: its own PTY + pending state.
 type discordSession struct {
 	channelID   string
+	runtime     AgentRuntime
 	sessionUUID string
 	pty         *PTYManager
 
@@ -291,12 +395,14 @@ type discordSession struct {
 	watcherCancel func() // non-nil while a PTY-change watcher goroutine is running
 }
 
-func newDiscordSession(channelID string, logger *slog.Logger, workdir string) *discordSession {
+func newDiscordSession(runtime AgentRuntime, channelID string, logger *slog.Logger, workdir string) *discordSession {
 	pty := newPTYManager()
-	go pty.start("claude", []string{"--permission-mode", "bypassPermissions", "--name", "discord:" + channelID}, workdir, logger,
-		"PERCH_SESSION_TARGET=discord:"+channelID)
+	target := "discord:" + channelID
+	go pty.start(runtime.Command, runtime.SessionArgs(target), workdir, logger, runtime.DefaultEnv,
+		runtime.SessionEnv(target)...)
 	return &discordSession{
 		channelID: channelID,
+		runtime:   runtime,
 		// sessionUUID is empty until the first hook event claims it.
 		pty: pty,
 	}
@@ -310,11 +416,12 @@ type SessionView struct {
 
 // DiscordSessionManager listens on Discord and routes each channel to its own PTY.
 type DiscordSessionManager struct {
-	token              string
-	allowedChannelID   string
-	allowedDMUserIDs   map[string]struct{} // nil/empty = DM disabled
-	logger             *slog.Logger
-	workdir            string
+	runtime          AgentRuntime
+	token            string
+	allowedChannelID string
+	allowedDMUserIDs map[string]struct{} // nil/empty = DM disabled
+	logger           *slog.Logger
+	workdir          string
 
 	mu             sync.Mutex
 	dgo            *discordgo.Session
@@ -322,12 +429,13 @@ type DiscordSessionManager struct {
 	channelPrivate map[string]bool            // channelID → isPrivate, cached
 }
 
-func newDiscordSessionManager(token, channelID string, allowedDMUsers []string, workdir string, logger *slog.Logger) *DiscordSessionManager {
+func newDiscordSessionManager(runtime AgentRuntime, token, channelID string, allowedDMUsers []string, workdir string, logger *slog.Logger) *DiscordSessionManager {
 	dmIDs := make(map[string]struct{}, len(allowedDMUsers))
 	for _, id := range allowedDMUsers {
 		dmIDs[id] = struct{}{}
 	}
 	return &DiscordSessionManager{
+		runtime:          runtime,
 		token:            token,
 		allowedChannelID: channelID,
 		allowedDMUserIDs: dmIDs,
@@ -469,6 +577,7 @@ func (d *DiscordSessionManager) onMessage(s *discordgo.Session, m *discordgo.Mes
 		MessageID: m.ID,
 		ChannelID: m.ChannelID,
 		GuildID:   m.GuildID,
+		AutoReply: !sess.runtime.SupportsHooks,
 	}
 	sess.mu.Unlock()
 
@@ -513,6 +622,7 @@ func (d *DiscordSessionManager) onMessage(s *discordgo.Session, m *discordgo.Mes
 		sess.mu.Unlock()
 		if pending != nil {
 			sess.startPTYWatcher(s, pending, d.logger)
+			sess.startRuntimeFallbackReply(s, pending, d.logger)
 		}
 	}
 	if needsWarm {
@@ -582,7 +692,7 @@ func (d *DiscordSessionManager) getOrCreateSession(channelID string) *discordSes
 	if sess, ok := d.sessions[channelID]; ok {
 		return sess
 	}
-	sess := newDiscordSession(channelID, d.logger, d.workdir)
+	sess := newDiscordSession(d.runtime, channelID, d.logger, d.workdir)
 	d.sessions[channelID] = sess
 	return sess
 }
@@ -770,6 +880,7 @@ func (d *DiscordSessionManager) OnScheduledFire(target, message string) {
 	sess.last = &discordPending{
 		MessageID: sent.ID,
 		ChannelID: channelID,
+		AutoReply: !sess.runtime.SupportsHooks,
 	}
 	sess.mu.Unlock()
 }

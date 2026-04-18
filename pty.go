@@ -28,6 +28,14 @@ type PTYManager struct {
 	done        chan struct{}
 }
 
+func (p *PTYManager) snapshot() []byte {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	out := make([]byte, len(p.framebuf))
+	copy(out, p.framebuf)
+	return out
+}
+
 func newPTYManager() *PTYManager {
 	return &PTYManager{
 		subscribers: make(map[chan []byte]struct{}),
@@ -103,7 +111,7 @@ func (p *PTYManager) resize(cols, rows uint16) error {
 	return pty.Setsize(ptmx, &pty.Winsize{Cols: cols, Rows: rows})
 }
 
-func (p *PTYManager) start(command string, args []string, workdir string, logger *slog.Logger, extraEnv ...string) {
+func (p *PTYManager) start(command string, args []string, workdir string, logger *slog.Logger, defaultEnv []string, extraEnv ...string) {
 	for {
 		select {
 		case <-p.done:
@@ -153,11 +161,7 @@ func (p *PTYManager) start(command string, args []string, workdir string, logger
 				set[k] = true
 			}
 		}
-		for _, d := range []string{
-			"TERM=xterm-256color",
-			"CLAUDE_CODE_NO_FLICKER=1",
-			"CLAUDE_CODE_DISABLE_MOUSE=1",
-		} {
+		for _, d := range append([]string{"TERM=xterm-256color"}, defaultEnv...) {
 			if k, _, ok := strings.Cut(d, "="); ok && !set[k] {
 				env = append(env, d)
 			}

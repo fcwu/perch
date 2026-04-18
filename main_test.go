@@ -7,11 +7,15 @@ import (
 	"time"
 )
 
-// --- claudeArgs() unit tests ---
+// --- runtime arg parsing unit tests ---
 
 func TestClaudeArgsEmpty(t *testing.T) {
 	t.Setenv("CLAUDE_ARGS", "")
-	got := claudeArgs()
+	rt, err := loadAgentRuntime()
+	if err != nil {
+		t.Fatalf("loadAgentRuntime: %v", err)
+	}
+	got := rt.MainArgs()
 	if len(got) != 0 {
 		t.Fatalf("expected empty slice, got %v", got)
 	}
@@ -19,7 +23,11 @@ func TestClaudeArgsEmpty(t *testing.T) {
 
 func TestClaudeArgsWhitespaceOnly(t *testing.T) {
 	t.Setenv("CLAUDE_ARGS", "   ")
-	got := claudeArgs()
+	rt, err := loadAgentRuntime()
+	if err != nil {
+		t.Fatalf("loadAgentRuntime: %v", err)
+	}
+	got := rt.MainArgs()
 	if len(got) != 0 {
 		t.Fatalf("expected empty slice for whitespace-only input, got %v", got)
 	}
@@ -27,7 +35,11 @@ func TestClaudeArgsWhitespaceOnly(t *testing.T) {
 
 func TestClaudeArgsSingleFlag(t *testing.T) {
 	t.Setenv("CLAUDE_ARGS", "--dangerously-skip-permissions")
-	got := claudeArgs()
+	rt, err := loadAgentRuntime()
+	if err != nil {
+		t.Fatalf("loadAgentRuntime: %v", err)
+	}
+	got := rt.MainArgs()
 	want := []string{"--dangerously-skip-permissions"}
 	if len(got) != len(want) || got[0] != want[0] {
 		t.Fatalf("want %v, got %v", want, got)
@@ -36,7 +48,11 @@ func TestClaudeArgsSingleFlag(t *testing.T) {
 
 func TestClaudeArgsFlagWithValue(t *testing.T) {
 	t.Setenv("CLAUDE_ARGS", "--model claude-opus-4-5")
-	got := claudeArgs()
+	rt, err := loadAgentRuntime()
+	if err != nil {
+		t.Fatalf("loadAgentRuntime: %v", err)
+	}
+	got := rt.MainArgs()
 	want := []string{"--model", "claude-opus-4-5"}
 	if len(got) != len(want) {
 		t.Fatalf("want %v, got %v", want, got)
@@ -50,7 +66,11 @@ func TestClaudeArgsFlagWithValue(t *testing.T) {
 
 func TestClaudeArgsMultipleFlags(t *testing.T) {
 	t.Setenv("CLAUDE_ARGS", "--model claude-opus-4-5 --dangerously-skip-permissions")
-	got := claudeArgs()
+	rt, err := loadAgentRuntime()
+	if err != nil {
+		t.Fatalf("loadAgentRuntime: %v", err)
+	}
+	got := rt.MainArgs()
 	want := []string{"--model", "claude-opus-4-5", "--dangerously-skip-permissions"}
 	if len(got) != len(want) {
 		t.Fatalf("want len=%d, got len=%d (%v)", len(want), len(got), got)
@@ -64,7 +84,11 @@ func TestClaudeArgsMultipleFlags(t *testing.T) {
 
 func TestClaudeArgsExtraSpaces(t *testing.T) {
 	t.Setenv("CLAUDE_ARGS", "  --model   opus  ")
-	got := claudeArgs()
+	rt, err := loadAgentRuntime()
+	if err != nil {
+		t.Fatalf("loadAgentRuntime: %v", err)
+	}
+	got := rt.MainArgs()
 	want := []string{"--model", "opus"}
 	if len(got) != len(want) {
 		t.Fatalf("want %v, got %v", want, got)
@@ -86,7 +110,7 @@ func TestPTYStartBroadcastsOutput(t *testing.T) {
 	defer unsub()
 	defer pm.stop()
 
-	go pm.start("echo", []string{"pty-output-test"}, "", slog.Default())
+	go pm.start("echo", []string{"pty-output-test"}, "", slog.Default(), nil)
 
 	deadline := time.After(3 * time.Second)
 	var buf []byte
@@ -113,7 +137,7 @@ func TestPTYStartPassesArgsToProcess(t *testing.T) {
 	defer pm.stop()
 
 	marker := "perch-arg-marker-12345"
-	go pm.start("echo", []string{marker}, "", slog.Default())
+	go pm.start("echo", []string{marker}, "", slog.Default(), nil)
 
 	deadline := time.After(3 * time.Second)
 	var buf []byte
@@ -139,7 +163,7 @@ func TestPTYStartWorkdir(t *testing.T) {
 	defer pm.stop()
 
 	dir := t.TempDir()
-	go pm.start("pwd", []string{}, dir, slog.Default())
+	go pm.start("pwd", []string{}, dir, slog.Default(), nil)
 
 	deadline := time.After(3 * time.Second)
 	var buf []byte
@@ -164,7 +188,7 @@ func TestPTYStopPreventsRestart(t *testing.T) {
 
 	done := make(chan struct{})
 	go func() {
-		pm.start("echo", []string{"should-not-run"}, "", slog.Default())
+		pm.start("echo", []string{"should-not-run"}, "", slog.Default(), nil)
 		close(done)
 	}()
 

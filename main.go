@@ -14,14 +14,13 @@ import (
 // buildTime is injected at build time via -ldflags "-X main.buildTime=..."
 var buildTime = "unknown"
 
-// claudeArgs parses CLAUDE_ARGS into a slice of CLI arguments for the claude
-// process. Example: CLAUDE_ARGS="--model claude-opus-4-5 --dangerously-skip-permissions"
-func claudeArgs() []string {
-	return strings.Fields(os.Getenv("CLAUDE_ARGS"))
-}
-
 func main() {
 	logger := newLogger(nil, nil)
+	runtime, err := loadAgentRuntime()
+	if err != nil {
+		logger.Error("invalid AGENT_RUNTIME", "err", err)
+		os.Exit(1)
+	}
 
 	// --- Env validation ---
 	authMode := os.Getenv("AUTH_MODE")
@@ -58,7 +57,7 @@ func main() {
 			workdir = "/workspace"
 		}
 	}
-	go pm.start("claude", claudeArgs(), workdir, logger.Logger)
+	go pm.start(runtime.Command, runtime.MainArgs(), workdir, logger.Logger, runtime.DefaultEnv, runtime.SessionEnv("")...)
 
 	// --- Scheduler ---
 	sched := newScheduler(pm, workdir, logger.Logger)
@@ -86,7 +85,7 @@ func main() {
 		im = newIMManager(logger.Logger)
 	}
 	if im != nil && discordToken != "" {
-		discordSess = newDiscordSessionManager(discordToken, discordChannel, discordAllowedDMUsers, workdir, logger.Logger)
+		discordSess = newDiscordSessionManager(runtime, discordToken, discordChannel, discordAllowedDMUsers, workdir, logger.Logger)
 		im.addAdapter(discordSess)
 	}
 	if im != nil && telegramToken != "" && telegramChatStr != "" {

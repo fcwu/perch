@@ -103,10 +103,12 @@ docker run -d \
 | `PUID` | `1000` | 容器內行程的 UID；建議設為主機使用者的 `$(id -u)` |
 | `PGID` | `PUID` 同值 | 容器內行程的 GID；建議設為主機使用者的 `$(id -g)` |
 | `BLOCK_IPS` | — | 空格分隔的封鎖 IP 清單，支援 CIDR，例如 `1.2.3.4 10.0.0.0/8` |
+| `AGENT_RUNTIME` | `claude` | Perch 啟動的 agent runtime：`claude` / `opencode` |
 | `CLAUDE_WORKDIR` | `/workspace`（若存在） | Claude Code 的起始工作目錄 |
 | `TZ` | `UTC` | 容器時區，影響排程觸發時間，例如 `Asia/Taipei` |
 | `ANTHROPIC_API_KEY` | — | Anthropic API 金鑰，直接傳給 Claude |
 | `CLAUDE_ARGS` | — | 傳給 `claude` 指令的額外 CLI 參數，空格分隔，例如 `--model claude-opus-4-5 --dangerously-skip-permissions` |
+| `OPENCODE_ARGS` | — | 傳給 `opencode` 指令的額外 CLI 參數，空格分隔，例如 `-p "hello" -q` |
 | `CLAUDE_CODE_NO_FLICKER` | `1` | 停用 Claude Code 的畫面閃爍動畫（預設啟用，設 `0` 可關閉） |
 | `CLAUDE_CODE_DISABLE_MOUSE` | `1` | 停用 Claude Code 的滑鼠事件捕捉（預設啟用，設 `0` 可關閉） |
 | `DISCORD_BOT_TOKEN` | — | Discord bot token（啟用 Discord 整合） |
@@ -144,6 +146,32 @@ docker run -d \
 - 下載後跳出安裝提示 → 去「設定 → 一般 → VPN 與裝置管理」安裝
 
 ---
+
+## Agent Runtime
+
+Perch 現在支援兩種 agent runtime：
+
+| Runtime | 設定值 | 預設 | 說明 |
+|---------|--------|------|------|
+| Claude Code | `claude` | yes | 保留既有行為，支援 Claude hooks、`.claude/skills/` 與 `CLAUDE_ARGS` |
+| OpenCode | `opencode` | no | 啟動 `opencode` CLI，使用 workspace 的 `.opencode/` 設定資產與 `OPENCODE_ARGS` |
+
+### 使用 OpenCode
+
+```bash
+docker run -d \
+  -p 8080:8080 \
+  -e AUTH_MODE=none \
+  -e AGENT_RUNTIME=opencode \
+  -e OPENCODE_ARGS="-q" \
+  -e ANTHROPIC_API_KEY=<your-key> \
+  -e PUID=$(id -u) \
+  -e PGID=$(id -g) \
+  -v ./:/workspace \
+  ghcr.io/fcwu/perch:latest
+```
+
+OpenCode 會使用 project-level `.opencode/` 目錄。Perch 會在 container 啟動時把 image 內建的 OpenCode assets 複製到 workspace 的 `.opencode/`，不會去修改 `~/.claude/settings.json`。
 
 ## Claude 啟動設定
 
@@ -204,9 +232,13 @@ Claude 會透過內建的 `local-schedule` skill 設定排程。排程資料存�
 
 ## Discord 整合
 
-訊息從 Discord 進來，寫進 PTY，Claude 處理完後透過 Claude Code Hooks 把結果送回 Discord。
+訊息從 Discord 進來，寫進 PTY，再由目前選定的 agent runtime 處理後回傳到 Discord。
 
 ### Hook 與 Reaction 對應
+
+`AGENT_RUNTIME=claude` 時，Perch 使用 Claude Code hooks 來驅動 reaction 與 completion 回覆。
+
+`AGENT_RUNTIME=opencode` 時，OpenCode 沒有直接沿用同一套 hook 協定，Perch 會改用 PTY output idle fallback 偵測完成並送出最後回覆。這代表 OpenCode 模式下沒有 `PreToolUse` / `PostToolUse` reaction 細節，但仍保留 Discord request/reply 流程。
 
 | Claude Hook 事件 | 行為 |
 |------------------|------|

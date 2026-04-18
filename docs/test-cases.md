@@ -745,6 +745,67 @@ docker run --rm \
 
 ---
 
+## T40 — OpenCode Runtime 可啟動
+
+**目的**：確認 `AGENT_RUNTIME=opencode` 時，Perch 主 PTY 會啟動 OpenCode，而不是 Claude。
+
+**步驟**：
+```bash
+docker run --rm \
+  -e AUTH_MODE=none \
+  -e AGENT_RUNTIME=opencode \
+  -e OPENCODE_ARGS="-q" \
+  -e ANTHROPIC_API_KEY=<key> \
+  -v /your/workspace:/workspace \
+  -p 8081:8080 \
+  perch:local
+```
+
+**預期**：
+- perch 啟動成功，沒有 `invalid AGENT_RUNTIME` 或 `claude: not found`
+- Web terminal 可連線
+- 主 PTY 顯示 OpenCode 啟動畫面或 OpenCode 對應輸出，而非 Claude Code 畫面
+
+---
+
+## T41 — OpenCode Runtime：Discord 訊息可收到完成回覆
+
+**目的**：確認 `AGENT_RUNTIME=opencode` 時，Discord 訊息仍會寫入 Discord session PTY，並在工作完成後收到回覆。
+
+**前置條件**：
+- 已設定 `DISCORD_BOT_TOKEN`
+- container 以 `AGENT_RUNTIME=opencode` 啟動
+
+**步驟**：
+1. 在 Discord channel 傳送簡短訊息，例如「回我一個 hi」
+2. 等待 OpenCode 完成
+
+**預期**：
+- 原始訊息出現 👀 reaction
+- Bot 在同一 channel 以 reply 回覆最終結果
+- 即使沒有 Claude hook 的 `⚙️ / ✅ / ❌` reaction，仍有 completion reply
+
+---
+
+## T42 — OpenCode Runtime：Discord 排程仍回到正確 Channel
+
+**目的**：確認 `AGENT_RUNTIME=opencode` 時，`target: "discord:<channelID>"` 的排程仍會先發 header，再把完成結果送回相同頻道。
+
+**前置條件**：
+- 同 T41
+- Discord 排程功能可用
+
+**步驟**：
+1. 建立一個一次性排程，目標為目前 Discord channel
+2. 等待觸發
+
+**預期**：
+- 先出現 `📅 local schedule > ...` header
+- 後續 completion reply 出現在同一 channel
+- main terminal 沒有收到這次 Discord-targeted 排程輸出
+
+---
+
 ## 已知 Bug 清單
 
 ### T12 — mTLS generateClientP12 key mismatch

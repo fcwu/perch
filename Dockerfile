@@ -18,13 +18,17 @@ RUN CGO_ENABLED=0 GOOS=linux go build -ldflags "-X main.buildTime=$(date -u +%Y-
 # Stage 3: Runtime
 FROM ubuntu:24.04
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    ca-certificates curl git nodejs npm gosu && \
+    ca-certificates curl git jq nodejs npm gosu && \
     rm -rf /var/lib/apt/lists/*
 RUN npm install -g @anthropic-ai/claude-code
+RUN curl -fsSL https://api.github.com/repos/anomalyco/opencode/releases/latest | \
+    jq -r '(.assets[] | select(.name=="opencode-linux-arm64.tar.gz") | .browser_download_url)' | \
+    xargs -I {} sh -lc 'tmp=$(mktemp -d) && curl -fsSL "{}" -o "$tmp/opencode.tgz" && tar -xzf "$tmp/opencode.tgz" -C /usr/local/bin && chmod +x /usr/local/bin/opencode && rm -rf "$tmp"'
 
 WORKDIR /app
 COPY --from=builder /app/perch .
 COPY claude/ /app/perch-claude/
+COPY .opencode/ /app/perch-opencode/
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
