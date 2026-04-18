@@ -182,7 +182,7 @@ func (d *debouncer) allow(errType string) bool {
 	return true
 }
 
-// syncOnce performs one sync cycle: stash → pull --rebase → submodule update → stash pop → push.
+// syncOnce performs one sync cycle: add → commit → pull --rebase → submodule update → push.
 // All git command outputs are logged. Errors trigger notify if debounce allows.
 func syncOnce(ctx context.Context, cfg WorkspaceSyncConfig, notify NotifyFunc, dbnc *debouncer, logger *slog.Logger) error {
 	path := cfg.WorkspacePath
@@ -205,22 +205,27 @@ func syncOnce(ctx context.Context, cfg WorkspaceSyncConfig, notify NotifyFunc, d
 		return fmt.Errorf("rebase was in progress, aborted")
 	}
 
-	// Stash if dirty
+	// Auto-commit if dirty: add all changes and create a timestamped commit
 	dirty, err := isDirty(path)
 	if err != nil {
 		logger.Error("workspace_sync: isDirty check failed", "err", err)
 		return err
 	}
-	stashed := false
 	if dirty {
-		logger.Debug("workspace_sync: dirty workspace, stashing")
-		out, err := runGit(ctx, path, "stash")
-		logger.Debug("workspace_sync: stash output", "output", strings.TrimSpace(out))
-		if err != nil {
-			logger.Error("workspace_sync: stash failed", "output", strings.TrimSpace(out), "err", err)
-			return fmt.Errorf("git stash: %w", err)
+		logger.Debug("workspace_sync: dirty workspace, committing")
+		addOut, addErr := runGit(ctx, path, "add", "-A")
+		logger.Debug("workspace_sync: add output", "output", strings.TrimSpace(addOut))
+		if addErr != nil {
+			logger.Error("workspace_sync: add failed", "output", strings.TrimSpace(addOut), "err", addErr)
+			return fmt.Errorf("git add -A: %w", addErr)
 		}
-		stashed = true
+		ts := time.Now().Format("2006-01-02 15:04:05")
+		commitOut, commitErr := runGit(ctx, path, "commit", "-m", "auto-sync: "+ts)
+		logger.Info("workspace_sync: commit output", "output", strings.TrimSpace(commitOut))
+		if commitErr != nil {
+			logger.Error("workspace_sync: commit failed", "output", strings.TrimSpace(commitOut), "err", commitErr)
+			return fmt.Errorf("git commit: %w", commitErr)
+		}
 	}
 
 	// Pull --rebase
@@ -241,21 +246,6 @@ func syncOnce(ctx context.Context, cfg WorkspaceSyncConfig, notify NotifyFunc, d
 			logger.Error("workspace_sync: submodule update failed", "output", strings.TrimSpace(subOut), "err", subErr)
 			maybeNotify(notify, dbnc, "submodule_failed",
 				fmt.Sprintf("⚠️ git sync: `git submodule update --init --recursive` failed:\n```\n%s\n```", strings.TrimSpace(subOut)))
-		}
-	}
-
-	// Stash pop if we stashed
-	if stashed {
-		stashOut, popErr := runGit(ctx, path, "stash", "pop")
-		logger.Debug("workspace_sync: stash pop output", "output", strings.TrimSpace(stashOut))
-		if popErr != nil {
-			// Get stash ref for the user
-			stashRef, _ := runGit(ctx, path, "stash", "list", "--max-count=1")
-			stashRef = strings.TrimSpace(stashRef)
-			logger.Error("workspace_sync: stash pop failed", "stash_ref", stashRef, "output", strings.TrimSpace(stashOut), "err", popErr)
-			maybeNotify(notify, dbnc, "stash_pop_failed",
-				fmt.Sprintf("⚠️ git sync: `git stash pop` failed in workspace.\nStash ref: `%s`\nError:\n```\n%s\n```\nPlease run `git stash pop` manually.", stashRef, strings.TrimSpace(stashOut)))
-			return fmt.Errorf("git stash pop: %w", popErr)
 		}
 	}
 
