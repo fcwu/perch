@@ -498,7 +498,7 @@ docker run -d \
 - Tab 列出現，顯示「discord:<channel_id>」tab 與原本的主 terminal tab
 - 點擊 Discord tab → terminal 畫面切換為該 Discord channel 的 PTY 輸出
 - 從 Discord 傳送訊息後，web viewer 可看到 Claude 回應的輸出
-- Discord tab **無法輸入**（鍵盤輸入不寫入 PTY）
+- Discord tab **可輸入**（鍵盤輸入會寫入 PTY）
 
 **反向驗證**：未設定 Discord 環境變數時，tab 列不顯示（只有主 terminal）。
 
@@ -803,6 +803,26 @@ docker run --rm \
 - 先出現 `📅 local schedule > ...` header
 - 後續 completion reply 出現在同一 channel
 - main terminal 沒有收到這次 Discord-targeted 排程輸出
+
+---
+
+## T43 — Web UI 對 Discord Session PTY 輸入
+
+**目的**：確認 Web UI 使用者可以在 Discord session tab 中直接輸入文字，keystrokes 會寫入對應的 PTY。
+
+**前置條件**：
+- 同 T28（Discord bot 已啟動，Web UI 可見 Discord channel tab）
+
+**步驟**：
+1. 瀏覽器切換到 Discord channel tab
+2. 在 terminal 中輸入任意文字（例如 `ls`）並按 Enter
+
+**預期**：
+- 鍵盤輸入出現在 web terminal 畫面
+- PTY 實際執行輸入的指令，輸出顯示在同一畫面
+- 同一 Discord channel 的輸出也同步反映（兩端共用同一 PTY）
+
+**反向驗證**：`resize` 訊息仍正確觸發 PTY resize，不被當成 keystroke 寫入。
 
 ---
 
