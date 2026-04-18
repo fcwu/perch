@@ -2,3 +2,4 @@ frontend/node_modules/
 perch
 schedules.json
 .claude/*.json
+.opencode/

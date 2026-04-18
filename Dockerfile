@@ -28,7 +28,7 @@ RUN curl -fsSL https://api.github.com/repos/anomalyco/opencode/releases/latest |
 WORKDIR /app
 COPY --from=builder /app/perch .
 COPY claude/ /app/perch-claude/
-COPY .opencode/ /app/perch-opencode/
+COPY opencode/ /app/perch-opencode/
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
