@@ -3,3 +3,4 @@ perch
 schedules.json
 .claude/*.json
 .opencode/
+deploy/.env
