@@ -5,6 +5,18 @@ description: Writes test cases into docs/test*.md based on openspec specs or use
 
 根據 openspec 規格或使用者描述，產出結構化 test cases 並寫入 `docs/test*.md`。
 
+## 測試層級
+
+每個 test case 必須標記層級：
+
+| 層級 | 說明 | GitLab 相依 |
+|------|------|-------------|
+| **Unit** | Go unit test，mock `GitLabAuthProvider` interface，無需啟動伺服器 | 無 |
+| **Integration** | `httptest` + mock OAuth server（`httptest.NewServer` 模擬 `/oauth/token`） | 無（mock） |
+| **E2E-curl** | 啟動真實 perch binary，用 curl 驗證 HTTP 行為 | 無（不需 GitLab） |
+| **E2E-browser** | 啟動真實 perch binary，瀏覽器操作驗證 | 視情況 |
+| **E2E-gitlab** | 需要連接真實 GitLab 實例完成 OAuth 流程 | **是** |
+
 ## 輸入來源
 
 可以是以下任一：
@@ -38,8 +50,10 @@ description: Writes test cases into docs/test*.md based on openspec specs or use
 
    每個 test case 格式：
 
-   ```markdown
+   ````markdown
    ## T<N> — <功能描述>
+
+   **層級**：Unit | Integration | E2E-curl | E2E-browser | E2E-gitlab
 
    **目的**：<一句話說明這個 test 驗證什麼>
 
@@ -60,7 +74,12 @@ description: Writes test cases into docs/test*.md based on openspec specs or use
    ```
 
    **自動化**（若有對應 unit test）：`go test -run TestXxx ./...`
-   ```
+   ````
+
+   層級選擇原則：
+   - 能在 Unit / Integration 驗證的邏輯，**不要**標 E2E
+   - 只有真正需要 HTTP 行為驗證才用 E2E-curl
+   - E2E-gitlab 只用於必須走完 OAuth 流程的測試
 
    Test case 的涵蓋範圍：
    - Happy path（主要功能流程）
