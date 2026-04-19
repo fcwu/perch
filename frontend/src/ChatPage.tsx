@@ -1,8 +1,10 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
 import { ToolPanel, ToolEntry } from './ToolPanel'
 
-// Strip ANSI/VT100 escape sequences including private-parameter sequences (CSI <=>? prefixes).
-const ANSI_RE = /\x1B(?:[@-Z\\-_]|\[[0-9;:<=>?]*[ -/]*[@-~]|\][^\x07]*(?:\x07|\x1B\\))/g
+// Strip ANSI/VT100 escape sequences applied to the FULL accumulated buffer.
+// OSC/DCS are tried before standalone Fe so \x1b] is not greedily consumed as a 2-char sequence.
+// Standalone Fe excludes ], ^, _, P which are string-sequence introducers (OSC/DCS/PM/APC).
+const ANSI_RE = /\x1B(?:\][^\x07\x1b]*(?:\x07|\x1B\\)|P[^\x1b]*(?:\x1b\\)?|\[(?:[0-9;:<=>?]|[ -/])*[@-~]|[@-OQ-Z\\])/g
 function stripAnsi(s: string): string {
   return s.replace(ANSI_RE, '').replace(/\r\n/g, '\n').replace(/\r/g, '\n')
 }
@@ -20,6 +22,7 @@ export default function ChatPage(_: ChatPageProps) {
   const esRef = useRef<EventSource | null>(null)
   const toolCounter = useRef(0)
   const outputRef = useRef<HTMLDivElement>(null)
+  const rawBufRef = useRef('')
 
   // Auto-scroll output to bottom
   useEffect(() => {
@@ -37,6 +40,7 @@ export default function ChatPage(_: ChatPageProps) {
     setSubmittedQuery(q)
     setQuery('')
     toolCounter.current = 0
+    rawBufRef.current = ''
 
     try {
       const resp = await fetch('/api/chat', {
@@ -69,8 +73,8 @@ export default function ChatPage(_: ChatPageProps) {
       const raw = atob(e.data)
       const bytes = new Uint8Array(raw.length)
       for (let i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i)
-      const text = stripAnsi(decoder.decode(bytes))
-      setMarkdownBuf(prev => prev + text)
+      rawBufRef.current += decoder.decode(bytes)
+      setMarkdownBuf(stripAnsi(rawBufRef.current))
     })
 
     es.addEventListener('json', (e: MessageEvent) => {
@@ -88,7 +92,7 @@ export default function ChatPage(_: ChatPageProps) {
           ))
         } else if (ev.type === 'done') {
           setLoading(false)
-          es.close()
+          setTimeout(() => es.close(), 300)
         }
       } catch { /* ignore malformed JSON */ }
     })
