@@ -1,3 +1,4 @@
+.worktrees/
 frontend/node_modules/
 perch
 schedules.json
