@@ -32,11 +32,109 @@ Perch 是一個輕量的 web terminal server，讓你不需要 SSH，直接用�
 
 - **完整 terminal**：基於 xterm.js，支援顏色、滾動、可點擊的 URL
 - **即時串流**：所有連線共用同一個 PTY session，即時看到 Claude Code 輸出
-- **三種認證模式**：無認證（內網測試）、密碼登入、mTLS 雙向憑證
+- **兩種運作模式**：單使用者（`PERCH_MODE=single`）直接存取 terminal；多使用者（`PERCH_MODE=multi`）透過 GitLab OAuth 管理多位使用者，管理員與一般使用者分流
+- **四種認證方式**：無認證（內網測試）、密碼登入、mTLS 雙向憑證、GitLab OAuth
+- **多輪對話 Chat UI**：網頁聊天介面支援連續追問，對話歷史自動從 SQLite 重建，24 小時內的對話可跨 session 保留
 - **排程器**：用自然語言設定每天幾點自動送指令進 terminal（透過 `local-schedule` skill）
 - **IP 封鎖**：TCP 層封鎖惡意 IP
 - **限速**：HTTP 層限制登入/bootstrap 端點的請求頻率
 - **自動重啟**：Claude Code 崩潰後自動重啟
+
+---
+
+## 推薦使用情境
+
+### 情境一：個人知識庫（家用，推薦）
+
+最低摩擦的個人使用方式：Perch 本身不做認證（`AUTH_METHOD=none`），存取控制交給 **Cloudflare Zero Trust** 處理，手機或外出時同樣可以安全連線。搭配 **Discord Bot** 讓你不用開瀏覽器也能隨時查詢。
+
+**架構：**
+```
+手機 / 外出電腦
+    │
+    ▼
+Cloudflare Zero Trust（身份驗證、mTLS 或 Email OTP）
+    │
+    ▼
+Perch（AUTH_METHOD=none，只監聽 localhost 或內網）
+    │
+    ├─ Web Terminal（/）── 完整 Claude Code 操控
+    └─ Discord Bot ──────── 隨時傳訊息查詢
+```
+
+**為什麼這樣搭配比密碼更好：**
+- Cloudflare Zero Trust 提供 SSO / Google / GitHub 登入，不用自己管密碼
+- Perch 完全不暴露在公網，即使 container 本身沒有認證也安全
+- Discord Bot 讓手機查詢更自然，不需要開啟瀏覽器
+
+```bash
+# 家用個人模式：交給 Cloudflare Zero Trust 保護
+docker run -d \
+  -p 127.0.0.1:8080:8080 \
+  -e PERCH_MODE=single \
+  -e AUTH_METHOD=none \
+  -e TZ=Asia/Taipei \
+  -e PUID=$(id -u) \
+  -e PGID=$(id -g) \
+  -e DISCORD_BOT_TOKEN=<Bot Token> \
+  -e DISCORD_CHANNEL_ID=<頻道 ID> \
+  -v ~/.claude:/home/perchuser/.claude \
+  -v ~/.claude.json:/home/perchuser/.claude.json \
+  -v ./:/workspace \
+  ghcr.io/fcwu/perch:latest
+```
+
+> `-p 127.0.0.1:8080:8080` 只綁定 localhost，Cloudflare Tunnel 連進來，外部無法直接存取。
+
+**Cloudflare Zero Trust 設定步驟：**
+1. [Cloudflare Zero Trust](https://one.dash.cloudflare.com/) → Networks → Tunnels → 建立 Tunnel，指向 `http://localhost:8080`
+2. Access → Applications → 新增 Self-hosted App，設定允許的身份來源（Google、GitHub 等）
+3. 完成後只有通過身份驗證的你才能透過 Cloudflare 連線到 Perch
+
+**效果**：家裡 NAS 或樹莓派上執行 Perch，在任何地方用手機開瀏覽器直接進 terminal，或在 Discord 頻道傳訊息查詢。認證由 Cloudflare 管理，Perch 本身零設定。
+
+---
+
+### 情境二：多人知識庫（其他人只能查詢）
+
+團隊共享 Perch：**操作員（管理員）**可控制 terminal；**其他成員**只能透過 Chat UI 查詢。
+
+| 角色 | 設定方式 | 可存取路由 |
+|------|---------|-----------|
+| 管理員（你） | GitLab ID 加入 `GITLAB_ADMIN_IDS` | `/admin`（terminal + 管理面板） |
+| 團隊成員 | GitLab 登入即可（`GITLAB_ALLOWED_IDS=*`） | `/chat`（只能聊天查詢） |
+| 限定名單 | GitLab ID 加入 `GITLAB_ALLOWED_IDS` | `/chat`（只能聊天查詢） |
+
+```bash
+# 多人模式：管理員 + 開放所有 GitLab 使用者查詢
+docker run -d \
+  -p 8080:8080 \
+  -e PERCH_MODE=multi \
+  -e GITLAB_URL=https://gitlab.com \
+  -e GITLAB_CLIENT_ID=<你的 App ID> \
+  -e GITLAB_CLIENT_SECRET=<你的 App Secret> \
+  -e GITLAB_REDIRECT_URI=https://your-domain/auth/callback \
+  -e GITLAB_ADMIN_IDS=123456 \
+  -e GITLAB_ALLOWED_IDS=* \
+  -e TZ=Asia/Taipei \
+  -e PUID=$(id -u) \
+  -e PGID=$(id -g) \
+  -v ~/.claude:/home/perchuser/.claude \
+  -v ~/.claude.json:/home/perchuser/.claude.json \
+  -v ./:/workspace \
+  ghcr.io/fcwu/perch:latest
+```
+
+若只想讓特定成員存取，將 `GITLAB_ALLOWED_IDS=*` 改為逗號分隔的 GitLab User ID：
+
+```bash
+-e GITLAB_ALLOWED_IDS=111111,222222,333333
+```
+
+**效果**：
+- 管理員登入後進 `/admin`，可操作 terminal、查看歷史
+- 其他成員登入後進 `/chat`，只能對 Claude 提問，無法操作 terminal
+- 未登入者看到 GitLab 登入畫面，無法存取任何內容
 
 ---
 
@@ -49,7 +147,7 @@ docker pull ghcr.io/fcwu/perch:latest
 # 無認證模式（內網測試）
 docker run -d \
   -p 8080:8080 \
-  -e AUTH_MODE=none \
+  -e AUTH_METHOD=none \
   -e TZ=Asia/Taipei \
   -e PUID=$(id -u) \
   -e PGID=$(id -g) \
@@ -61,8 +159,8 @@ docker run -d \
 # 密碼模式
 docker run -d \
   -p 8080:8080 \
-  -e AUTH_MODE=password \
-  -e AUTH_PASSWORD=你的密碼 \
+  -e AUTH_METHOD=password \
+  -e PERCH_PASSWORD=你的密碼 \
   -e TZ=Asia/Taipei \
   -e PUID=$(id -u) \
   -e PGID=$(id -g) \
@@ -74,7 +172,7 @@ docker run -d \
 # mTLS 模式（最安全，正式對外使用）
 docker run -d \
   -p 8443:8443 \
-  -e AUTH_MODE=mtls \
+  -e AUTH_METHOD=mtls \
   -e LISTEN_ADDR=:8443 \
   -e TZ=Asia/Taipei \
   -e PUID=$(id -u) \
@@ -95,10 +193,13 @@ docker run -d \
 
 ## 環境變數
 
+### 核心設定
+
 | 變數 | 預設值 | 說明 |
 |------|--------|------|
-| `AUTH_MODE` | `none` | 認證模式：`none` / `password` / `mtls` |
-| `AUTH_PASSWORD` | — | 密碼（`AUTH_MODE=password` 時必填） |
+| `PERCH_MODE` | `single` | 運作模式：`single`（單使用者）/ `multi`（多使用者）；`multi` 需搭配 GitLab OAuth |
+| `AUTH_METHOD` | `none` | 認證方式：`none` / `password` / `mtls` / `gitlab`；多使用者模式固定使用 `gitlab` |
+| `PERCH_PASSWORD` | — | 密碼（`AUTH_METHOD=password` 時必填） |
 | `LISTEN_ADDR` | `:8080` | 監聽位址；一般不需設定，mTLS 模式需改為 `:8443` |
 | `PUID` | `1000` | 容器內行程的 UID；建議設為主機使用者的 `$(id -u)` |
 | `PGID` | `PUID` 同值 | 容器內行程的 GID；建議設為主機使用者的 `$(id -g)` |
@@ -106,47 +207,114 @@ docker run -d \
 | `AGENT_RUNTIME` | `claude` | Perch 啟動的 agent runtime：`claude` / `opencode` |
 | `CLAUDE_WORKDIR` | `/workspace`（若存在） | Claude Code 的起始工作目錄 |
 | `TZ` | `UTC` | 容器時區，影響排程觸發時間，例如 `Asia/Taipei` |
+
+### Claude / OpenCode 設定
+
+| 變數 | 預設值 | 說明 |
+|------|--------|------|
 | `ANTHROPIC_API_KEY` | — | Anthropic API 金鑰，直接傳給 Claude |
-| `CLAUDE_ARGS` | — | 傳給 `claude` 指令的額外 CLI 參數，空格分隔，例如 `--model claude-opus-4-5 --dangerously-skip-permissions` |
-| `OPENCODE_ARGS` | — | 傳給 `opencode` 指令的額外 CLI 參數，空格分隔，例如 `-p "hello" -q` |
-| `CLAUDE_CODE_NO_FLICKER` | `1` | 停用 Claude Code 的畫面閃爍動畫（預設啟用，設 `0` 可關閉） |
-| `CLAUDE_CODE_DISABLE_MOUSE` | `1` | 停用 Claude Code 的滑鼠事件捕捉（預設啟用，設 `0` 可關閉） |
-| `DISCORD_BOT_TOKEN` | — | Discord bot token（啟用 Discord 整合） |
-| `DISCORD_CHANNEL_ID` | — | **選填**。限制只監聽指定 channel ID；不設定時監聽所有頻道（公開頻道需 @mention，私密頻道與 DM 直接回應） |
-| `DISCORD_ALLOWED_USER_IDS` | — | **選填**。逗號分隔的 Discord 用戶 ID 白名單，限制哪些用戶可透過 DM 使用 Bot；**未設定時 DM 功能完全關閉**（安全預設值） |
-| `WORKSPACE_GIT_SYNC_ENABLED` | `false` | 設為 `true` 或 `1` 啟用 workspace 自動 git sync |
-| `WORKSPACE_GIT_SYNC_INTERVAL` | `60` | Sync 間隔秒數（純數字，例如 `60`；也支援 Go duration 格式如 `2m`） |
-| `WORKSPACE_PATH` | `/workspace` | 要同步的 git repo 路徑 |
-| `WORKSPACE_GIT_TOKEN` | — | HTTPS remote 的 git token（寫入 `~/.git-credentials`） |
-| `WORKSPACE_GIT_SYNC_NOTIFY_CHANNEL` | — | 同步失敗時送通知的 Discord channel ID |
-| `WORKSPACE_GIT_SYNC_SUBMODULES` | `false` | 設為 `true` 或 `1` 在每次 pull 後自動執行 `git submodule update --init --recursive` |
-| `GITLAB_URL` | — | GitLab instance URL，例如 `https://gitlab.example.com`（啟用 Chat UI GitLab OAuth） |
+| `CLAUDE_ARGS` | — | 傳給 `claude` 指令的額外 CLI 參數，例如 `--model claude-opus-4-5 --dangerously-skip-permissions` |
+| `OPENCODE_ARGS` | — | 傳給 `opencode` 指令的額外 CLI 參數，例如 `-p "hello" -q` |
+| `CLAUDE_CODE_NO_FLICKER` | `1` | 停用 Claude Code 的畫面閃爍動畫（設 `0` 可關閉） |
+| `CLAUDE_CODE_DISABLE_MOUSE` | `1` | 停用 Claude Code 的滑鼠事件捕捉（設 `0` 可關閉） |
+
+### GitLab OAuth
+
+| 變數 | 預設值 | 說明 |
+|------|--------|------|
+| `GITLAB_URL` | — | GitLab instance URL，例如 `https://gitlab.example.com` |
 | `GITLAB_CLIENT_ID` | — | GitLab OAuth Application 的 Client ID |
 | `GITLAB_CLIENT_SECRET` | — | GitLab OAuth Application 的 Client Secret |
 | `GITLAB_REDIRECT_URI` | — | OAuth callback URI，例如 `https://perch.example.com/auth/callback` |
+| `GITLAB_ADMIN_IDS` | — | 逗號分隔的 GitLab 使用者 ID，這些 ID 具有管理員權限；多使用者模式中會被路由到 `/admin`，單使用者 GitLab 模式中作為允許名單 |
+| `GITLAB_ALLOWED_IDS` | — | 逗號分隔的 GitLab 使用者 ID（多使用者模式）：空白=拒絕所有一般使用者，`*`=允許所有已認證使用者，逗號清單=只允許指定 ID |
 | `COOKIE_SECRET` | （固定預設值） | 用於簽署 `perch_session` cookie 的 HMAC 密鑰；**正式環境請務必設定隨機值** |
+
+### Admin 與儲存
+
+| 變數 | 預設值 | 說明 |
+|------|--------|------|
 | `ADMIN_TOKEN` | — | Admin 管理介面的 token；設定後 `/admin` 路由啟用（即時監控、歷史查詢、使用量統計） |
 | `DB_PATH` | `/data/perch.db` | SQLite 資料庫路徑，用於持久化查詢紀錄；GitLab OAuth 啟用時自動使用預設路徑 |
 | `RATE_LIMIT_RPM` | `10` | 每位使用者每分鐘最多查詢次數；設為 `0` 停用限速 |
 | `LOG_FORMAT` | `text` | Log 輸出格式：`text`（人讀格式）或 `json`（結構化，方便 ELK/Loki 收集） |
 
+### Discord 整合
+
+| 變數 | 預設值 | 說明 |
+|------|--------|------|
+| `DISCORD_BOT_TOKEN` | — | Discord bot token（啟用 Discord 整合） |
+| `DISCORD_CHANNEL_ID` | — | **選填**。限制只監聽指定 channel ID；不設定時監聽所有頻道 |
+| `DISCORD_ALLOWED_USER_IDS` | — | **選填**。逗號分隔的 Discord 用戶 ID 白名單；**未設定時 DM 功能完全關閉** |
+
+### Workspace Git Sync
+
+| 變數 | 預設值 | 說明 |
+|------|--------|------|
+| `WORKSPACE_GIT_SYNC_ENABLED` | `false` | 設為 `true` 或 `1` 啟用 workspace 自動 git sync |
+| `WORKSPACE_GIT_SYNC_INTERVAL` | `60` | Sync 間隔秒數 |
+| `WORKSPACE_PATH` | `/workspace` | 要同步的 git repo 路徑 |
+| `WORKSPACE_GIT_TOKEN` | — | HTTPS remote 的 git token |
+| `WORKSPACE_GIT_SYNC_NOTIFY_CHANNEL` | — | 同步失敗時送通知的 Discord channel ID |
+| `WORKSPACE_GIT_SYNC_SUBMODULES` | `false` | 設為 `true` 或 `1` 在每次 pull 後自動執行 submodule update |
+
 ---
 
-## Chat UI（知識庫查詢）
+## 運作模式
 
-當設定 `GITLAB_URL`、`GITLAB_CLIENT_ID`、`GITLAB_CLIENT_SECRET`、`GITLAB_REDIRECT_URI` 後，Perch 會在 `/chat` 路由提供 Chat UI。
+### 單使用者模式（預設）
 
-- 使用者以公司 GitLab 帳號登入後，可輸入問題由 OpenCode `as-query` agent 回答
-- 每位使用者有獨立的 OpenCode PTY session，互不干擾
-- 回應以 markdown 渲染；側邊面板可即時查看 tool call 執行狀態
-- 原有 `/`（terminal）的 auth 模式不受影響
+`PERCH_MODE=single`（或不設定）啟動單使用者模式。`/` 直接提供 terminal UI，認證方式由 `AUTH_METHOD` 決定。
+
+### 多使用者模式
+
+`PERCH_MODE=multi` 啟動多使用者模式，需搭配 GitLab OAuth。
+
+- **管理員**（`GITLAB_ADMIN_IDS` 中的使用者）：登入後路由到 `/admin`（terminal UI + 管理面板），也可直接瀏覽 `/chat`
+- **一般使用者**（`GITLAB_ALLOWED_IDS` 控制）：登入後路由到 `/chat`（多輪對話 Chat UI）
+- **未認證的訪客**：`/`、`/chat`、`/admin` 均顯示 GitLab 登入畫面，不進行伺服器端重導向
 
 **啟動範例：**
 
 ```bash
 docker run -d \
   -p 8080:8080 \
-  -e AUTH_MODE=none \
+  -e PERCH_MODE=multi \
+  -e AGENT_RUNTIME=opencode \
+  -e GITLAB_URL=https://gitlab.example.com \
+  -e GITLAB_CLIENT_ID=your-client-id \
+  -e GITLAB_CLIENT_SECRET=your-client-secret \
+  -e GITLAB_REDIRECT_URI=https://perch.example.com/auth/callback \
+  -e GITLAB_ADMIN_IDS=101,202 \
+  -e GITLAB_ALLOWED_IDS=* \
+  -e COOKIE_SECRET=$(openssl rand -hex 32) \
+  -v ./:/workspace \
+  ghcr.io/fcwu/perch:latest
+```
+
+---
+
+## Chat UI（多輪對話知識庫查詢）
+
+Chat UI 提供多輪對話支援，使用者可以追問後續問題，agent 會自動記住過去 24 小時內的對話歷史。
+
+- **多輪對話**：對話歷史從 SQLite 自動重建，24 小時內的問答會作為上下文附在新查詢前方
+- **自動過期**：超過 24 小時無活動，下一次查詢自動以空白歷史重新開始（上限 20 輪）
+- **新對話按鈕**：可隨時點擊「New conversation」立即清除歷史，伺服器端同步跳過歷史查詢
+- **對話串渲染**：所有輪次以可捲動的 user/assistant 氣泡呈現
+- **登出**：所有已認證頁面均顯示登出按鈕，點擊後清除 session 並返回登入畫面
+
+### 多使用者模式啟用 Chat UI
+
+同上方「多使用者模式」啟動範例，一般使用者登入後自動路由至 `/chat`。
+
+### 單使用者模式啟用 Chat UI（搭配 GitLab 認證）
+
+```bash
+docker run -d \
+  -p 8080:8080 \
+  -e PERCH_MODE=single \
+  -e AUTH_METHOD=gitlab \
   -e AGENT_RUNTIME=opencode \
   -e GITLAB_URL=https://gitlab.example.com \
   -e GITLAB_CLIENT_ID=your-client-id \
@@ -159,17 +327,17 @@ docker run -d \
 
 ---
 
-## 認證模式說明
+## 認證方式說明
 
-### `AUTH_MODE=none` — 無認證
+### `AUTH_METHOD=none` — 無認證
 
 無任何驗證，所有人可直接連線。**僅限內網或本地測試使用**，絕對不要暴露在公網。
 
-### `AUTH_MODE=password` — 密碼登入
+### `AUTH_METHOD=password` — 密碼登入
 
-連線後需輸入密碼才能看到 terminal。密碼以 cookie session 方式儲存。
+連線後需輸入密碼才能看到 terminal。密碼以 cookie session 方式儲存。需設定 `PERCH_PASSWORD`。
 
-### `AUTH_MODE=mtls` — 雙向 TLS（mTLS）
+### `AUTH_METHOD=mtls` — 雙向 TLS（mTLS）
 
 最安全的模式，瀏覽器必須安裝 client 憑證才能連線。
 
@@ -187,6 +355,23 @@ docker run -d \
 **iOS Safari 安裝憑證：**
 - 下載後跳出安裝提示 → 去「設定 → 一般 → VPN 與裝置管理」安裝
 
+### `AUTH_METHOD=gitlab` — GitLab OAuth（單使用者）
+
+使用 GitLab OAuth 作為單使用者認證。需設定 `GITLAB_URL`、`GITLAB_CLIENT_ID`、`GITLAB_CLIENT_SECRET`。
+
+若設定 `GITLAB_ADMIN_IDS`，只有清單中的 GitLab 使用者 ID 可以通過認證（作為允許名單）；若不設定，所有已認證的 GitLab 使用者均可登入。
+
+---
+
+## 公開 API Endpoint
+
+| Endpoint | 說明 |
+|----------|------|
+| `GET /api/auth/status` | 回傳當前認證狀態（始終 HTTP 200）：`{"authenticated": bool, "username": "", "role": "admin\|user\|", "mode": "single\|multi"}` |
+| `GET /auth/logout` | 清除 session cookie，重導向至 `/` |
+| `GET /auth/gitlab` | 開始 GitLab OAuth 流程 |
+| `GET /auth/callback` | GitLab OAuth callback |
+
 ---
 
 ## Agent Runtime
@@ -203,7 +388,7 @@ Perch 現在支援兩種 agent runtime：
 ```bash
 docker run -d \
   -p 8080:8080 \
-  -e AUTH_MODE=none \
+  -e AUTH_METHOD=none \
   -e AGENT_RUNTIME=opencode \
   -e OPENCODE_ARGS="-q" \
   -e ANTHROPIC_API_KEY=<your-key> \

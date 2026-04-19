@@ -3,7 +3,7 @@ name: verifier
 description: Runs and verifies test cases from docs/test*.md. Prefers e2e testing with curl/bash. Always asks for environment info (URL, auth, tokens) before executing. Use when you need to validate features or run a test suite.
 ---
 
-根據 `docs/test*.md` 中的 test cases 執行驗證，優先做 e2e 測試。
+根據 `docs/test*.md` 中的 test cases 執行驗證。
 
 ## 執行前：收集環境資訊
 
@@ -24,6 +24,7 @@ description: Runs and verifies test cases from docs/test*.md. Prefers e2e testin
 ## 輸入來源
 
 可以是：
+
 - Test case 範圍（e.g. `T01~T10`、`T55`、`T01 T03 T07`）
 - 功能描述（e.g. `測試 multi-turn chat`）→ 自動找對應 test cases
 - OpenSpec change 名稱 → 掃描 test cases 找相關項目
@@ -54,17 +55,61 @@ description: Runs and verifies test cases from docs/test*.md. Prefers e2e testin
    c. 比對實際結果與預期結果
 
    d. 標記結果：
-      - `✅ PASS` — 符合預期
-      - `❌ FAIL` — 不符預期，附上實際輸出
-      - `⚠️ SKIP` — 無法執行（缺少環境），說明原因
-      - `⚠️ MANUAL` — 需要手動操作（瀏覽器 UI），列出步驟讓使用者執行並回報
+   - `✅ PASS` — 符合預期
+   - `❌ FAIL` — 不符預期，附上實際輸出
+   - `⚠️ SKIP` — 無法執行（缺少環境），說明原因
+   - `⚠️ MANUAL` — 需要手動操作（瀏覽器 UI），列出步驟讓使用者執行並回報
 
-4. **手動測試的處理**
+4. **E2E-browser 測試：優先用 chrome-cdp 自動化**
 
-   若 test case 需要瀏覽器操作：
-   - 列出清楚的操作步驟
-   - 等待使用者回報結果（`✅` / `❌`）
-   - 記錄使用者回報的結果後繼續
+   若 test case 標記為 `E2E-browser`，**優先使用 chrome-cdp 自動執行**，不要標記為 MANUAL：
+
+   **工具路徑**：`node /Users/dorowu/.agents/skills/chrome-cdp/scripts/cdp.mjs`
+
+   **標準流程**：
+
+   ```bash
+   # 1. 列出可用 tab，找到目標頁面
+   node .../cdp.mjs list
+
+   # 2. 導航到目標 URL
+   node .../cdp.mjs nav <target> <url>
+
+   # 3. 截圖確認頁面狀態
+   node .../cdp.mjs shot <target> /tmp/test-<name>.png
+
+   # 4. 操作元素（點擊、輸入）
+   node .../cdp.mjs click <target> "<css-selector>"
+   # React 元件的 input/textarea 需用 eval + nativeInputValueSetter：
+   node .../cdp.mjs eval <target> "
+     const ta = document.querySelector('textarea');
+     const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set;
+     setter.call(ta, '輸入文字');
+     ta.dispatchEvent(new Event('input', { bubbles: true }));
+   "
+
+   # 5. 查看頁面結構
+   node .../cdp.mjs snap <target>
+
+   # 6. 驗證 Network 請求（DevTools 替代方案）
+   node .../cdp.mjs eval <target> "
+     // intercept fetch to capture last request body
+     window.__lastReqBody = null;
+     const orig = window.fetch;
+     window.fetch = (url, opts) => { window.__lastReqBody = opts?.body; return orig(url, opts); };
+   "
+   # 送出後檢查：
+   node .../cdp.mjs eval <target> "window.__lastReqBody"
+   ```
+
+   **前置條件**：
+   - 若測試需要已登入狀態，先確認 `/api/auth/status` 回傳 `authenticated: true`
+   - 若未登入，詢問使用者如何取得 session（手動登入或提供憑證），**不要自行 debug auth 流程**
+   - 確認後再繼續測試
+
+   **只有在以下情況才標記為 MANUAL**：
+   - chrome-cdp 連不上（Chrome 未開啟 remote debugging）
+   - 使用者明確要求手動執行
 
 5. **彙整報告**
 
@@ -86,7 +131,6 @@ description: Runs and verifies test cases from docs/test*.md. Prefers e2e testin
    ```
 
 6. **詢問後續動作**
-
    - 若有 FAIL → 詢問是否需要 debug 或修 bug
    - 若全 PASS → 詢問是否要寫入測試報告（`docs/test-report-<date>.md`）
 
