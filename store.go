@@ -294,9 +294,16 @@ func (s *Store) GetUsageStats(from, to int64) (*UsageStats, error) {
 		return nil, err
 	}
 
+	toolWhere := "s.status='done'"
+	if from > 0 {
+		toolWhere += " AND s.started_at>=?"
+	}
+	if to > 0 {
+		toolWhere += " AND s.started_at<=?"
+	}
 	toolRows, err := s.db.Query(
 		`SELECT t.tool_name,COUNT(*) as cnt FROM tool_events t
-		 JOIN query_sessions s ON t.session_id=s.id WHERE s.` + where + ` GROUP BY t.tool_name ORDER BY cnt DESC LIMIT 10`,
+		 JOIN query_sessions s ON t.session_id=s.id WHERE `+toolWhere+` GROUP BY t.tool_name ORDER BY cnt DESC LIMIT 10`,
 		args...,
 	)
 	if err != nil {

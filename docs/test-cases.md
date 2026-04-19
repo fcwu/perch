@@ -1341,3 +1341,98 @@ curl -s "http://localhost:8080/admin/analytics?from=$FROM&to=$TO" \
 - 無資料時回傳空陣列，total_queries=0
 
 **自動化**：`go test -run TestGetUsageStats ./...`
+
+---
+
+## T60 — GET /admin/login 應回傳 SPA HTML
+
+**目的**：確認瀏覽器直接輸入 `/admin/login` URL 時，伺服器回傳 `index.html` 而非 "method not allowed"。
+
+**背景**：`handleLogin` 只處理 POST；若 GET 請求命中同一 handler 會回 405。
+此 bug 曾在初次 browser 測試時發現，需確保路由層對 GET 正確 fallback 到 SPA。
+
+**步驟**：
+```bash
+# GET 請求應回傳 HTML（SPA entry point），不是純文字錯誤
+curl -s -o /dev/null -w "%{http_code}" http://localhost:8080/admin/login
+# 預期：200
+
+curl -s http://localhost:8080/admin/login | head -1
+# 預期：<!doctype html>
+```
+
+**瀏覽器驗證**：
+1. 在 Chrome 網址列輸入 `http://<host>/admin/login` 並按 Enter
+2. 確認頁面渲染出「Admin Login」表單（有 token 輸入框和 Login 按鈕）
+3. 不應出現「method not allowed」或任何純文字錯誤
+
+**反向驗證**：POST 仍走 login handler
+```bash
+curl -s -o /dev/null -w "%{http_code}" -X POST http://localhost:8080/admin/login \
+  -H "Content-Type: application/json" -d '{"token":"correct"}'
+# 預期：200（正確 token）
+```
+
+---
+
+## T61 — Admin Tab 切換應為 Client-Side Routing
+
+**目的**：確認 Live / History / Analytics tab 切換時，不觸發整頁重載；URL 更新但頁面不重新向 server 請求 HTML。
+
+**背景**：若 tab 使用 `window.location.href`，瀏覽器會發 GET 到 `/admin/history`，
+server 回 JSON（`{"sessions":null,"total":0}`），破壞 SPA 體驗。
+
+**步驟（瀏覽器驗證）**：
+1. 登入 `/admin/login` 取得 `perch_admin` cookie
+2. 開啟 DevTools → Network 面板，勾選 「Preserve log」
+3. 點擊「History」tab → 確認 **網址列變成 `/admin/history`** 但無 document 類型的 network request
+4. 點擊「Analytics」tab → 確認 **網址列變成 `/admin/analytics`** 但無整頁 reload
+5. 點擊「Live」tab → 回 `/admin`，頁面仍是 SPA
+
+**預期**：
+- Tab 切換只觸發 `fetch()` API call（`/admin/history`、`/admin/analytics`），不觸發整頁 navigation
+- Network 面板中無 type=`document` 的請求（除最初進入頁面那次）
+- URL 更新後，重新整理頁面仍可正確載入對應 tab
+
+**反向驗證（不應出現的現象）**：
+```bash
+# 若 tab 用 window.location.href，直接 GET /admin/history 會拿到 JSON
+curl -s http://localhost:8080/admin/history -H "Cookie: perch_admin=<token>" | head -1
+# 正確行為下（有 cookie）仍回 JSON（API endpoint），不影響 SPA
+# 但瀏覽器 tab 切換不應走這條路徑取 HTML
+```
+
+---
+
+## T62 — Analytics API JOIN Query 不報 Ambiguous Column Error
+
+**目的**：確認 `GET /admin/analytics` 在有資料時不回 500 Internal Server Error。
+
+**背景**：`GetUsageStats` 的 tool_events JOIN query 中，`started_at` 在 `query_sessions` 和 `tool_events` 兩個 table 都存在，
+若 WHERE 子句未加 table alias 前綴，SQLite 報 ambiguous column → 500。
+
+**步驟**：
+```bash
+ADMIN_COOKIE="perch_admin=<from T54>"
+FROM=$(($(date +%s) - 604800))000
+TO=$(date +%s)000
+
+curl -s -o /dev/null -w "%{http_code}" \
+  "http://localhost:8080/admin/analytics?from=$FROM&to=$TO" \
+  -H "Cookie: $ADMIN_COOKIE"
+# 預期：200（不是 500）
+
+curl -s "http://localhost:8080/admin/analytics?from=$FROM&to=$TO" \
+  -H "Cookie: $ADMIN_COOKIE" | python3 -m json.tool
+# 預期：合法 JSON，含 users、top_tools、total_queries、total_duration_ms
+```
+
+**反向驗證（無資料）**：
+```bash
+# from/to 超出資料範圍時，回傳空陣列而非 500
+curl -s "http://localhost:8080/admin/analytics?from=0&to=1" \
+  -H "Cookie: $ADMIN_COOKIE"
+# 預期：{"users":[],"top_tools":[],"total_queries":0,"total_duration_ms":0}
+```
+
+**自動化**：`go test -run TestGetUsageStats ./...`
