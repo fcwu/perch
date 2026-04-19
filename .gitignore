@@ -7,3 +7,5 @@ schedules.json
 .opencode/
 deploy/.env
 docs/.env.*.md
+docs/test-report-*.md
+tests/test-report-*.md

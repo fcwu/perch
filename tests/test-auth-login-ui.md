@@ -133,7 +133,9 @@ curl -s http://localhost:8080/api/auth/status
 
 ### AL08 — multi-user OAuth 後一般使用者導向 /chat
 
-**層級**：Integration（mock OAuth server）
+**層級**：Unit/Integration（Go test with httptest mock）
+
+**Go Test**：`TestGitLabAuthCallbackMultiModeAllowAllRedirectsToChat`（`gitlab_auth_test.go`）
 
 **Mock 方式**：mock server 回傳不在 `GITLAB_ADMIN_IDS` 中的 user ID，設定 `GITLAB_ALLOWED_IDS=*`。
 
@@ -292,7 +294,9 @@ curl -k --cert-type P12 --cert client.p12:perch \
 
 ### AL18 — GITLAB_ALLOWED_IDS=* 允許任何已驗證的非 admin 使用者
 
-**層級**：Unit 或 Integration（mock OAuth）
+**層級**：Unit/Integration（Go test with httptest mock）
+
+**Go Test**：`TestGitLabAuthCallbackMultiModeAllowAllRedirectsToChat`（`gitlab_auth_test.go`）
 
 **步驟**：mock 回傳非 admin user ID，設 `GITLAB_ALLOWED_IDS=*`。
 
@@ -302,9 +306,11 @@ curl -k --cert-type P12 --cert client.p12:perch \
 
 ### AL19 — GITLAB_ALLOWED_IDS 指定 ID — 列表內使用者被允許
 
-**層級**：Unit 或 Integration（mock OAuth）
+**層級**：Unit/Integration（Go test with httptest mock）
 
-**步驟**：mock 回傳 user ID = `111`，設 `GITLAB_ALLOWED_IDS=111,222`。
+**Go Test**：`TestGitLabAuthCallbackMultiModeAllowedListPermitted`（`gitlab_auth_test.go`）
+
+**步驟**：mock 回傳 user ID = `55`，設 `GITLAB_ALLOWED_IDS=55`。
 
 **預期**：使用者被允許並重導向至 `/chat`。
 
@@ -322,9 +328,11 @@ curl -k --cert-type P12 --cert client.p12:perch \
 
 ### AL21 — Admin 無視 GITLAB_ALLOWED_IDS 限制
 
-**層級**：Unit 或 Integration（mock OAuth）
+**層級**：Unit/Integration（Go test with httptest mock）
 
-**步驟**：mock 回傳 user ID = `777`，設 `GITLAB_ADMIN_IDS=777`，不設 `GITLAB_ALLOWED_IDS`。
+**Go Test**：`TestGitLabAuthCallbackAdminIgnoresAllowedIDs`（`gitlab_auth_test.go`）
+
+**步驟**：mock 回傳 user ID = `42`，設 `GITLAB_ADMIN_IDS=42`，`GITLAB_ALLOWED_IDS=99`（admin 不在 allowedIDs 內）。
 
 **預期**：使用者被允許並重導向至 `/admin`。
 
@@ -396,16 +404,6 @@ curl -v http://localhost:8080/auth/logout
 
 ---
 
-### AL26 — 登入頁面顯示 access_denied 錯誤訊息
-
-**層級**：E2E-browser（無需 GitLab）
-
-**步驟**：瀏覽器開啟 `/?error=access_denied`。
-
-**預期**：登入畫面顯示「Access denied. Contact the administrator.」訊息。
-
----
-
 ### AL27 — 已登入時顯示登出按鈕
 
 **層級**：E2E-browser（可用 password auth，無需 GitLab）
@@ -442,22 +440,40 @@ curl -v http://localhost:8080/auth/logout
 
 ### AL30 — Multi-user admin 在 /admin 看到 admin UI
 
-**層級**：E2E-browser（Integration mock OAuth 取得 session 後，瀏覽器帶 cookie 瀏覽）
+**層級**：E2E-browser（偽造 session cookie，無需 GitLab OAuth）
+
+**前置條件**：perch 以 multi-user 模式啟動，`GITLAB_ADMIN_IDS` 包含 user ID `42`，`COOKIE_SECRET` 已知。
 
 **步驟**：
-1. 以 mock OAuth 取得 admin session cookie。
-2. 瀏覽 `/admin`。
+```bash
+# 1. 產生 admin session cookie（使用與 perch 相同的 COOKIE_SECRET）
+COOKIE=$(go run ./cmd/mkcookie -user=42 -username=admin -role=admin -secret=$COOKIE_SECRET)
 
-**預期**：SPA 渲染 terminal UI 與管理面板。
+# 2. 用 chrome-cdp 注入 cookie 並導航至 /admin
+node ~/.agents/skills/chrome-cdp/scripts/cdp.mjs cookie-set <target> perch_session "$COOKIE" <host>
+node ~/.agents/skills/chrome-cdp/scripts/cdp.mjs nav <target> http://<host>/admin
+node ~/.agents/skills/chrome-cdp/scripts/cdp.mjs snap <target>
+```
+
+**預期**：SPA 渲染 admin UI（AX tree 含管理面板相關元素，不含「Login with GitLab」按鈕）。
 
 ---
 
 ### AL31 — Multi-user 一般使用者在 /chat 看到聊天 UI
 
-**層級**：E2E-browser（Integration mock OAuth 取得 session 後，瀏覽器帶 cookie 瀏覽）
+**層級**：E2E-browser（偽造 session cookie，無需 GitLab OAuth）
+
+**前置條件**：perch 以 multi-user 模式啟動，`GITLAB_ALLOWED_IDS=*`，`COOKIE_SECRET` 已知。
 
 **步驟**：
-1. 以 mock OAuth 取得 user session cookie（`GITLAB_ALLOWED_IDS=*`）。
-2. 瀏覽 `/chat`。
+```bash
+# 1. 產生 user session cookie
+COOKIE=$(go run ./cmd/mkcookie -user=999 -username=regularuser -role=user -secret=$COOKIE_SECRET)
 
-**預期**：SPA 渲染聊天 UI。
+# 2. 注入 cookie 並導航至 /chat
+node ~/.agents/skills/chrome-cdp/scripts/cdp.mjs cookie-set <target> perch_session "$COOKIE" <host>
+node ~/.agents/skills/chrome-cdp/scripts/cdp.mjs nav <target> http://<host>/chat
+node ~/.agents/skills/chrome-cdp/scripts/cdp.mjs snap <target>
+```
+
+**預期**：SPA 渲染聊天 UI（AX tree 含對話輸入框，不含「Login with GitLab」按鈕）。

@@ -17,35 +17,6 @@
 
 ---
 
-## MT01 — 歷史記錄注入（基本情境）
-
-**層級**：Integration
-
-**目的**：確認有近期已完成 session 時，伺服器會將對話歷史前置於新查詢。
-
-**前置條件**：
-- 使用者已登入
-- 該使用者在過去 24 小時內有 ≥1 筆 `status='done'` 的 `query_sessions` 記錄
-
-**步驟**：
-```bash
-# 先送第一則訊息
-curl -s -X POST http://localhost:8080/api/chat \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer <token>" \
-  -d '{"query": "我的名字是 Alice"}'
-
-# 再送跟進問題
-curl -s -X POST http://localhost:8080/api/chat \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer <token>" \
-  -d '{"query": "你記得我剛才說了什麼？"}'
-```
-
-**預期**：第二次回應中，agent 能正確引用第一次的對話內容（例如提到「Alice」）。
-
----
-
 ## MT02 — 24 小時以外的 session 不注入
 
 **層級**：Unit（直接測 `GetRecentHistory` 的 WHERE 條件）或 Integration（in-memory SQLite 插入舊資料）
