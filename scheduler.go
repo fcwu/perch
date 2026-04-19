@@ -313,7 +313,7 @@ func (s *Scheduler) run() {
 					if s.onFire != nil && job.Target != "" {
 						s.onFire(job.Target, job.Message)
 					}
-					if err := pm.write([]byte(job.Message + "\r")); err != nil {
+					if err := pm.write([]byte(job.Message + "\n")); err != nil {
 						s.logger.Warn("scheduler PTY write failed", "jobID", id, "target", job.Target, "err", err)
 					}
 				}
