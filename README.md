@@ -125,6 +125,10 @@ docker run -d \
 | `GITLAB_CLIENT_SECRET` | — | GitLab OAuth Application 的 Client Secret |
 | `GITLAB_REDIRECT_URI` | — | OAuth callback URI，例如 `https://perch.example.com/auth/callback` |
 | `COOKIE_SECRET` | （固定預設值） | 用於簽署 `perch_session` cookie 的 HMAC 密鑰；**正式環境請務必設定隨機值** |
+| `ADMIN_TOKEN` | — | Admin 管理介面的 token；設定後 `/admin` 路由啟用（即時監控、歷史查詢、使用量統計） |
+| `DB_PATH` | `/data/perch.db` | SQLite 資料庫路徑，用於持久化查詢紀錄；GitLab OAuth 啟用時自動使用預設路徑 |
+| `RATE_LIMIT_RPM` | `10` | 每位使用者每分鐘最多查詢次數；設為 `0` 停用限速 |
+| `LOG_FORMAT` | `text` | Log 輸出格式：`text`（人讀格式）或 `json`（結構化，方便 ELK/Loki 收集） |
 
 ---
 

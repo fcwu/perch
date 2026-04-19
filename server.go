@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"log/slog"
 	"net/http"
+	"strings"
 
 	"github.com/gorilla/websocket"
 )
@@ -28,21 +29,25 @@ func wsUpgrade(w http.ResponseWriter, r *http.Request) (*websocket.Conn, error) 
 }
 
 type Server struct {
-	pty          *PTYManager
-	auth         *AuthMiddleware
-	im           *IMManager
-	sessions     SessionProvider
-	userSessions *UserSessionManager
-	gitlabAuth   *gitLabAuth
-	logger       *slog.Logger
-	mux          *http.ServeMux
+	pty             *PTYManager
+	auth            *AuthMiddleware
+	im              *IMManager
+	sessions        SessionProvider
+	userSessions    *UserSessionManager
+	gitlabAuth      *gitLabAuth
+	adminAuth       *adminAuth
+	adminHub        *AdminHub
+	store           *Store
+	userRateLimiter *UserRateLimiter
+	logger          *slog.Logger
+	mux             *http.ServeMux
 }
 
-func newServer(pm *PTYManager, auth *AuthMiddleware, im *IMManager, sessions SessionProvider, userSessions *UserSessionManager, gitlabAuth *gitLabAuth, logger *slog.Logger) *Server {
+func newServer(pm *PTYManager, auth *AuthMiddleware, im *IMManager, sessions SessionProvider, userSessions *UserSessionManager, gitlabAuth *gitLabAuth, adminAuth *adminAuth, adminHub *AdminHub, store *Store, userRL *UserRateLimiter, logger *slog.Logger) *Server {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	s := &Server{pty: pm, auth: auth, im: im, sessions: sessions, userSessions: userSessions, gitlabAuth: gitlabAuth, logger: logger, mux: http.NewServeMux()}
+	s := &Server{pty: pm, auth: auth, im: im, sessions: sessions, userSessions: userSessions, gitlabAuth: gitlabAuth, adminAuth: adminAuth, adminHub: adminHub, store: store, userRateLimiter: userRL, logger: logger, mux: http.NewServeMux()}
 	s.mux.HandleFunc("/ws", s.handleWS)
 	s.mux.HandleFunc("/input", s.handleInput)
 	s.mux.HandleFunc("/sessions", s.handleSessions)
@@ -54,6 +59,15 @@ func newServer(pm *PTYManager, auth *AuthMiddleware, im *IMManager, sessions Ses
 	if auth != nil && auth.mode == "password" {
 		s.mux.HandleFunc("/login", auth.handleLogin)
 		s.mux.HandleFunc("/api/auth", auth.handleAuthStatus)
+	}
+	// Admin endpoints — POST handled by adminAuth, GET falls through to SPA below.
+	adminLoginHandler := adminAuth.handleLogin
+	if adminAuth != nil {
+		adminMW := adminAuth.middleware
+		s.mux.Handle("/admin/history/", adminMW(http.HandlerFunc(s.handleAdminHistoryDetail)))
+		s.mux.Handle("/admin/history", adminMW(http.HandlerFunc(s.handleAdminHistory)))
+		s.mux.Handle("/admin/analytics", adminMW(http.HandlerFunc(s.handleAdminAnalytics)))
+		s.mux.Handle("/ws/admin", adminMW(http.HandlerFunc(s.handleAdminWS)))
 	}
 	// GitLab OAuth endpoints (no auth required).
 	if gitlabAuth != nil && gitlabAuth.enabled() {
@@ -73,6 +87,14 @@ func newServer(pm *PTYManager, auth *AuthMiddleware, im *IMManager, sessions Ses
 		// Serve index.html for SPA routes that don't correspond to static files.
 		spaHandler := &spaFileServer{fs: distFS, fileServer: fileServer}
 		s.mux.Handle("/", spaHandler)
+		// /admin/login GET → SPA, POST → login handler.
+		s.mux.HandleFunc("/admin/login", func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == http.MethodPost {
+				adminLoginHandler(w, r)
+				return
+			}
+			serveIndexHTML(w, r, distFS)
+		})
 		// /chat: serve index.html (React router handles the path); protected by GitLab auth above.
 		if gitlabAuth != nil && gitlabAuth.enabled() {
 			s.mux.Handle("/chat", gitlabAuth.middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -86,7 +108,16 @@ func newServer(pm *PTYManager, auth *AuthMiddleware, im *IMManager, sessions Ses
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Paths exempt from the primary auth middleware.
 	switch r.URL.Path {
-	case "/hook", "/auth/gitlab", "/auth/callback":
+	case "/hook", "/auth/gitlab", "/auth/callback", "/admin/login":
+		s.mux.ServeHTTP(w, r)
+		return
+	}
+	// Admin paths use their own cookie auth or are public (login page, SPA).
+	if r.URL.Path == "/ws/admin" || r.URL.Path == "/admin/history" ||
+		strings.HasPrefix(r.URL.Path, "/admin/history/") ||
+		r.URL.Path == "/admin/analytics" ||
+		r.URL.Path == "/admin/login" ||
+		r.URL.Path == "/admin" || strings.HasPrefix(r.URL.Path, "/admin/") {
 		s.mux.ServeHTTP(w, r)
 		return
 	}
@@ -308,6 +339,19 @@ func (s *Server) handleChatAPI(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Per-user rate limit check
+	if s.userRateLimiter != nil {
+		if ok, retryAfter := s.userRateLimiter.Allow(userID); !ok {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusTooManyRequests)
+			json.NewEncoder(w).Encode(map[string]any{
+				"error":          "rate limit exceeded",
+				"retry_after_ms": retryAfter,
+			})
+			return
+		}
+	}
+
 	if err := s.userSessions.StartSession(userID, username, req.Query); err != nil {
 		if ce, ok := err.(interface{ IsConflict() bool }); ok && ce.IsConflict() {
 			http.Error(w, "session already in progress", http.StatusConflict)
@@ -449,4 +493,112 @@ func (s *Server) handleChatWS(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+}
+
+// handleAdminWS streams admin session events via WebSocket.
+func (s *Server) handleAdminWS(w http.ResponseWriter, r *http.Request) {
+	if s.adminHub == nil {
+		http.Error(w, "admin not configured", http.StatusServiceUnavailable)
+		return
+	}
+	conn, err := wsUpgrade(w, r)
+	if err != nil {
+		s.logger.Error("ws admin upgrade", "err", err)
+		return
+	}
+	defer conn.Close()
+
+	ch, unsub := s.adminHub.subscribe()
+	defer unsub()
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for {
+			if _, _, err := conn.ReadMessage(); err != nil {
+				return
+			}
+		}
+	}()
+
+	for {
+		select {
+		case msg, ok := <-ch:
+			if !ok {
+				return
+			}
+			if err := conn.WriteMessage(websocket.TextMessage, []byte(msg)); err != nil {
+				return
+			}
+		case <-done:
+			return
+		}
+	}
+}
+
+// handleAdminHistory handles GET /admin/history
+func (s *Server) handleAdminHistory(w http.ResponseWriter, r *http.Request) {
+	if s.store == nil {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{"total": 0, "sessions": []any{}})
+		return
+	}
+	q := r.URL.Query()
+	user := q.Get("user")
+	keyword := q.Get("q")
+	var from, to int64
+	fmt.Sscanf(q.Get("from"), "%d", &from)
+	fmt.Sscanf(q.Get("to"), "%d", &to)
+	var page, limit int
+	fmt.Sscanf(q.Get("page"), "%d", &page)
+	fmt.Sscanf(q.Get("limit"), "%d", &limit)
+
+	sessions, total, err := s.store.ListSessions(user, keyword, from, to, page, limit)
+	if err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{"total": total, "sessions": sessions})
+}
+
+// handleAdminHistoryDetail handles GET /admin/history/<id>
+func (s *Server) handleAdminHistoryDetail(w http.ResponseWriter, r *http.Request) {
+	id := r.URL.Path[len("/admin/history/"):]
+	if id == "" || s.store == nil {
+		http.Error(w, "not found", http.StatusNotFound)
+		return
+	}
+	detail, err := s.store.GetSession(id)
+	if err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	if detail == nil {
+		http.Error(w, "not found", http.StatusNotFound)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(detail)
+}
+
+// handleAdminAnalytics handles GET /admin/analytics
+func (s *Server) handleAdminAnalytics(w http.ResponseWriter, r *http.Request) {
+	if s.store == nil {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(&UsageStats{Users: []UserStat{}, TopTools: []ToolStat{}})
+		return
+	}
+	q := r.URL.Query()
+	var from, to int64
+	fmt.Sscanf(q.Get("from"), "%d", &from)
+	fmt.Sscanf(q.Get("to"), "%d", &to)
+
+	stats, err := s.store.GetUsageStats(from, to)
+	if err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(stats)
 }

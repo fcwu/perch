@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"crypto/tls"
+	"fmt"
 	"net"
 	"net/http"
 	"os"
@@ -116,11 +117,38 @@ func main() {
 		sessProvider = discordSess
 	}
 	gitlabAuth := newGitLabAuth()
+	adminAuth := newAdminAuth()
+	adminHub := newAdminHub()
+
+	// Open SQLite store if DB_PATH is set (or default to /data/perch.db when GitLab auth enabled)
+	var store *Store
+	dbPath := os.Getenv("DB_PATH")
+	if dbPath == "" && gitlabAuth.enabled() {
+		dbPath = "/data/perch.db"
+	}
+	if dbPath != "" {
+		var storeErr error
+		store, storeErr = OpenStore(dbPath)
+		if storeErr != nil {
+			logger.Warn("failed to open store, history disabled", "path", dbPath, "err", storeErr)
+		}
+	}
+
 	var userSessions *UserSessionManager
 	if gitlabAuth.enabled() {
-		userSessions = newUserSessionManager(runtime, workdir, logger.Logger)
+		userSessions = newUserSessionManager(runtime, workdir, logger.Logger, store, adminHub)
 	}
-	srv := newServer(pm, auth, im, sessProvider, userSessions, gitlabAuth, logger.Logger)
+	// Per-user rate limiter
+	rateLimitRPM := 10
+	if v := os.Getenv("RATE_LIMIT_RPM"); v != "" {
+		fmt.Sscanf(v, "%d", &rateLimitRPM)
+	}
+	var userRL *UserRateLimiter
+	if gitlabAuth.enabled() {
+		userRL = newUserRateLimiter(rateLimitRPM)
+	}
+
+	srv := newServer(pm, auth, im, sessProvider, userSessions, gitlabAuth, adminAuth, adminHub, store, userRL, logger.Logger)
 
 	// Apply rate limiting to sensitive endpoints only
 	sensitivePaths := map[string]bool{"/login": true, "/bootstrap": true}
@@ -204,4 +232,7 @@ func main() {
 		im.stop()
 	}
 	httpSrv.Shutdown(context.Background())
+	if store != nil {
+		store.Close()
+	}
 }

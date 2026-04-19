@@ -26,6 +26,8 @@ type userSession struct {
 	userID      string
 	username    string
 	sessionUUID string
+	query       string
+	startedAt   int64
 
 	pty    *PTYManager
 	status userSessionStatus
@@ -34,19 +36,23 @@ type userSession struct {
 	jsonSubs  map[int]chan string
 	nextSubID int
 
-	toolStartTimes map[string]time.Time // toolName → PreToolUse time
+	toolStartTimes  map[string]time.Time  // toolName → PreToolUse time
+	toolEventIDs    map[string]int64      // toolName → store event ID
 
 	cancel      context.CancelFunc
 	completedAt time.Time
 }
 
-func newUserSession(userID, username string) *userSession {
+func newUserSession(userID, username, query string) *userSession {
 	return &userSession{
-		userID:         userID,
-		username:       username,
-		pty:            newPTYManager(),
-		jsonSubs:       make(map[int]chan string),
+		userID:       userID,
+		username:     username,
+		query:        query,
+		startedAt:    time.Now().UnixMilli(),
+		pty:          newPTYManager(),
+		jsonSubs:     make(map[int]chan string),
 		toolStartTimes: make(map[string]time.Time),
+		toolEventIDs:   make(map[string]int64),
 	}
 }
 
@@ -88,16 +94,18 @@ func (s *userSession) closeAllJSON() {
 
 // UserSessionManager manages per-user OpenCode PTY sessions.
 type UserSessionManager struct {
-	runtime AgentRuntime
-	workdir string
-	logger  *slog.Logger
+	runtime   AgentRuntime
+	workdir   string
+	logger    *slog.Logger
+	store     *Store
+	adminHub  *AdminHub
 
 	mu       sync.Mutex
 	sessions map[string]*userSession // userID → session
 	uuidMap  map[string]string       // sessionUUID → userID (for hook routing)
 }
 
-func newUserSessionManager(runtime AgentRuntime, workdir string, logger *slog.Logger) *UserSessionManager {
+func newUserSessionManager(runtime AgentRuntime, workdir string, logger *slog.Logger, store *Store, adminHub *AdminHub) *UserSessionManager {
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -105,6 +113,8 @@ func newUserSessionManager(runtime AgentRuntime, workdir string, logger *slog.Lo
 		runtime:  runtime,
 		workdir:  workdir,
 		logger:   logger,
+		store:    store,
+		adminHub: adminHub,
 		sessions: make(map[string]*userSession),
 		uuidMap:  make(map[string]string),
 	}
@@ -130,7 +140,7 @@ func (m *UserSessionManager) StartSession(userID, username, query string) error 
 		delete(m.sessions, userID)
 	}
 
-	sess := newUserSession(userID, username)
+	sess := newUserSession(userID, username, query)
 	m.sessions[userID] = sess
 	m.mu.Unlock()
 
@@ -172,6 +182,16 @@ func (m *UserSessionManager) StartSession(userID, username, query string) error 
 		<-ctx.Done()
 		if ctx.Err() == context.DeadlineExceeded {
 			m.logger.Warn("UserSession timeout, stopping PTY", "userID", userID)
+			durationMs := time.Now().UnixMilli() - sess.startedAt
+			if m.store != nil && sess.sessionUUID != "" {
+				if err := m.store.UpdateSessionTimeout(sess.sessionUUID); err != nil {
+					m.logger.Error("store: update session timeout", "err", err)
+				}
+			}
+			if m.adminHub != nil && sess.sessionUUID != "" {
+				m.adminHub.SessionRemoved(sess.sessionUUID, "timeout")
+			}
+			m.logger.Info("query_done", "session_id", sess.sessionUUID, "duration_ms", durationMs, "status", "timeout")
 			sess.pty.stop()
 		}
 	}()
@@ -202,6 +222,22 @@ func (m *UserSessionManager) ClaimUUID(uuid string) (*userSession, bool) {
 			if st == userSessionRunning {
 				sess.sessionUUID = uuid
 				m.uuidMap[uuid] = sess.userID
+				// Persist session start now that we have the UUID.
+				if m.store != nil {
+					if err := m.store.InsertSession(uuid, sess.userID, sess.username, sess.query); err != nil {
+						m.logger.Error("store: insert session", "err", err)
+					}
+				}
+				if m.adminHub != nil {
+					m.adminHub.SessionAdded(AdminSessionView{
+						ID:        uuid,
+						Username:  sess.username,
+						Query:     sess.query,
+						Status:    "running",
+						StartedAt: sess.startedAt,
+					})
+				}
+				m.logger.Info("query_start", "user_id", sess.userID, "username", sess.username, "session_id", uuid, "query", sess.query)
 				return sess, true
 			}
 		}
@@ -250,11 +286,30 @@ func (m *UserSessionManager) NotifyHook(event HookEvent) {
 		})
 		sess.broadcastJSON(string(msg))
 
+		// Persist tool event start
+		if m.store != nil && sess.sessionUUID != "" {
+			if eventID, err := m.store.InsertToolEvent(sess.sessionUUID, event.ToolName, string(input)); err != nil {
+				m.logger.Error("store: insert tool event", "err", err)
+			} else {
+				sess.mu.Lock()
+				sess.toolEventIDs[event.ToolName] = eventID
+				sess.mu.Unlock()
+			}
+		}
+		if m.adminHub != nil && sess.sessionUUID != "" {
+			m.adminHub.SessionUpdated(sess.sessionUUID, event.ToolName)
+		}
+		m.logger.Info("tool_start", "session_id", sess.sessionUUID, "tool", event.ToolName)
+
 	case "PostToolUse":
 		sess.mu.Lock()
 		start, had := sess.toolStartTimes[event.ToolName]
 		if had {
 			delete(sess.toolStartTimes, event.ToolName)
+		}
+		eventID, hasEventID := sess.toolEventIDs[event.ToolName]
+		if hasEventID {
+			delete(sess.toolEventIDs, event.ToolName)
 		}
 		sess.mu.Unlock()
 
@@ -269,6 +324,17 @@ func (m *UserSessionManager) NotifyHook(event HookEvent) {
 		})
 		sess.broadcastJSON(string(msg))
 
+		// Persist tool event end
+		if m.store != nil && hasEventID {
+			outputJSON := string(truncateJSON(event.ToolResponse, 2000))
+			if err := m.store.UpdateToolEventEnd(eventID, outputJSON); err != nil {
+				m.logger.Error("store: update tool event end", "err", err)
+			}
+		}
+		if m.adminHub != nil && sess.sessionUUID != "" {
+			m.adminHub.SessionUpdated(sess.sessionUUID, "")
+		}
+
 	case "Stop":
 		msg, _ := json.Marshal(map[string]string{"type": "done"})
 		sess.broadcastJSON(string(msg))
@@ -281,7 +347,20 @@ func (m *UserSessionManager) NotifyHook(event HookEvent) {
 			sess.cancel()
 		}
 
-		m.logger.Info("UserSession Stop hook received", "userID", sess.userID)
+		// Persist session completion
+		durationMs := time.Now().UnixMilli() - sess.startedAt
+		sess.mu.Lock()
+		toolCount := len(sess.toolStartTimes)
+		sess.mu.Unlock()
+		if m.store != nil && sess.sessionUUID != "" {
+			if err := m.store.UpdateSessionDone(sess.sessionUUID, event.LastAssistantMessage); err != nil {
+				m.logger.Error("store: update session done", "err", err)
+			}
+		}
+		if m.adminHub != nil && sess.sessionUUID != "" {
+			m.adminHub.SessionRemoved(sess.sessionUUID, "done")
+		}
+		m.logger.Info("query_done", "session_id", sess.sessionUUID, "duration_ms", durationMs, "tool_count", toolCount, "status", "done")
 	}
 }
 

@@ -4,6 +4,9 @@ import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
 import { Keyboard } from './Keyboard'
 import ChatPage from './ChatPage'
+import AdminRealtimePage from './AdminRealtimePage'
+import AdminHistoryPage from './AdminHistoryPage'
+import AdminAnalyticsPage from './AdminAnalyticsPage'
 
 const URL_RE = /https?:\/\/[^\s\x00-\x1f\x7f]+/g
 
@@ -337,10 +340,94 @@ function TerminalRoot() {
   return <TerminalApp />
 }
 
+function AdminLoginPage() {
+  const [token, setToken] = useState('')
+  const [error, setError] = useState('')
+  const [loading, setLoading] = useState(false)
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setLoading(true)
+    setError('')
+    const r = await fetch('/admin/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token }),
+    })
+    setLoading(false)
+    if (r.ok) {
+      window.location.href = '/admin'
+    } else {
+      setError('Invalid token')
+    }
+  }
+
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100dvh', background: '#000' }}>
+      <form onSubmit={submit} style={{ display: 'flex', flexDirection: 'column', gap: 12, background: '#111', padding: 32, borderRadius: 8, minWidth: 280 }}>
+        <div style={{ color: '#fff', fontSize: 18, fontFamily: 'monospace', marginBottom: 8 }}>Admin Login</div>
+        <input type="password" placeholder="Admin token" value={token} onChange={e => setToken(e.target.value)} autoFocus
+          style={{ background: '#222', color: '#fff', border: '1px solid #444', borderRadius: 4, padding: '8px 12px', fontSize: 14, fontFamily: 'monospace' }} />
+        {error && <div style={{ color: '#f66', fontSize: 12 }}>{error}</div>}
+        <button type="submit" disabled={loading} style={{ background: '#4af', color: '#000', border: 'none', borderRadius: 4, padding: '8px 12px', fontSize: 14, cursor: 'pointer' }}>
+          {loading ? '…' : 'Login'}
+        </button>
+      </form>
+    </div>
+  )
+}
+
+type AdminTab = 'realtime' | 'history' | 'analytics'
+
+function AdminApp() {
+  const initTab = (): AdminTab => {
+    const p = window.location.pathname
+    return p.startsWith('/admin/analytics') ? 'analytics' : p.startsWith('/admin/history') ? 'history' : 'realtime'
+  }
+  const [tab, setTab] = useState<AdminTab>(initTab)
+
+  const navigate = (t: AdminTab) => {
+    const url = t === 'realtime' ? '/admin' : t === 'history' ? '/admin/history' : '/admin/analytics'
+    window.history.pushState({}, '', url)
+    setTab(t)
+  }
+
+  const tabStyle = (active: boolean): React.CSSProperties => ({
+    padding: '8px 16px', cursor: 'pointer',
+    background: active ? '#222' : 'none',
+    color: active ? '#4af' : '#888',
+    border: 'none',
+    borderBottom: active ? '2px solid #4af' : '2px solid transparent',
+    fontSize: 13, fontFamily: 'sans-serif',
+  })
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100dvh', background: '#0a0a0a', color: '#e0e0e0' }}>
+      <div style={{ display: 'flex', background: '#111', borderBottom: '1px solid #222', flexShrink: 0, alignItems: 'center', padding: '0 8px' }}>
+        <span style={{ color: '#4af', fontFamily: 'monospace', fontSize: 14, padding: '8px 12px', marginRight: 8 }}>Perch Admin</span>
+        <button style={tabStyle(tab === 'realtime')} onClick={() => navigate('realtime')}>Live</button>
+        <button style={tabStyle(tab === 'history')} onClick={() => navigate('history')}>History</button>
+        <button style={tabStyle(tab === 'analytics')} onClick={() => navigate('analytics')}>Analytics</button>
+      </div>
+      <div style={{ flex: 1, overflowY: 'auto' }}>
+        {tab === 'realtime' && <AdminRealtimePage />}
+        {tab === 'history' && <AdminHistoryPage />}
+        {tab === 'analytics' && <AdminAnalyticsPage />}
+      </div>
+    </div>
+  )
+}
+
 export default function App() {
   const path = window.location.pathname
   if (path.startsWith('/chat')) {
     return <ChatPage userID={CHAT_USER_PLACEHOLDER} />
+  }
+  if (path === '/admin/login') {
+    return <AdminLoginPage />
+  }
+  if (path.startsWith('/admin')) {
+    return <AdminApp />
   }
   return <TerminalRoot />
 }

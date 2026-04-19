@@ -1163,3 +1163,181 @@ curl -s -o /dev/null -w "%{http_code}" -X POST http://localhost:8080/api/chat \
 - A、B 各自有獨立 PTY session（`UserSessionManager` 以 userID 為 key）
 - Hook 事件由 `session_uuid → userID` mapping 正確路由，互不干擾
 - 任一使用者查詢完成後，另一使用者的 session 繼續正常執行
+
+---
+
+## T54 — Admin Login（Phase 2）
+
+**目的**：確認 Admin token 登入流程正確，設置 `perch_admin` signed cookie。
+
+**前置條件**：啟動 perch 時設定 `ADMIN_TOKEN=mysecret`。
+
+**步驟**：
+```bash
+# 正確 token → 200 + cookie
+curl -s -v -X POST http://localhost:8080/admin/login \
+  -H "Content-Type: application/json" \
+  -d '{"token":"mysecret"}' 2>&1 | grep "< HTTP\|Set-Cookie"
+# 預期：HTTP 200，Set-Cookie: perch_admin=...
+
+# 錯誤 token → 401
+curl -s -o /dev/null -w "%{http_code}" -X POST http://localhost:8080/admin/login \
+  -H "Content-Type: application/json" \
+  -d '{"token":"wrong"}'
+# 預期：401
+```
+
+**反向驗證（ADMIN_TOKEN 未設定 → 503）**：
+```bash
+# 啟動時不設 ADMIN_TOKEN
+curl -s -o /dev/null -w "%{http_code}" http://localhost:8080/admin/history
+# 預期：503
+```
+
+**自動化**：`go test -run TestAdminLogin ./...`
+
+---
+
+## T55 — Admin 即時監控（Phase 2）
+
+**目的**：確認 `/ws/admin` WebSocket 正確推送即時 session 狀態。
+
+**前置條件**：已完成 T54 取得 `perch_admin` cookie，GitLab OAuth 已設定。
+
+**步驟**：
+1. 瀏覽器開啟 `http://localhost:8080/admin`
+2. 另一個瀏覽器以 GitLab 帳號登入並送出查詢
+3. 觀察 Admin 頁面的 Live Sessions
+
+**預期**：
+- Admin 頁面連線後立即顯示目前 active sessions（含 snapshot 推送）
+- 新查詢開始時出現新 row，顯示 username、query（截斷）、elapsed time、current tool
+- tool 開始執行時，current tool 欄位即時更新（不重整頁面）
+- 查詢結束時，該 row 從列表消失（`session_removed` 事件）
+
+---
+
+## T56 — Admin 歷史搜尋（Phase 2）
+
+**目的**：確認 `/admin/history` API 與 UI 的搜尋與詳情展開功能。
+
+**前置條件**：已有若干完成的查詢 session（執行過 T55）。
+
+**步驟（API）**：
+```bash
+ADMIN_COOKIE="perch_admin=<from T54>"
+
+# 列出所有 session
+curl -s http://localhost:8080/admin/history \
+  -H "Cookie: $ADMIN_COOKIE" | jq '.total, .sessions | length'
+
+# 依使用者過濾
+curl -s "http://localhost:8080/admin/history?user=alice" \
+  -H "Cookie: $ADMIN_COOKIE" | jq '.sessions[].Username'
+
+# 關鍵字搜尋
+curl -s "http://localhost:8080/admin/history?q=kubernetes" \
+  -H "Cookie: $ADMIN_COOKIE" | jq '.total'
+
+# 取得單一 session 詳情
+SESSION_ID=$(curl -s http://localhost:8080/admin/history -H "Cookie: $ADMIN_COOKIE" | jq -r '.sessions[0].ID')
+curl -s "http://localhost:8080/admin/history/$SESSION_ID" \
+  -H "Cookie: $ADMIN_COOKIE" | jq 'keys'
+# 預期：含 "Response", "ToolEvents", "Query" 等欄位
+```
+
+**步驟（UI）**：
+1. 瀏覽器開啟 `http://localhost:8080/admin/history`
+2. 在搜尋欄輸入關鍵字，觀察列表即時過濾
+3. 點擊某一行 → 展開詳情頁，可見完整 query、response、tool call 時序
+
+**預期**：list API 不含 response 欄位；detail API 含完整 response 與 tool_events。
+
+---
+
+## T57 — Per-User Rate Limit 429 回應（Phase 3）
+
+**目的**：確認超過 `RATE_LIMIT_RPM` 後回傳 429 及 retry_after_ms。
+
+**前置條件**：啟動 perch 時設定 `RATE_LIMIT_RPM=2`，已取得 GitLab session cookie。
+
+**步驟**：
+```bash
+SESSION_COOKIE="perch_session=<your_cookie>"
+
+for i in 1 2 3; do
+  CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST http://localhost:8080/api/chat \
+    -H "Cookie: $SESSION_COOKIE" \
+    -H "Content-Type: application/json" \
+    -d '{"query":"test '\"$i\"'"}')
+  echo "Request $i: $CODE"
+done
+```
+
+**預期**：
+- Request 1, 2：HTTP 200（或 409 若 session 仍在執行中）
+- Request 3：HTTP 429，body 含 `{"error":"rate limit exceeded","retry_after_ms":N}`
+
+**自動化**：`go test -run TestUserRateLimiter ./...`
+
+---
+
+## T58 — JSON Log 格式驗證（Phase 3）
+
+**目的**：確認 `LOG_FORMAT=json` 時，查詢生命週期事件以 JSON 格式輸出且含必要欄位。
+
+**步驟**：
+```bash
+LOG_FORMAT=json GITLAB_URL=... ADMIN_TOKEN=x ./perch 2>&1 &
+
+# 觸發一次查詢，觀察 log 輸出
+curl -X POST http://localhost:8080/api/chat \
+  -H "Cookie: $SESSION_COOKIE" \
+  -H "Content-Type: application/json" \
+  -d '{"query":"test"}'
+```
+
+**預期**：Log 輸出為 newline-delimited JSON，包含：
+```json
+{"time":"...","level":"INFO","msg":"query_start","user_id":"...","session_id":"...","query":"test"}
+{"time":"...","level":"INFO","msg":"tool_start","session_id":"...","tool":"Read"}
+{"time":"...","level":"INFO","msg":"query_done","session_id":"...","duration_ms":N,"status":"done"}
+```
+
+**反向驗證**：不設 `LOG_FORMAT`（預設 text），log 輸出為 `time=... level=INFO msg=...` 格式。
+
+**自動化**：`go test -run TestLogger ./...`
+
+---
+
+## T59 — Analytics API 回傳正確統計（Phase 3）
+
+**目的**：確認 `GET /admin/analytics` 回傳正確的 per-user 統計與 top tools 排行。
+
+**前置條件**：已有若干完成的查詢 session（含 tool events）。
+
+**步驟**：
+```bash
+ADMIN_COOKIE="perch_admin=<from T54>"
+
+# 本週統計
+FROM=$(date -d '7 days ago' +%s000 2>/dev/null || date -v-7d +%s000)
+TO=$(date +%s000)
+curl -s "http://localhost:8080/admin/analytics?from=$FROM&to=$TO" \
+  -H "Cookie: $ADMIN_COOKIE" | jq '.'
+```
+
+**預期**：
+```json
+{
+  "users": [{"username":"alice","query_count":N,"avg_duration_ms":M},...],
+  "top_tools": [{"tool":"read","count":N},...],
+  "total_queries": N,
+  "total_duration_ms": M
+}
+```
+- users 依 query_count 降冪排列
+- top_tools 依 count 降冪排列（最多 10 個）
+- 無資料時回傳空陣列，total_queries=0
+
+**自動化**：`go test -run TestGetUsageStats ./...`

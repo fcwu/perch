@@ -14,7 +14,7 @@ func makeTestRuntime() AgentRuntime {
 
 func TestUserSessionManagerStartSession(t *testing.T) {
 	rt := makeTestRuntime()
-	m := newUserSessionManager(rt, "", nil)
+	m := newUserSessionManager(rt, "", nil, nil, nil)
 	if err := m.StartSession("u1", "alice", "what is X?"); err != nil {
 		t.Fatalf("StartSession: %v", err)
 	}
@@ -28,10 +28,10 @@ func TestUserSessionManagerStartSession(t *testing.T) {
 
 func TestUserSessionManagerConflictWhileRunning(t *testing.T) {
 	rt := makeTestRuntime()
-	m := newUserSessionManager(rt, "", nil)
+	m := newUserSessionManager(rt, "", nil, nil, nil)
 
 	// Manually add a running session.
-	sess := newUserSession("u1", "alice")
+	sess := newUserSession("u1", "alice", "test query")
 	// status defaults to userSessionRunning (zero value).
 	m.mu.Lock()
 	m.sessions["u1"] = sess
@@ -49,7 +49,7 @@ func TestUserSessionManagerConflictWhileRunning(t *testing.T) {
 
 func TestUserSessionManagerCancelStopsPTY(t *testing.T) {
 	rt := makeTestRuntime()
-	m := newUserSessionManager(rt, "", nil)
+	m := newUserSessionManager(rt, "", nil, nil, nil)
 
 	if err := m.StartSession("u1", "alice", "q"); err != nil {
 		t.Fatalf("StartSession: %v", err)
@@ -75,7 +75,7 @@ func TestUserSessionManagerCancelStopsPTY(t *testing.T) {
 
 func TestUserSessionManagerClaimUUID(t *testing.T) {
 	rt := makeTestRuntime()
-	m := newUserSessionManager(rt, "", nil)
+	m := newUserSessionManager(rt, "", nil, nil, nil)
 	if err := m.StartSession("u1", "alice", "q"); err != nil {
 		t.Fatalf("StartSession: %v", err)
 	}

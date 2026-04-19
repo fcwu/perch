@@ -33,6 +33,9 @@ COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
 ENV AUTH_MODE=none
+# SQLite DB and persistent data — mount a volume to preserve across restarts:
+# -v /your/data:/data
+VOLUME ["/data"]
 # GitLab OAuth for Chat UI — inject via -e at runtime:
 # -e GITLAB_URL=https://gitlab.example.com
 # -e GITLAB_CLIENT_ID=your-client-id

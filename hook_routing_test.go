@@ -9,13 +9,13 @@ import (
 
 func newTestUserSessionManager() *UserSessionManager {
 	rt := AgentRuntime{Name: "opencode", Command: "true"}
-	return newUserSessionManager(rt, "", nil)
+	return newUserSessionManager(rt, "", nil, nil, nil)
 }
 
 func TestHookRouterKnownSessionUUID(t *testing.T) {
 	usm := newTestUserSessionManager()
 	// Seed a session and claim a UUID.
-	usm.sessions["u1"] = newUserSession("u1", "alice")
+	usm.sessions["u1"] = newUserSession("u1", "alice", "test query")
 	usm.sessions["u1"].sessionUUID = "uuid-123"
 	usm.uuidMap["uuid-123"] = "u1"
 
@@ -57,7 +57,7 @@ func TestHookRouterUnknownSessionUUIDDiscarded(t *testing.T) {
 
 func TestHookRouterStopMarksSessionCompleted(t *testing.T) {
 	usm := newTestUserSessionManager()
-	sess := newUserSession("u1", "alice")
+	sess := newUserSession("u1", "alice", "test query")
 	sess.sessionUUID = "uuid-stop"
 	usm.sessions["u1"] = sess
 	usm.uuidMap["uuid-stop"] = "u1"

@@ -18,6 +18,11 @@ func newLogger(stdout io.Writer, fileWriter io.Writer) *Logger {
 	if fileWriter != nil {
 		w = io.MultiWriter(stdout, fileWriter)
 	}
-	handler := slog.NewJSONHandler(w, &slog.HandlerOptions{Level: slog.LevelDebug})
+	var handler slog.Handler
+	if os.Getenv("LOG_FORMAT") == "json" {
+		handler = slog.NewJSONHandler(w, &slog.HandlerOptions{Level: slog.LevelDebug})
+	} else {
+		handler = slog.NewTextHandler(w, &slog.HandlerOptions{Level: slog.LevelDebug})
+	}
 	return &Logger{slog.New(handler)}
 }
