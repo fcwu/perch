@@ -986,6 +986,22 @@ docker run --rm \
 
 ## 已知 Bug 清單
 
+### T55 — Admin Live Sessions 只顯示使用工具的 session
+
+Admin Live Sessions 透過 `/ws/admin` WebSocket 推送 `session_added` / `session_removed` 事件。
+對於不呼叫任何工具的簡單查詢（例如 "say hi"），`ClaimUUID`（觸發 `session_added`）與
+`NotifyHook("Stop")`（觸發 `session_removed`）在同一個 hook 呼叫序列內執行，間距 < 1ms，
+瀏覽器 React 渲染來不及反映。
+
+**影響範圍**：只有 no-tool 查詢在 Live Sessions 看不到；需要讀檔/搜尋的真實 KB 查詢（有 PreToolUse hook）可正常顯示，session 會維持數秒以上。
+
+**建議驗證方式**：使用會觸發工具呼叫的查詢（如「列出 /workspace 的檔案」），觀察 Live Sessions 顯示 current tool 欄位即時更新。
+
+### T52 — Chat UI textarea 送出後未清空（已知，低優先）
+
+按下 Enter 或 Send 送出查詢後，textarea 清空依賴 `setQuery('')`；在某些 React 狀態時序下
+可能不即時，使用者需手動刪除才能輸入下一個問題。
+
 ### T12 — mTLS generateClientP12 key mismatch
 
 `AUTH_MODE=mtls` 下執行 `/bootstrap`，`tls.go` 的 `generateClientP12` 內部產生 RSA key pair 後，cert 與 private key 不匹配，導致 TLS handshake 失敗：
@@ -996,17 +1012,6 @@ x509: provided PrivateKey doesn't match parent's PublicKey
 
 影響範圍：T12 整個流程無法完成。其他認證模式（none、password）不受影響。
 
-### T52 — Chat UI ANSI escape codes 未過濾
-
-Chat UI output 區域直接顯示 PTY 的原始位元組，ANSI terminal 控制碼（如 `[>4m`、`[<u9;4;0; 0;`）未被過濾，導致 markdown 渲染層看到裸碼。
-
-**現象**：output 區出現亂碼，如 `[>4m [<u9;4;0; 0;`
-
-**預期**：在 SSE/WS 串流層或前端接收層，用 regex 過濾 ANSI escape sequences 後再交給 markdown renderer。
-
-### T52 — Chat UI textarea 送出後未清空
-
-按下 Enter 或 Send 送出查詢後，textarea 的文字未被清空，使用者需手動刪除才能輸入下一個問題。
 
 
 ---

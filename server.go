@@ -424,6 +424,19 @@ func (s *Server) handleChatSSE(w http.ResponseWriter, r *http.Request) {
 			if !ok {
 				return
 			}
+			// Drain any pending PTY data before forwarding this JSON event,
+			// so fast responses don't lose output when 'done' races ahead.
+			for {
+				select {
+				case data := <-ptyCh:
+					if !writeEvent("pty", base64.StdEncoding.EncodeToString(data)) {
+						return
+					}
+				default:
+					goto sendJSON
+				}
+			}
+		sendJSON:
 			if !writeEvent("json", msg) {
 				return
 			}
