@@ -91,6 +91,14 @@ func newServerWithMode(pm *PTYManager, auth *AuthMiddleware, im *IMManager, sess
 		s.mux.Handle("/api/chat/stream", chatSSEHandler)
 		chatWSHandler := gitlabAuth.middleware(http.HandlerFunc(s.handleChatWS))
 		s.mux.Handle("/ws/chat", chatWSHandler)
+	} else {
+		// Register chat routes even when GitLab auth is disabled so unauthenticated
+		// requests get a proper error response instead of falling through to the SPA
+		// handler and returning 200 HTML. ServeHTTP applies primary auth before
+		// reaching these handlers in password mode.
+		s.mux.Handle("/api/chat", http.HandlerFunc(s.handleChatAPI))
+		s.mux.Handle("/api/chat/stream", http.HandlerFunc(s.handleChatSSE))
+		s.mux.Handle("/ws/chat", http.HandlerFunc(s.handleChatWS))
 	}
 	distFS, err := fs.Sub(frontendFS, "frontend/dist")
 	if err == nil {
@@ -146,7 +154,13 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		r.URL.Path = "/chat"
 	}
 	// Chat/API paths: auth enforced at handler registration, skip primary auth.
+	// Exception: in password mode the chat API routes must go through primary auth
+	// because they are registered without a middleware wrapper (GitLab auth disabled).
 	if r.URL.Path == "/chat" || r.URL.Path == "/api/chat" || r.URL.Path == "/api/chat/stream" || r.URL.Path == "/ws/chat" {
+		if s.auth != nil && s.auth.mode == "password" && r.URL.Path != "/chat" {
+			s.auth.wrap(s.mux).ServeHTTP(w, r)
+			return
+		}
 		s.mux.ServeHTTP(w, r)
 		return
 	}
