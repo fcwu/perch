@@ -1,5 +1,6 @@
 frontend/node_modules/
 perch
+perch_linux_amd64
 schedules.json
 .claude/*.json
 .opencode/
