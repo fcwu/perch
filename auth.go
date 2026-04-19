@@ -81,6 +81,15 @@ func (a *AuthMiddleware) newSession() string {
 	return token
 }
 
+func (a *AuthMiddleware) handleAuthStatus(w http.ResponseWriter, r *http.Request) {
+	cookie, err := r.Cookie("session")
+	if err != nil || !a.validSession(cookie.Value) {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
 func (a *AuthMiddleware) validSession(token string) bool {
 	a.mu.Lock()
 	defer a.mu.Unlock()

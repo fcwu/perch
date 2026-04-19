@@ -6,11 +6,12 @@ import (
 )
 
 type hookHandler struct {
-	im *IMManager
+	im           *IMManager
+	userSessions *UserSessionManager
 }
 
-func newHookHandler(im *IMManager) http.Handler {
-	return &hookHandler{im: im}
+func newHookHandler(im *IMManager, userSessions *UserSessionManager) http.Handler {
+	return &hookHandler{im: im, userSessions: userSessions}
 }
 
 func (h *hookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -30,6 +31,9 @@ func (h *hookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	if h.im != nil {
 		h.im.notify(event)
+	}
+	if h.userSessions != nil {
+		h.userSessions.NotifyHook(event)
 	}
 	w.WriteHeader(http.StatusOK)
 }

@@ -1,9 +1,8 @@
 services:
   perch:
     image: ghcr.io/fcwu/perch:latest
+    network_mode: host
     restart: unless-stopped
-    ports:
-      - "8081:8080"
     env_file: .env
     volumes:
       - tmp/workspace:/workspace

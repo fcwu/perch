@@ -78,3 +78,15 @@ func (r AgentRuntime) ProjectConfigPath(workdir string) string {
 	}
 	return filepath.Join(workdir, r.ProjectConfigDir, r.ProjectConfigFile)
 }
+
+// RunAgent returns the command and args to launch an agent session with the given prompt.
+// For OpenCode: opencode run --agent <agentName> <prompt>
+// For Claude: claude [CLAUDE_ARGS] -p <prompt>  (non-interactive print mode)
+func (r AgentRuntime) RunAgent(agentName, prompt, _ string) (string, []string) {
+	if r.Name == "claude" {
+		args := r.MainArgs() // e.g. [--dangerously-skip-permissions]
+		args = append(args, "-p", prompt)
+		return r.Command, args
+	}
+	return r.Command, []string{"run", "--agent", agentName, prompt}
+}

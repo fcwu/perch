@@ -115,7 +115,12 @@ func main() {
 	if discordSess != nil {
 		sessProvider = discordSess
 	}
-	srv := newServer(pm, auth, im, sessProvider, logger.Logger)
+	gitlabAuth := newGitLabAuth()
+	var userSessions *UserSessionManager
+	if gitlabAuth.enabled() {
+		userSessions = newUserSessionManager(runtime, workdir, logger.Logger)
+	}
+	srv := newServer(pm, auth, im, sessProvider, userSessions, gitlabAuth, logger.Logger)
 
 	// Apply rate limiting to sensitive endpoints only
 	sensitivePaths := map[string]bool{"/login": true, "/bootstrap": true}

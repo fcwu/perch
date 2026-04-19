@@ -8,7 +8,7 @@ import (
 )
 
 func TestHookHandlerInvalidMethod(t *testing.T) {
-	h := newHookHandler(nil)
+	h := newHookHandler(nil, nil)
 	req := httptest.NewRequest(http.MethodGet, "/hook", nil)
 	rr := httptest.NewRecorder()
 	h.ServeHTTP(rr, req)
@@ -18,7 +18,7 @@ func TestHookHandlerInvalidMethod(t *testing.T) {
 }
 
 func TestHookHandlerInvalidJSON(t *testing.T) {
-	h := newHookHandler(nil)
+	h := newHookHandler(nil, nil)
 	req := httptest.NewRequest(http.MethodPost, "/hook", bytes.NewBufferString("not-json"))
 	req.Header.Set("Content-Type", "application/json")
 	rr := httptest.NewRecorder()
@@ -33,7 +33,7 @@ func TestHookHandlerValidEvent(t *testing.T) {
 	im := newIMManager(nil)
 	im.addAdapter(&captureAdapter{onNotify: func(e HookEvent, _ string) { received = e }})
 
-	h := newHookHandler(im)
+	h := newHookHandler(im, nil)
 	body := `{"hook_event_name":"PreToolUse","tool_name":"Bash"}`
 	req := httptest.NewRequest(http.MethodPost, "/hook", bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
@@ -55,7 +55,7 @@ func TestHookHandlerStopExtractsText(t *testing.T) {
 	im := newIMManager(nil)
 	im.addAdapter(&captureAdapter{onNotify: func(_ HookEvent, t string) { lastText = t }})
 
-	h := newHookHandler(im)
+	h := newHookHandler(im, nil)
 	body := `{
 		"hook_event_name": "Stop",
 		"transcript": [

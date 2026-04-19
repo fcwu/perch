@@ -46,6 +46,21 @@ func TestAgentRuntimeRejectsInvalidValue(t *testing.T) {
 	}
 }
 
+func TestRunAgentReturnsOpenCodeCommand(t *testing.T) {
+	t.Setenv("AGENT_RUNTIME", "opencode")
+	rt, err := loadAgentRuntime()
+	if err != nil {
+		t.Fatalf("loadAgentRuntime: %v", err)
+	}
+	cmd, args := rt.RunAgent("as-query", "what is X?", "/workspace")
+	if cmd != "opencode" {
+		t.Errorf("expected command 'opencode', got %q", cmd)
+	}
+	if len(args) != 4 || args[0] != "run" || args[1] != "--agent" || args[2] != "as-query" || args[3] != "what is X?" {
+		t.Errorf("unexpected args: %v", args)
+	}
+}
+
 func TestAgentRuntimeKeepsRuntimeSpecificArgsIsolated(t *testing.T) {
 	t.Setenv("CLAUDE_ARGS", "--model claude-opus-4-5")
 	t.Setenv("OPENCODE_ARGS", "run --fast")

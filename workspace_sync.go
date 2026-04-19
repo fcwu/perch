@@ -240,9 +240,17 @@ func syncOnce(ctx context.Context, cfg WorkspaceSyncConfig, notify NotifyFunc, d
 		}
 	}
 
-	// Pull --rebase
+	// Pull --rebase; if working tree has residual changes (e.g. CRLF) that
+	// would be overwritten, reset --hard and retry once.
 	out, err := runGit(ctx, path, "pull", "--rebase")
 	logger.Info("workspace_sync: pull output", "output", strings.TrimSpace(out))
+	if err != nil && strings.Contains(out, "local changes to the following files would be overwritten") {
+		logger.Warn("workspace_sync: pull blocked by residual changes, resetting and retrying")
+		resetOut, _ := runGit(ctx, path, "reset", "--hard")
+		logger.Info("workspace_sync: reset output", "output", strings.TrimSpace(resetOut))
+		out, err = runGit(ctx, path, "pull", "--rebase")
+		logger.Info("workspace_sync: pull retry output", "output", strings.TrimSpace(out))
+	}
 	if err != nil {
 		logger.Error("workspace_sync: pull failed", "output", strings.TrimSpace(out), "err", err)
 		maybeNotify(notify, dbnc, "pull_failed",

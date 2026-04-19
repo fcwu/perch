@@ -995,3 +995,171 @@ x509: provided PrivateKey doesn't match parent's PublicKey
 ```
 
 影響範圍：T12 整個流程無法完成。其他認證模式（none、password）不受影響。
+
+### T52 — Chat UI ANSI escape codes 未過濾
+
+Chat UI output 區域直接顯示 PTY 的原始位元組，ANSI terminal 控制碼（如 `[>4m`、`[<u9;4;0; 0;`）未被過濾，導致 markdown 渲染層看到裸碼。
+
+**現象**：output 區出現亂碼，如 `[>4m [<u9;4;0; 0;`
+
+**預期**：在 SSE/WS 串流層或前端接收層，用 regex 過濾 ANSI escape sequences 後再交給 markdown renderer。
+
+### T52 — Chat UI textarea 送出後未清空
+
+按下 Enter 或 Send 送出查詢後，textarea 的文字未被清空，使用者需手動刪除才能輸入下一個問題。
+
+
+---
+
+## T50 — GitLab OAuth：未登入 redirect
+
+**目的**：確認 `/chat` 在沒有 cookie 時自動導向 GitLab OAuth。
+
+**前置條件**：已設定 `GITLAB_URL`、`GITLAB_CLIENT_ID`、`GITLAB_CLIENT_SECRET`、`GITLAB_REDIRECT_URI`、`COOKIE_SECRET`。
+
+**步驟**：
+```bash
+# 啟動（不帶 cookie）
+curl -v http://localhost:8080/chat 2>&1 | grep "< HTTP\|Location:"
+```
+
+**預期**：
+```
+< HTTP/1.1 302 Found
+Location: /auth/gitlab
+```
+
+**反向驗證（tampered cookie → 401）**：
+```bash
+curl -v -H "Cookie: perch_session=badpayload.badsig" \
+  http://localhost:8080/chat 2>&1 | grep "< HTTP"
+# 預期：HTTP/1.1 401 Unauthorized
+```
+
+**反向驗證（state mismatch → 400）**：
+```bash
+# callback 不帶 oauth_state cookie，或 state 不一致
+curl -v "http://localhost:8080/auth/callback?code=abc&state=wrong" \
+  2>&1 | grep "< HTTP"
+# 預期：HTTP/1.1 400 Bad Request
+```
+
+---
+
+## T51 — GitLab OAuth：完整登入流程
+
+**目的**：確認 OAuth code exchange → 設置 signed cookie → redirect `/chat` 全流程正確。
+
+**前置條件**：能連上 GitLab instance（`GITLAB_URL`）並已建立 OAuth Application。
+
+**步驟**：
+1. 瀏覽器開啟 `http://localhost:8080/chat`（未登入）
+2. 應自動 redirect 到 GitLab 授權頁面
+3. 在 GitLab 頁面授權
+4. GitLab redirect 回 `/auth/callback?code=...&state=...`
+5. 伺服器設置 `perch_session` cookie 後 redirect 到 `/chat`
+
+**驗證 cookie 已設置**（DevTools → Application → Cookies）：
+- Name: `perch_session`
+- HttpOnly: ✓
+- MaxAge: 28800（8 小時）
+- Path: `/`
+
+**驗證 cookie 內容有效**（Go unit test）：
+```bash
+go test -run TestGitLabAuthCallbackValidFlow ./...
+```
+
+**預期**：
+- Step 4 回應為 HTTP 302 到 `/chat`
+- cookie payload 解碼後含正確 `user_id`、`username`、`exp`
+
+---
+
+## T52 — Chat UI：查詢送出與 markdown 串流
+
+**目的**：確認 POST `/api/chat` → WebSocket `/ws/chat` 全流程，以及 Tool Panel 即時更新。
+
+**前置條件**：
+- 有效 `perch_session` cookie（已完成 T51）
+- `AGENT_RUNTIME=opencode`
+- workspace 掛載知識庫，且 `.opencode/agents/as-query.md` 存在
+
+**步驟（API 層驗證）**：
+```bash
+# 取得 cookie 後手動帶入（以 curl 模擬）
+SESSION_COOKIE="perch_session=<從瀏覽器複製的值>"
+
+# 1. 發送查詢
+curl -v -X POST http://localhost:8080/api/chat \
+  -H "Cookie: $SESSION_COOKIE" \
+  -H "Content-Type: application/json" \
+  -d '{"query":"什麼是 HBS？"}' \
+  2>&1 | grep "< HTTP\|user_id"
+# 預期：HTTP/1.1 200 OK，body 含 {"user_id":"..."}
+
+# 2. 確認 session 已建立（重複送出 → 409）
+curl -s -o /dev/null -w "%{http_code}" -X POST http://localhost:8080/api/chat \
+  -H "Cookie: $SESSION_COOKIE" \
+  -H "Content-Type: application/json" \
+  -d '{"query":"再問一次"}'
+# 預期：409（session 已在執行中）
+```
+
+**步驟（瀏覽器驗證）**：
+1. 開啟 `http://localhost:8080/chat`，輸入問題，按 Enter
+2. 觀察：
+   - 輸入框 disabled、出現「⟳ Thinking…」
+   - PTY 輸出以 markdown 逐步渲染
+   - 點開 Tool calls 面板 → 看到工具名稱 + spinner
+   - 工具完成 → spinner 變 ✓，顯示 elapsed ms
+   - 完成後輸入框恢復可用
+
+**預期 WebSocket 訊息順序**：
+```
+[binary]  PTY 輸出字節（逐步累積，markdown 渲染）
+[text]    {"type":"tool_start","tool":"Read","input":...}
+[binary]  更多 PTY 輸出
+[text]    {"type":"tool_end","tool":"Read","elapsed_ms":42}
+[text]    {"type":"done"}
+```
+
+---
+
+## T53 — Chat UI：多使用者並行 Session 互不干擾
+
+**目的**：確認不同 userID 的 session 輸出不會串流到錯誤的 WebSocket。
+
+**前置條件**：兩組不同 GitLab 帳號各自登入，取得各自 `perch_session` cookie。
+
+**步驟**：
+```bash
+# 使用者 A 送出慢查詢
+curl -X POST http://localhost:8080/api/chat \
+  -H "Cookie: perch_session=<USER_A_COOKIE>" \
+  -H "Content-Type: application/json" \
+  -d '{"query":"詳細介紹整個 HBS 架構"}'
+
+# 使用者 B 送出另一個查詢
+curl -X POST http://localhost:8080/api/chat \
+  -H "Cookie: perch_session=<USER_B_COOKIE>" \
+  -H "Content-Type: application/json" \
+  -d '{"query":"Boxafe 是什麼？"}'
+
+# 確認 A 的 session 仍在執行中（返回 409）
+curl -s -o /dev/null -w "%{http_code}" -X POST http://localhost:8080/api/chat \
+  -H "Cookie: perch_session=<USER_A_COOKIE>" \
+  -H "Content-Type: application/json" \
+  -d '{"query":"再問"}'
+# 預期：409
+```
+
+**瀏覽器驗證**：
+1. 開兩個不同瀏覽器視窗，各用不同帳號登入
+2. 同時送出查詢
+3. 確認各自的 markdown 輸出不混流
+
+**預期**：
+- A、B 各自有獨立 PTY session（`UserSessionManager` 以 userID 為 key）
+- Hook 事件由 `session_uuid → userID` mapping 正確路由，互不干擾
+- 任一使用者查詢完成後，另一使用者的 session 繼續正常執行

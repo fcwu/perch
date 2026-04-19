@@ -3,6 +3,7 @@ import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
 import { Keyboard } from './Keyboard'
+import ChatPage from './ChatPage'
 
 const URL_RE = /https?:\/\/[^\s\x00-\x1f\x7f]+/g
 
@@ -29,7 +30,69 @@ function useDiscordSessions() {
   return sessions
 }
 
-export default function App() {
+// userIDFromCookie reads the userID from the perch_session cookie (server sets it).
+// The cookie is HttpOnly so JS can't read it directly; the server injects it via a meta tag or
+// we parse it from the URL query param that the server can embed on the /chat page.
+// For now, the ChatPage derives userID via /api/chat response.
+// This sentinel lets ChatPage request userID lazily.
+const CHAT_USER_PLACEHOLDER = 'me'
+
+function LoginOverlay({ onLogin }: { onLogin: () => void }) {
+  const [password, setPassword] = useState('')
+  const [error, setError] = useState('')
+  const [loading, setLoading] = useState(false)
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setLoading(true)
+    setError('')
+    const r = await fetch('/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password }),
+    })
+    setLoading(false)
+    if (r.ok) {
+      onLogin()
+    } else {
+      setError('Wrong password')
+    }
+  }
+
+  return (
+    <div style={{
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      height: '100dvh', background: '#000',
+    }}>
+      <form onSubmit={submit} style={{
+        display: 'flex', flexDirection: 'column', gap: 12,
+        background: '#111', padding: 32, borderRadius: 8, minWidth: 280,
+      }}>
+        <div style={{ color: '#fff', fontSize: 18, fontFamily: 'monospace', marginBottom: 8 }}>Perch</div>
+        <input
+          type="password"
+          placeholder="Password"
+          value={password}
+          onChange={e => setPassword(e.target.value)}
+          autoFocus
+          style={{
+            background: '#222', color: '#fff', border: '1px solid #444',
+            borderRadius: 4, padding: '8px 12px', fontSize: 14, fontFamily: 'monospace',
+          }}
+        />
+        {error && <div style={{ color: '#f66', fontSize: 12 }}>{error}</div>}
+        <button type="submit" disabled={loading} style={{
+          background: '#4af', color: '#000', border: 'none', borderRadius: 4,
+          padding: '8px 12px', fontSize: 14, fontFamily: 'monospace', cursor: 'pointer',
+        }}>
+          {loading ? '…' : 'Login'}
+        </button>
+      </form>
+    </div>
+  )
+}
+
+function TerminalApp() {
   const containerRef = useRef<HTMLDivElement>(null)
   const termRef = useRef<Terminal | null>(null)
   const fitAddonRef = useRef<FitAddon | null>(null)
@@ -251,4 +314,33 @@ export default function App() {
       <Keyboard termRef={termRef} />
     </div>
   )
+}
+
+function TerminalRoot() {
+  const [authChecked, setAuthChecked] = useState(false)
+  const [authenticated, setAuthenticated] = useState(true)
+
+  useEffect(() => {
+    fetch('/api/auth').then(r => {
+      setAuthenticated(r.ok)
+      setAuthChecked(true)
+    }).catch(() => {
+      // /api/auth not registered (AUTH_MODE != password) → assume authenticated
+      setAuthChecked(true)
+    })
+  }, [])
+
+  if (!authChecked) return null
+  if (!authenticated) {
+    return <LoginOverlay onLogin={() => setAuthenticated(true)} />
+  }
+  return <TerminalApp />
+}
+
+export default function App() {
+  const path = window.location.pathname
+  if (path.startsWith('/chat')) {
+    return <ChatPage userID={CHAT_USER_PLACEHOLDER} />
+  }
+  return <TerminalRoot />
 }

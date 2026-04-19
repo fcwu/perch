@@ -120,6 +120,38 @@ docker run -d \
 | `WORKSPACE_GIT_TOKEN` | — | HTTPS remote 的 git token（寫入 `~/.git-credentials`） |
 | `WORKSPACE_GIT_SYNC_NOTIFY_CHANNEL` | — | 同步失敗時送通知的 Discord channel ID |
 | `WORKSPACE_GIT_SYNC_SUBMODULES` | `false` | 設為 `true` 或 `1` 在每次 pull 後自動執行 `git submodule update --init --recursive` |
+| `GITLAB_URL` | — | GitLab instance URL，例如 `https://gitlab.example.com`（啟用 Chat UI GitLab OAuth） |
+| `GITLAB_CLIENT_ID` | — | GitLab OAuth Application 的 Client ID |
+| `GITLAB_CLIENT_SECRET` | — | GitLab OAuth Application 的 Client Secret |
+| `GITLAB_REDIRECT_URI` | — | OAuth callback URI，例如 `https://perch.example.com/auth/callback` |
+| `COOKIE_SECRET` | （固定預設值） | 用於簽署 `perch_session` cookie 的 HMAC 密鑰；**正式環境請務必設定隨機值** |
+
+---
+
+## Chat UI（知識庫查詢）
+
+當設定 `GITLAB_URL`、`GITLAB_CLIENT_ID`、`GITLAB_CLIENT_SECRET`、`GITLAB_REDIRECT_URI` 後，Perch 會在 `/chat` 路由提供 Chat UI。
+
+- 使用者以公司 GitLab 帳號登入後，可輸入問題由 OpenCode `as-query` agent 回答
+- 每位使用者有獨立的 OpenCode PTY session，互不干擾
+- 回應以 markdown 渲染；側邊面板可即時查看 tool call 執行狀態
+- 原有 `/`（terminal）的 auth 模式不受影響
+
+**啟動範例：**
+
+```bash
+docker run -d \
+  -p 8080:8080 \
+  -e AUTH_MODE=none \
+  -e AGENT_RUNTIME=opencode \
+  -e GITLAB_URL=https://gitlab.example.com \
+  -e GITLAB_CLIENT_ID=your-client-id \
+  -e GITLAB_CLIENT_SECRET=your-client-secret \
+  -e GITLAB_REDIRECT_URI=https://perch.example.com/auth/callback \
+  -e COOKIE_SECRET=$(openssl rand -hex 32) \
+  -v ./:/workspace \
+  ghcr.io/fcwu/perch:latest
+```
 
 ---
 

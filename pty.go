@@ -111,6 +111,89 @@ func (p *PTYManager) resize(cols, rows uint16) error {
 	return pty.Setsize(ptmx, &pty.Winsize{Cols: cols, Rows: rows})
 }
 
+// startOnce runs the command exactly once (no restart loop) and returns when the process exits.
+// It signals completion by closing p.done so callers can detect exit via select on p.done.
+func (p *PTYManager) startOnce(command string, args []string, workdir string, logger *slog.Logger) {
+	p.runOnce(command, args, workdir, logger, nil)
+	p.stop() // signal completion
+}
+
+// runOnce executes a single process lifecycle (used by start and startOnce).
+func (p *PTYManager) runOnce(command string, args []string, workdir string, logger *slog.Logger, defaultEnv []string, extraEnv ...string) {
+	p.mu.Lock()
+	p.framebuf = nil
+	p.mu.Unlock()
+
+	cmd := exec.Command(command, args...)
+	if workdir != "" {
+		cmd.Dir = workdir
+	}
+	home := "/home/perchuser"
+	if puidStr := os.Getenv("PUID"); puidStr != "" {
+		uid, err := strconv.ParseUint(puidStr, 10, 32)
+		if err == nil {
+			pgidStr := os.Getenv("PGID")
+			if pgidStr == "" {
+				pgidStr = puidStr
+			}
+			gid, err := strconv.ParseUint(pgidStr, 10, 32)
+			if err == nil {
+				home = "/home/perchuser"
+				cmd.SysProcAttr = &syscall.SysProcAttr{
+					Credential: &syscall.Credential{
+						Uid: uint32(uid),
+						Gid: uint32(gid),
+					},
+				}
+			}
+		}
+	}
+	env := os.Environ()
+	set := make(map[string]bool, len(env))
+	for _, e := range env {
+		if k, _, ok := strings.Cut(e, "="); ok {
+			set[k] = true
+		}
+	}
+	for _, d := range append([]string{"TERM=xterm-256color"}, defaultEnv...) {
+		if k, _, ok := strings.Cut(d, "="); ok && !set[k] {
+			env = append(env, d)
+		}
+	}
+	env = append(env, "HOME="+home)
+	cmd.Env = env
+	cmd.Env = append(cmd.Env, extraEnv...)
+	ptmx, err := pty.StartWithSize(cmd, &pty.Winsize{Cols: 220, Rows: 50})
+	if err != nil {
+		logger.Error("pty start failed", "err", err)
+		return
+	}
+	p.mu.Lock()
+	p.ptmx = ptmx
+	p.mu.Unlock()
+
+	buf := make([]byte, 4096)
+	for {
+		n, err := ptmx.Read(buf)
+		if n > 0 {
+			data := make([]byte, n)
+			copy(data, buf[:n])
+			p.broadcast(data)
+		}
+		if err != nil {
+			if err != io.EOF {
+				logger.Error("pty read error", "err", err)
+			}
+			break
+		}
+	}
+	ptmx.Close()
+	p.mu.Lock()
+	p.ptmx = nil
+	p.mu.Unlock()
+	cmd.Wait()
+}
+
 func (p *PTYManager) start(command string, args []string, workdir string, logger *slog.Logger, defaultEnv []string, extraEnv ...string) {
 	for {
 		select {
@@ -118,92 +201,7 @@ func (p *PTYManager) start(command string, args []string, workdir string, logger
 			return
 		default:
 		}
-
-		p.mu.Lock()
-		p.framebuf = nil
-		p.mu.Unlock()
-
-		cmd := exec.Command(command, args...)
-		if workdir != "" {
-			cmd.Dir = workdir
-		}
-		home := "/root"
-		if puidStr := os.Getenv("PUID"); puidStr != "" {
-			uid, err := strconv.ParseUint(puidStr, 10, 32)
-			if err == nil {
-				pgidStr := os.Getenv("PGID")
-				if pgidStr == "" {
-					pgidStr = puidStr
-				}
-				gid, err := strconv.ParseUint(pgidStr, 10, 32)
-				if err == nil {
-					home = "/home/perchuser"
-					cmd.SysProcAttr = &syscall.SysProcAttr{
-						Credential: &syscall.Credential{
-							Uid: uint32(uid),
-							Gid: uint32(gid),
-						},
-					}
-				}
-			}
-		}
-		// Build env: inherit parent env; apply perch-specific defaults only
-		// when not already set by the caller (e.g. via Docker -e flags).
-		// Node.js uses the last duplicate entry, so we must not append defaults
-		// unconditionally or user-supplied values would be silently overridden.
-		//
-		// HOME is always overridden: it is computed from PUID and must point to
-		// the correct directory regardless of what the container env has.
-		env := os.Environ()
-		set := make(map[string]bool, len(env))
-		for _, e := range env {
-			if k, _, ok := strings.Cut(e, "="); ok {
-				set[k] = true
-			}
-		}
-		for _, d := range append([]string{"TERM=xterm-256color"}, defaultEnv...) {
-			if k, _, ok := strings.Cut(d, "="); ok && !set[k] {
-				env = append(env, d)
-			}
-		}
-		// Always append HOME last so Node.js picks it up over the container default.
-		env = append(env, "HOME="+home)
-		cmd.Env = env
-		cmd.Env = append(cmd.Env, extraEnv...)
-		ptmx, err := pty.StartWithSize(cmd, &pty.Winsize{Cols: 220, Rows: 50})
-		if err != nil {
-			logger.Error("pty start failed", "err", err)
-			select {
-			case <-p.done:
-				return
-			case <-time.After(5 * time.Second):
-			}
-			continue
-		}
-		p.mu.Lock()
-		p.ptmx = ptmx
-		p.mu.Unlock()
-
-		buf := make([]byte, 4096)
-		for {
-			n, err := ptmx.Read(buf)
-			if n > 0 {
-				data := make([]byte, n)
-				copy(data, buf[:n])
-				p.broadcast(data)
-			}
-			if err != nil {
-				if err != io.EOF {
-					logger.Error("pty read error", "err", err)
-				}
-				break
-			}
-		}
-		ptmx.Close()
-		p.mu.Lock()
-		p.ptmx = nil
-		p.mu.Unlock()
-		cmd.Wait()
+		p.runOnce(command, args, workdir, logger, defaultEnv, extraEnv...)
 		logger.Info("process exited, restarting in 2s")
 		select {
 		case <-p.done:

@@ -12,7 +12,7 @@ import (
 
 func TestWebSocketReceivesPTYOutput(t *testing.T) {
 	pm := newPTYManager()
-	srv := newServer(pm, nil, nil, nil, nil)
+	srv := newServer(pm, nil, nil, nil, nil, nil, nil)
 
 	ts := httptest.NewServer(srv)
 	defer ts.Close()
@@ -52,7 +52,7 @@ func (f *fakeSessionProvider) WriteSession(_ string, _ []byte) error { return ni
 
 func TestSessionsEndpointNoProvider(t *testing.T) {
 	pm := newPTYManager()
-	s := newServer(pm, nil, nil, nil, nil)
+	s := newServer(pm, nil, nil, nil, nil, nil, nil)
 	req := httptest.NewRequest(http.MethodGet, "/sessions", nil)
 	rr := httptest.NewRecorder()
 	s.ServeHTTP(rr, req)
@@ -67,7 +67,7 @@ func TestSessionsEndpointNoProvider(t *testing.T) {
 func TestSessionsEndpointWithProvider(t *testing.T) {
 	pm := newPTYManager()
 	sp := &fakeSessionProvider{sessions: []SessionView{{ChannelID: "ch1", SessionUUID: "uuid1"}}}
-	s := newServer(pm, nil, nil, sp, nil)
+	s := newServer(pm, nil, nil, sp, nil, nil, nil)
 	req := httptest.NewRequest(http.MethodGet, "/sessions", nil)
 	rr := httptest.NewRecorder()
 	s.ServeHTTP(rr, req)
@@ -106,7 +106,7 @@ func (r *recordingSessionProvider) WriteSession(_ string, data []byte) error {
 func TestSessionWSKeystrokeForwarded(t *testing.T) {
 	pm := newPTYManager()
 	sp := newRecordingSessionProvider()
-	srv := newServer(pm, nil, nil, sp, nil)
+	srv := newServer(pm, nil, nil, sp, nil, nil, nil)
 	ts := httptest.NewServer(srv)
 	defer ts.Close()
 
@@ -130,7 +130,7 @@ func TestSessionWSKeystrokeForwarded(t *testing.T) {
 func TestSessionWSResizeNotForwarded(t *testing.T) {
 	pm := newPTYManager()
 	sp := newRecordingSessionProvider()
-	srv := newServer(pm, nil, nil, sp, nil)
+	srv := newServer(pm, nil, nil, sp, nil, nil, nil)
 	ts := httptest.NewServer(srv)
 	defer ts.Close()
 

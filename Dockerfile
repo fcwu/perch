@@ -33,6 +33,12 @@ COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
 ENV AUTH_MODE=none
+# GitLab OAuth for Chat UI — inject via -e at runtime:
+# -e GITLAB_URL=https://gitlab.example.com
+# -e GITLAB_CLIENT_ID=your-client-id
+# -e GITLAB_CLIENT_SECRET=your-client-secret
+# -e GITLAB_REDIRECT_URI=https://perch.example.com/auth/callback
+# -e COOKIE_SECRET=$(openssl rand -hex 32)
 
 EXPOSE 8080
 CMD ["/entrypoint.sh"]
