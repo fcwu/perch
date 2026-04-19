@@ -1,38 +1,17 @@
-## ADDED Requirements
+## MODIFIED Requirements
 
-### Requirement: Configurable active agent runtime
-The system SHALL allow Perch to select a single active agent runtime by configuration, with `claude` as the default when no runtime is explicitly set.
+### Requirement: OpenCode subagent launch mode
 
-#### Scenario: Default runtime remains Claude
-- **WHEN** Perch starts without an explicit runtime selection
-- **THEN** the main PTY starts the Claude runtime and existing Claude-based behavior remains unchanged
+The `AgentRuntime` for OpenCode SHALL support a `RunAgent(agentName, prompt, workdir string) (cmd, args)` helper that returns the command to launch OpenCode in non-interactive subagent mode.
 
-#### Scenario: OpenCode runtime selected
-- **WHEN** Perch starts with the runtime configured as `opencode`
-- **THEN** the main PTY starts the OpenCode runtime instead of Claude
+#### Scenario: launch as-query agent with a prompt
+- **WHEN** `UserSessionManager` starts a new session for a user query
+- **THEN** it SHALL use `AgentRuntime.RunAgent("as-query", userQuery, workdir)` to obtain the command, which resolves to: `opencode run --agent as-query "<userQuery>"`
 
-#### Scenario: Invalid runtime rejected
-- **WHEN** Perch starts with an unsupported runtime value
-- **THEN** startup fails with a clear configuration error instead of silently falling back to another runtime
+#### Scenario: subagent exits after completion
+- **WHEN** the OpenCode subagent finishes processing the query
+- **THEN** the PTY process SHALL exit with code 0; the server SHALL detect EOF and trigger session completion
 
-### Requirement: All PTY entry points use the active runtime
-The system MUST use the same active agent runtime for the main PTY, Discord session PTYs, and scheduler-triggered PTYs.
-
-#### Scenario: Discord session uses OpenCode
-- **WHEN** the active runtime is `opencode` and a Discord message creates or reuses a Discord PTY session
-- **THEN** that PTY session starts OpenCode rather than Claude
-
-#### Scenario: Scheduler target uses selected runtime
-- **WHEN** a scheduler job writes to the main PTY or a Discord PTY target
-- **THEN** the target PTY is backed by the currently selected runtime rather than a hard-coded agent command
-
-### Requirement: Runtime-specific CLI arguments are isolated by runtime
-The system SHALL apply runtime-specific extra CLI arguments only to the runtime they belong to.
-
-#### Scenario: Claude args do not leak into OpenCode
-- **WHEN** the active runtime is `opencode`
-- **THEN** Claude-specific CLI argument configuration is not appended to the OpenCode command line
-
-#### Scenario: OpenCode args do not affect Claude
-- **WHEN** the active runtime is `claude`
-- **THEN** OpenCode-specific CLI argument configuration does not affect Claude startup
+#### Scenario: invalid agent name
+- **WHEN** `RunAgent` is called with an agent name that does not exist in `.opencode/agents/`
+- **THEN** OpenCode SHALL exit with a non-zero code; the server SHALL surface an error message to the user's WebSocket
