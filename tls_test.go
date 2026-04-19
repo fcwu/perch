@@ -7,7 +7,7 @@ import (
 )
 
 func TestGenerateSelfSignedCert(t *testing.T) {
-	certPEM, keyPEM, err := generateSelfSignedCert("perch-ca", nil)
+	certPEM, keyPEM, err := generateSelfSignedCert("perch-ca", nil, nil)
 	if err != nil {
 		t.Fatalf("generateSelfSignedCert: %v", err)
 	}

@@ -13,7 +13,10 @@ import (
 	"time"
 )
 
-func generateSelfSignedCert(cn string, parent *x509.Certificate) (certPEM, keyPEM []byte, err error) {
+// generateSelfSignedCert generates an EC keypair and certificate.
+// If parent and parentKey are both nil, a self-signed CA cert is produced.
+// If parent and parentKey are provided, the cert is signed by the parent CA.
+func generateSelfSignedCert(cn string, parent *x509.Certificate, parentKey any) (certPEM, keyPEM []byte, err error) {
 	priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		return nil, nil, err
@@ -33,8 +36,9 @@ func generateSelfSignedCert(cn string, parent *x509.Certificate) (certPEM, keyPE
 	}
 	signerCert := tmpl
 	var signerKey any = priv
-	if parent != nil {
+	if parent != nil && parentKey != nil {
 		signerCert = parent
+		signerKey = parentKey
 	}
 	der, err := x509.CreateCertificate(rand.Reader, tmpl, signerCert, &priv.PublicKey, signerKey)
 	if err != nil {

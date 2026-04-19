@@ -51,8 +51,13 @@ func generateClientP12(caCertPEM, caKeyPEM []byte, password string) ([]byte, err
 	if err != nil {
 		return nil, err
 	}
+	caKeyBlock, _ := pem.Decode(caKeyPEM)
+	caKey, err := x509.ParseECPrivateKey(caKeyBlock.Bytes)
+	if err != nil {
+		return nil, err
+	}
 
-	clientCertPEM, clientKeyPEM, err := generateSelfSignedCert("perch-client", caCert)
+	clientCertPEM, clientKeyPEM, err := generateSelfSignedCert("perch-client", caCert, caKey)
 	if err != nil {
 		return nil, err
 	}
