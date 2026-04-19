@@ -60,36 +60,7 @@ docker exec <container> df -h /tmp
 
 ---
 
-## 3. 本機 debug 連線（SSH port forward）
-
-若需要從本機瀏覽器測試遠端服務（特別是 OAuth callback URL 必須與遠端 FQDN 一致時）：
-
-**Step 1：SSH port forward**
-```bash
-ssh -L <local-port>:localhost:<remote-port> <user>@<host-ip>
-```
-> 用直連 IP，不用 FQDN（防火牆可能擋 22 port）
-
-**Step 2：修改 /etc/hosts（若需要 FQDN）**
-```
-127.0.0.1  <fqdn>
-```
-
-**Step 3：瀏覽器用 `<fqdn>:<local-port>` 開啟**
-
-原因：`/etc/hosts` 讓瀏覽器把 FQDN 視為 localhost，Chrome PNA 政策不觸發，且 OAuth redirect URI 與 GitLab 設定吻合。
-
-**為什麼不直接用 127.0.0.1 或 direct IP：**
-
-| 方式 | 問題 |
-|------|------|
-| `127.0.0.1` | OAuth callback URL 對不上 GitLab 設定的 redirect URI |
-| direct IP（私有段）| Chrome PNA 政策擋 WebSocket（公開 FQDN 解析到私有 IP） |
-| FQDN + `/etc/hosts → 127.0.0.1` | 瀏覽器視為 localhost，PNA 不觸發，OAuth URI 一致 ✓ |
-
----
-
-## 4. 瀏覽器自動化（chrome-cdp）
+## 3. 瀏覽器自動化（chrome-cdp）
 
 使用 `chrome-cdp` skill（需先在 Chrome 開啟 remote debugging）。
 
@@ -129,13 +100,3 @@ curl -v -N -H "Cookie: session_token=<token>" http://localhost:<port>/api/chat/s
 # 若看到 "data:" 開頭的行 → SSE 正常
 ```
 
----
-
-## 6. 常見環境限制
-
-| 限制 | 說明 | 對策 |
-|------|------|------|
-| Squid 透明 proxy | WebSocket `Upgrade` header 被剝除 | Chat 改用 SSE |
-| Chrome PNA | 公開 FQDN 解析到私有 IP，WS 101 被擋 | 帶 `Access-Control-Allow-Private-Network: true` header |
-| Container /tmp 空間 | tmpfs 通常只有 128MB | 大檔案用 host 上有空間的目錄中轉 |
-| OAuth origin | port forward 時 callback domain 可能不符 | 用 /etc/hosts 讓 FQDN 指向 127.0.0.1 |
