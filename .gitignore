@@ -4,3 +4,4 @@ schedules.json
 .claude/*.json
 .opencode/
 deploy/.env
+docs/.env.*.md
