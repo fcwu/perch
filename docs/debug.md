@@ -79,6 +79,14 @@ ssh -L <local-port>:localhost:<remote-port> <user>@<host-ip>
 
 原因：`/etc/hosts` 讓瀏覽器把 FQDN 視為 localhost，Chrome PNA 政策不觸發，且 OAuth redirect URI 與 GitLab 設定吻合。
 
+**為什麼不直接用 127.0.0.1 或 direct IP：**
+
+| 方式 | 問題 |
+|------|------|
+| `127.0.0.1` | OAuth callback URL 對不上 GitLab 設定的 redirect URI |
+| direct IP（私有段）| Chrome PNA 政策擋 WebSocket（公開 FQDN 解析到私有 IP） |
+| FQDN + `/etc/hosts → 127.0.0.1` | 瀏覽器視為 localhost，PNA 不觸發，OAuth URI 一致 ✓ |
+
 ---
 
 ## 4. 瀏覽器自動化（chrome-cdp）
@@ -96,8 +104,9 @@ node $CDP nav   <target> <url>         # 導航
 node $CDP shot  <target> [file]        # 截圖
 node $CDP snap  <target>               # accessibility tree
 node $CDP eval  <target> <expr>        # 執行 JS
-node $CDP click <target> <selector>    # 點擊元素
-node $CDP type  <target> <text>        # 輸入文字
+node $CDP click   <target> <selector>              # 點擊元素
+node $CDP type    <target> <text>                  # 輸入文字
+node $CDP evalraw <target> Network.getCookies '{"urls":["<url>"]}' # 查 cookies
 ```
 
 > target ID 每次重啟 Chrome 會變，用 `list` 重新查。
