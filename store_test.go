@@ -155,3 +155,51 @@ func TestStoreGetSessionNotFound(t *testing.T) {
 		t.Errorf("expected nil for nonexistent session, got %+v", detail)
 	}
 }
+
+func TestGetRecentHistory(t *testing.T) {
+	s := tempStore(t)
+	now := nowMs()
+	window := int64(24 * 60 * 60 * 1000) // 24h in ms
+
+	// Recent session (within window)
+	s.InsertSession("h1", "u1", "alice", "query1")
+	s.UpdateSessionDone("h1", "response1")
+
+	// Old session (outside window)
+	s.InsertSession("h2", "u1", "alice", "query2")
+	s.UpdateSessionDone("h2", "response2")
+	s.db.Exec(`UPDATE query_sessions SET started_at=? WHERE id=?`, now-window-1000, "h2")
+
+	// Another user's session (should be excluded)
+	s.InsertSession("h3", "u2", "bob", "query3")
+	s.UpdateSessionDone("h3", "response3")
+
+	since := now - window
+	turns, err := s.GetRecentHistory("u1", since, 20)
+	if err != nil {
+		t.Fatalf("GetRecentHistory: %v", err)
+	}
+	if len(turns) != 1 {
+		t.Fatalf("expected 1 turn within window, got %d", len(turns))
+	}
+	if turns[0].Query != "query1" {
+		t.Errorf("expected query1, got %q", turns[0].Query)
+	}
+	if turns[0].Response != "response1" {
+		t.Errorf("expected response1, got %q", turns[0].Response)
+	}
+
+	// Respect limit cap
+	for i := 0; i < 5; i++ {
+		id := "hlim" + string(rune('A'+i))
+		s.InsertSession(id, "u1", "alice", "q")
+		s.UpdateSessionDone(id, "r")
+	}
+	turns, err = s.GetRecentHistory("u1", since, 3)
+	if err != nil {
+		t.Fatalf("GetRecentHistory limit: %v", err)
+	}
+	if len(turns) != 3 {
+		t.Errorf("expected 3 turns (limit), got %d", len(turns))
+	}
+}

@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"crypto/tls"
+	"crypto/x509"
+	"encoding/pem"
 	"fmt"
 	"net"
 	"net/http"
@@ -23,21 +25,52 @@ func main() {
 		os.Exit(1)
 	}
 
-	// --- Env validation ---
-	authMode := os.Getenv("AUTH_MODE")
-	if authMode == "" {
-		authMode = "none"
+	// --- Operating mode ---
+	mode, err := parseOperatingMode()
+	if err != nil {
+		logger.Error("invalid PERCH_MODE", "err", err)
+		os.Exit(1)
 	}
-	validModes := map[string]bool{"none": true, "password": true, "mtls": true}
-	if !validModes[authMode] {
-		logger.Error("invalid AUTH_MODE", "value", authMode)
+	if mode == ModeMulti {
+		if err := validateMultiModeEnv(); err != nil {
+			logger.Error("PERCH_MODE=multi configuration error", "err", err)
+			os.Exit(1)
+		}
+	}
+
+	// --- Auth method (AUTH_METHOD, with fallback to legacy AUTH_MODE) ---
+	authMethod := os.Getenv("AUTH_METHOD")
+	if authMethod == "" {
+		authMethod = os.Getenv("AUTH_MODE") // backward compat
+	}
+	if authMethod == "" {
+		authMethod = "none"
+	}
+	validMethods := map[string]bool{"none": true, "password": true, "mtls": true, "gitlab": true}
+	if !validMethods[authMethod] {
+		logger.Error("invalid AUTH_METHOD", "value", authMethod)
+		os.Exit(1)
+	}
+	if mode == ModeMulti {
+		// Multi-user always uses GitLab; AUTH_METHOD is ignored.
+		authMethod = "gitlab"
+	}
+
+	password := os.Getenv("PERCH_PASSWORD")
+	if password == "" {
+		password = os.Getenv("AUTH_PASSWORD") // backward compat
+	}
+	if authMethod == "password" && password == "" {
+		logger.Error("AUTH_METHOD=password requires PERCH_PASSWORD")
 		os.Exit(1)
 	}
 
-	password := os.Getenv("AUTH_PASSWORD")
-	if authMode == "password" && password == "" {
-		logger.Error("AUTH_MODE=password requires AUTH_PASSWORD")
-		os.Exit(1)
+	if authMethod == "gitlab" && mode == ModeSingle {
+		// Single-user GitLab: requires GitLab vars.
+		if err := validateMultiModeEnv(); err != nil {
+			logger.Error("AUTH_METHOD=gitlab configuration error", "err", err)
+			os.Exit(1)
+		}
 	}
 
 	addr := os.Getenv("LISTEN_ADDR")
@@ -106,7 +139,10 @@ func main() {
 	}
 
 	// --- Auth ---
-	auth := newAuthMiddleware(authMode, password)
+	var auth *AuthMiddleware
+	if authMethod != "gitlab" {
+		auth = newAuthMiddleware(authMethod, password)
+	}
 
 	// --- Rate limiter ---
 	rl := newRateLimiter(2, 5)
@@ -116,7 +152,7 @@ func main() {
 	if discordSess != nil {
 		sessProvider = discordSess
 	}
-	gitlabAuth := newGitLabAuth()
+	gitlabAuth := newGitLabAuth(mode, authMethod)
 	adminAuth := newAdminAuth()
 	adminHub := newAdminHub()
 
@@ -148,7 +184,7 @@ func main() {
 		userRL = newUserRateLimiter(rateLimitRPM)
 	}
 
-	srv := newServer(pm, auth, im, sessProvider, userSessions, gitlabAuth, adminAuth, adminHub, store, userRL, logger.Logger)
+	srv := newServerWithMode(pm, auth, im, sessProvider, userSessions, gitlabAuth, adminAuth, adminHub, store, userRL, mode, logger.Logger)
 
 	// Apply rate limiting to sensitive endpoints only
 	sensitivePaths := map[string]bool{"/login": true, "/bootstrap": true}
@@ -171,13 +207,26 @@ func main() {
 
 	// --- TLS (mtls mode only) ---
 	var finalListener net.Listener = blockedListener
-	if authMode == "mtls" {
-		caCertPEM, caKeyPEM, err := generateSelfSignedCert("perch-ca", nil)
+	if authMethod == "mtls" {
+		caCertPEM, caKeyPEM, err := generateSelfSignedCert("perch-ca", nil, nil)
 		if err != nil {
 			logger.Error("generate CA cert", "err", err)
 			os.Exit(1)
 		}
-		serverCertPEM, serverKeyPEM, err := generateSelfSignedCert("perch-server", nil)
+		// Parse CA cert/key so the server cert can be signed by the CA.
+		caBlock, _ := pem.Decode(caCertPEM)
+		caCert, err := x509.ParseCertificate(caBlock.Bytes)
+		if err != nil {
+			logger.Error("parse CA cert", "err", err)
+			os.Exit(1)
+		}
+		caKeyBlock, _ := pem.Decode(caKeyPEM)
+		caKey, err := x509.ParseECPrivateKey(caKeyBlock.Bytes)
+		if err != nil {
+			logger.Error("parse CA key", "err", err)
+			os.Exit(1)
+		}
+		serverCertPEM, serverKeyPEM, err := generateSelfSignedCert("perch-server", caCert, caKey)
 		if err != nil {
 			logger.Error("generate server cert", "err", err)
 			os.Exit(1)
@@ -188,7 +237,7 @@ func main() {
 			os.Exit(1)
 		}
 		srv.mux.Handle("/bootstrap", newBootstrapHandler(p12Data, "data/bootstrap.used"))
-		tlsCfg, err := buildTLSConfig(authMode, serverCertPEM, serverKeyPEM, caCertPEM)
+		tlsCfg, err := buildTLSConfig(authMethod, serverCertPEM, serverKeyPEM, caCertPEM)
 		if err != nil {
 			logger.Error("build TLS config", "err", err)
 			os.Exit(1)
@@ -220,7 +269,7 @@ func main() {
 	}
 
 	go func() {
-		logger.Info("perch listening", "addr", addr, "auth", authMode, "built", buildTime)
+		logger.Info("perch listening", "addr", addr, "auth", authMethod, "mode", mode, "built", buildTime)
 		if err := httpSrv.Serve(finalListener); err != nil && err != http.ErrServerClosed {
 			logger.Error("server error", "err", err)
 		}

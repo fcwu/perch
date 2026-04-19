@@ -9,58 +9,73 @@ function stripAnsi(s: string): string {
   return s.replace(ANSI_RE, '').replace(/\r\n/g, '\n').replace(/\r/g, '\n')
 }
 
+interface Message {
+  role: 'user' | 'assistant'
+  content: string
+  done: boolean
+}
+
 interface ChatPageProps {
   userID: string
 }
 
 export default function ChatPage(_: ChatPageProps) {
   const [query, setQuery] = useState('')
-  const [submittedQuery, setSubmittedQuery] = useState('')
+  const [messages, setMessages] = useState<Message[]>([])
+  const [newConversation, setNewConversation] = useState(false)
   const [loading, setLoading] = useState(false)
-  const [markdownBuf, setMarkdownBuf] = useState('')
   const [toolEntries, setToolEntries] = useState<ToolEntry[]>([])
   const esRef = useRef<EventSource | null>(null)
   const toolCounter = useRef(0)
-  const outputRef = useRef<HTMLDivElement>(null)
+  const threadRef = useRef<HTMLDivElement>(null)
   const rawBufRef = useRef('')
 
-  // Auto-scroll output to bottom
+  // Auto-scroll to bottom after each new message or content update
   useEffect(() => {
-    if (outputRef.current) {
-      outputRef.current.scrollTop = outputRef.current.scrollHeight
+    if (threadRef.current) {
+      threadRef.current.scrollTop = threadRef.current.scrollHeight
     }
-  }, [markdownBuf])
+  }, [messages])
 
   const handleSubmit = useCallback(async () => {
     const q = query.trim()
     if (!q || loading) return
     setLoading(true)
-    setMarkdownBuf('')
     setToolEntries([])
-    setSubmittedQuery(q)
     setQuery('')
     toolCounter.current = 0
     rawBufRef.current = ''
+
+    // Append user message and a pending assistant slot
+    const sendNewConversation = newConversation
+    setMessages(prev => {
+      const base = sendNewConversation ? [] : prev
+      return [...base, { role: 'user', content: q, done: true }, { role: 'assistant', content: '', done: false }]
+    })
+    setNewConversation(false)
 
     try {
       const resp = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query: q }),
+        body: JSON.stringify({ query: q, new_conversation: sendNewConversation }),
       })
       if (resp.status === 409) {
         alert('A session is already in progress. Please wait.')
         setLoading(false)
+        setMessages(prev => prev.slice(0, -2))
         return
       }
       if (!resp.ok) {
         alert('Failed to start session: ' + resp.statusText)
         setLoading(false)
+        setMessages(prev => prev.slice(0, -2))
         return
       }
     } catch (e) {
       alert('Network error: ' + e)
       setLoading(false)
+      setMessages(prev => prev.slice(0, -2))
       return
     }
 
@@ -74,7 +89,16 @@ export default function ChatPage(_: ChatPageProps) {
       const bytes = new Uint8Array(raw.length)
       for (let i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i)
       rawBufRef.current += decoder.decode(bytes)
-      setMarkdownBuf(stripAnsi(rawBufRef.current))
+      const content = stripAnsi(rawBufRef.current)
+      // Update the last (pending) assistant message in-place
+      setMessages(prev => {
+        const updated = [...prev]
+        const last = updated[updated.length - 1]
+        if (last && last.role === 'assistant') {
+          updated[updated.length - 1] = { ...last, content }
+        }
+        return updated
+      })
     })
 
     es.addEventListener('json', (e: MessageEvent) => {
@@ -91,6 +115,15 @@ export default function ChatPage(_: ChatPageProps) {
               : e
           ))
         } else if (ev.type === 'done') {
+          // Mark last assistant message as complete
+          setMessages(prev => {
+            const updated = [...prev]
+            const last = updated[updated.length - 1]
+            if (last && last.role === 'assistant') {
+              updated[updated.length - 1] = { ...last, done: true }
+            }
+            return updated
+          })
           setLoading(false)
           setTimeout(() => es.close(), 300)
         }
@@ -101,7 +134,7 @@ export default function ChatPage(_: ChatPageProps) {
       setLoading(false)
       es.close()
     }
-  }, [query, loading])
+  }, [query, loading, newConversation])
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -110,56 +143,84 @@ export default function ChatPage(_: ChatPageProps) {
     }
   }
 
+  const handleNewConversation = () => {
+    setMessages([])
+    setNewConversation(true)
+    setToolEntries([])
+  }
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100dvh', background: '#1a1a1a', color: '#e0e0e0', fontFamily: 'sans-serif' }}>
-      {/* Response area */}
-      <div ref={outputRef} style={{ flex: 1, overflowY: 'auto', padding: '20px 24px' }}>
-        {!submittedQuery && !loading && (
+      {/* Thread area */}
+      <div ref={threadRef} style={{ flex: 1, overflowY: 'auto', padding: '20px 24px' }}>
+        {messages.length === 0 && !loading && (
           <div style={{ color: '#555', textAlign: 'center', marginTop: 80, fontSize: 18 }}>
             Ask anything about the knowledge base
           </div>
         )}
 
-        {submittedQuery && (
-          <div style={{ maxWidth: 800, margin: '0 auto 20px' }}>
-            {/* User question bubble */}
-            <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 16 }}>
-              <div style={{
-                background: '#2c4a7a', color: '#e0e0e0', borderRadius: '12px 12px 2px 12px',
-                padding: '10px 16px', maxWidth: '75%', fontSize: 14, lineHeight: 1.5,
-                whiteSpace: 'pre-wrap', wordBreak: 'break-word',
-              }}>
-                {submittedQuery}
-              </div>
-            </div>
-
-            {/* Response */}
-            {(markdownBuf || loading) && (
-              <div style={{ display: 'flex', justifyContent: 'flex-start' }}>
-                <div style={{ maxWidth: '100%', width: '100%' }}>
-                  {markdownBuf ? (
-                    <pre style={{
-                      margin: 0, lineHeight: 1.6,
-                      whiteSpace: 'pre-wrap', wordBreak: 'break-word',
-                      fontFamily: 'monospace', fontSize: 13, color: '#e0e0e0',
-                    }}>
-                      {markdownBuf}
-                    </pre>
-                  ) : (
-                    <span style={{ color: '#888', fontSize: 13 }}>⟳ Thinking…</span>
-                  )}
+        <div style={{ maxWidth: 800, margin: '0 auto' }}>
+          {messages.map((msg, i) => (
+            <div key={i} style={{ marginBottom: 16 }}>
+              {msg.role === 'user' ? (
+                <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                  <div style={{
+                    background: '#2c4a7a', color: '#e0e0e0', borderRadius: '12px 12px 2px 12px',
+                    padding: '10px 16px', maxWidth: '75%', fontSize: 14, lineHeight: 1.5,
+                    whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+                  }}>
+                    {msg.content}
+                  </div>
                 </div>
-              </div>
-            )}
-          </div>
-        )}
+              ) : (
+                <div style={{ display: 'flex', justifyContent: 'flex-start' }}>
+                  <div style={{ maxWidth: '100%', width: '100%' }}>
+                    {msg.content ? (
+                      <pre style={{
+                        margin: 0, lineHeight: 1.6,
+                        whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+                        fontFamily: 'monospace', fontSize: 13, color: '#e0e0e0',
+                      }}>
+                        {msg.content}
+                      </pre>
+                    ) : (
+                      // Show "Thinking…" spinner only in the last pending assistant slot
+                      i === messages.length - 1 && !msg.done && (
+                        <span style={{ color: '#888', fontSize: 13 }}>⟳ Thinking…</span>
+                      )
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
       </div>
 
       {/* Activity bar (tool calls) */}
       <ToolPanel entries={toolEntries} loading={loading} />
 
       {/* Input area */}
-      <div style={{ padding: '12px 16px', background: '#111', borderTop: '1px solid #333', display: 'flex', gap: 8 }}>
+      <div style={{ padding: '12px 16px', background: '#111', borderTop: '1px solid #333', display: 'flex', gap: 8, alignItems: 'flex-end' }}>
+        <button
+          onClick={handleNewConversation}
+          disabled={loading}
+          title="Start a new conversation"
+          style={{
+            background: '#333',
+            border: '1px solid #555',
+            borderRadius: 6,
+            color: '#aaa',
+            padding: '8px 12px',
+            cursor: loading ? 'not-allowed' : 'pointer',
+            opacity: loading ? 0.5 : 1,
+            fontSize: 13,
+            whiteSpace: 'nowrap',
+            height: 'fit-content',
+          }}
+        >
+          New conversation
+        </button>
         <textarea
           value={query}
           onChange={e => setQuery(e.target.value)}
@@ -192,6 +253,10 @@ export default function ChatPage(_: ChatPageProps) {
             cursor: loading || !query.trim() ? 'not-allowed' : 'pointer',
             opacity: loading || !query.trim() ? 0.5 : 1,
             fontSize: 14,
+            height: 'fit-content',
+            alignSelf: 'flex-end',
+            paddingTop: 10,
+            paddingBottom: 10,
           }}
         >
           Send

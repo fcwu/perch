@@ -15,7 +15,7 @@ func TestStoreIntegration(t *testing.T) {
 	m := newUserSessionManager(rt, "", nil, store, hub)
 
 	// Start a session
-	if err := m.StartSession("u1", "alice", "what is HBS?"); err != nil {
+	if err := m.StartSession("u1", "alice", "what is HBS?", false); err != nil {
 		t.Fatalf("StartSession: %v", err)
 	}
 

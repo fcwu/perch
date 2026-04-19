@@ -15,6 +15,14 @@ interface SessionView {
   session_uuid: string
 }
 
+interface AuthStatus {
+  authenticated: boolean
+  username: string
+  role: string        // "admin" | "user" | ""
+  mode: string        // "single" | "multi"
+  auth_method: string // "none" | "password" | "mtls" | "gitlab"
+}
+
 type ActiveTab = null | string  // null = main PTY; string = discord channelID
 
 function useDiscordSessions() {
@@ -33,13 +41,60 @@ function useDiscordSessions() {
   return sessions
 }
 
-// userIDFromCookie reads the userID from the perch_session cookie (server sets it).
-// The cookie is HttpOnly so JS can't read it directly; the server injects it via a meta tag or
-// we parse it from the URL query param that the server can embed on the /chat page.
-// For now, the ChatPage derives userID via /api/chat response.
-// This sentinel lets ChatPage request userID lazily.
-const CHAT_USER_PLACEHOLDER = 'me'
+// Shared logout button style
+function LogoutButton() {
+  return (
+    <button
+      onClick={() => { window.location.href = '/auth/logout' }}
+      style={{
+        background: 'none', border: '1px solid #444', borderRadius: 4,
+        color: '#888', padding: '4px 10px', fontSize: 12, cursor: 'pointer',
+        fontFamily: 'monospace',
+      }}
+    >
+      Logout
+    </button>
+  )
+}
 
+// Login screen for multi-user unauthenticated state
+function GitLabLoginScreen({ error }: { error: boolean }) {
+  return (
+    <div style={{
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      height: '100dvh', background: '#1a1a1a', color: '#e0e0e0',
+    }}>
+      <div style={{
+        display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 20,
+        background: '#111', padding: 48, borderRadius: 12,
+        border: '1px solid #333', minWidth: 320,
+      }}>
+        <div style={{ fontSize: 24, fontFamily: 'monospace', color: '#4a9eff' }}>Perch</div>
+        {error && (
+          <div style={{
+            color: '#f66', fontSize: 13, textAlign: 'center', padding: '8px 16px',
+            background: '#2a0000', borderRadius: 6, border: '1px solid #800',
+          }}>
+            Access denied. Contact the administrator.
+          </div>
+        )}
+        <button
+          onClick={() => { window.location.href = '/auth/gitlab' }}
+          style={{
+            background: '#fc6d26', border: 'none', borderRadius: 6,
+            color: '#fff', padding: '12px 24px', fontSize: 15,
+            cursor: 'pointer', fontFamily: 'sans-serif', fontWeight: 600,
+            width: '100%',
+          }}
+        >
+          Login with GitLab
+        </button>
+      </div>
+    </div>
+  )
+}
+
+// Password login overlay (single-user password mode)
 function LoginOverlay({ onLogin }: { onLogin: () => void }) {
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
@@ -95,7 +150,7 @@ function LoginOverlay({ onLogin }: { onLogin: () => void }) {
   )
 }
 
-function TerminalApp() {
+function TerminalApp({ showLogout }: { showLogout: boolean }) {
   const containerRef = useRef<HTMLDivElement>(null)
   const termRef = useRef<Terminal | null>(null)
   const fitAddonRef = useRef<FitAddon | null>(null)
@@ -119,16 +174,10 @@ function TerminalApp() {
     term.registerLinkProvider({
       provideLinks(bufferRow, callback) {
         const buffer = term.buffer.active
-        // buffer.getLine() is 0-indexed; bufferRow is 1-indexed
         const getLine = (r: number) => buffer.getLine(r - 1)
         const rowText = (r: number) => (getLine(r)?.translateToString(false) ?? '').trimEnd()
-        // A row with no whitespace looks like a URL fragment (percent-encoded, no spaces)
         const noSpace = (s: string) => s.length > 0 && !/\s/.test(s)
 
-        // Walk back to find the first row of this group.
-        // Handles isWrapped=true continuations AND explicit-newline URL splits:
-        // if the current row has no spaces and doesn't start a new URL, and
-        // the previous row also has no spaces, they're likely parts of the same URL.
         let startRow = bufferRow
         while (startRow > 1) {
           if (getLine(startRow)?.isWrapped) { startRow--; continue }
@@ -139,7 +188,6 @@ function TerminalApp() {
           break
         }
 
-        // Collect all rows going forward (isWrapped continuations + no-space URL fragments)
         const rows: number[] = [startRow]
         for (let r = startRow; r <= buffer.length; r++) {
           const next = getLine(r + 1)
@@ -147,8 +195,6 @@ function TerminalApp() {
           if (next.isWrapped) {
             rows.push(r + 1)
           } else {
-            // Extend for explicit-newline URL fragments: both current and next row
-            // must have no whitespace, and next must not start a new URL.
             const nextT = rowText(r + 1)
             if (noSpace(rowText(r)) && noSpace(nextT) && !nextT.startsWith('http')) {
               rows.push(r + 1)
@@ -160,15 +206,12 @@ function TerminalApp() {
 
         if (!rows.includes(bufferRow)) { callback(undefined); return }
 
-        // Get each row's text trimmed of padding spaces
         const trimmed = rows.map(r => rowText(r))
         const combined = trimmed.join('')
 
-        // Cumulative character lengths (for offset → coordinate mapping)
         const cumLen: number[] = [0]
         for (const s of trimmed) cumLen.push(cumLen[cumLen.length - 1] + s.length)
 
-        // Map a character offset in `combined` back to buffer {x, y} coordinates
         const toCoord = (off: number) => {
           let ri = trimmed.length - 1
           for (let i = 0; i < trimmed.length; i++) {
@@ -190,7 +233,6 @@ function TerminalApp() {
             range: { start: toCoord(s), end: toCoord(e) },
             decorations: { pointerCursor: true, underline: true },
             activate: (_: MouseEvent, text: string) => {
-              // Use anchor click instead of window.open to avoid popup blockers
               const a = document.createElement('a')
               a.href = text
               a.target = '_blank'
@@ -215,13 +257,11 @@ function TerminalApp() {
     }
   }, [])
 
-  // Connect/reconnect WebSocket whenever active tab changes
   const connectWS = useCallback((tab: ActiveTab) => {
     const term = termRef.current
     const fitAddon = fitAddonRef.current
     if (!term || !fitAddon || !containerRef.current) return
 
-    // Clear terminal buffer so the new session starts with a clean view.
     term.reset()
 
     const proto = location.protocol === 'https:' ? 'wss' : 'ws'
@@ -261,9 +301,6 @@ function TerminalApp() {
     observer.observe(containerRef.current!)
     window.addEventListener('resize', sendResize)
 
-    // When the native mobile keyboard appears the visual viewport shrinks.
-    // Resize the terminal to fit the remaining space and scroll to bottom so
-    // the cursor line stays visible.
     const handleViewportResize = () => {
       sendResize()
       term.scrollToBottom()
@@ -297,47 +334,47 @@ function TerminalApp() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100dvh', background: '#000' }}>
-      {sessions.length > 0 && (
-        <div style={{ display: 'flex', background: '#111', flexShrink: 0, overflowX: 'auto' }}>
-          <button style={tabStyle(activeTab === null)} onClick={() => setActiveTab(null)}>
-            Terminal
-          </button>
-          {sessions.map(sess => (
-            <button
-              key={sess.channel_id}
-              style={tabStyle(activeTab === sess.channel_id)}
-              onClick={() => setActiveTab(sess.channel_id)}
-            >
-              Discord {sess.channel_id}
+      <div style={{ display: 'flex', background: '#111', flexShrink: 0, overflowX: 'auto', alignItems: 'center' }}>
+        {sessions.length > 0 && (
+          <>
+            <button style={tabStyle(activeTab === null)} onClick={() => setActiveTab(null)}>
+              Terminal
             </button>
-          ))}
-        </div>
-      )}
+            {sessions.map(sess => (
+              <button
+                key={sess.channel_id}
+                style={tabStyle(activeTab === sess.channel_id)}
+                onClick={() => setActiveTab(sess.channel_id)}
+              >
+                Discord {sess.channel_id}
+              </button>
+            ))}
+          </>
+        )}
+        {showLogout && (
+          <div style={{ marginLeft: 'auto', padding: '4px 8px' }}>
+            <LogoutButton />
+          </div>
+        )}
+      </div>
       <div ref={containerRef} style={{ flex: 1, overflow: 'hidden' }} />
       <Keyboard termRef={termRef} />
     </div>
   )
 }
 
-function TerminalRoot() {
-  const [authChecked, setAuthChecked] = useState(false)
-  const [authenticated, setAuthenticated] = useState(true)
+function TerminalRoot({ status, accessDenied }: { status: AuthStatus, accessDenied: boolean }) {
+  const [authenticated, setAuthenticated] = useState(status.authenticated)
 
-  useEffect(() => {
-    fetch('/api/auth').then(r => {
-      setAuthenticated(r.ok)
-      setAuthChecked(true)
-    }).catch(() => {
-      // /api/auth not registered (AUTH_MODE != password) → assume authenticated
-      setAuthChecked(true)
-    })
-  }, [])
-
-  if (!authChecked) return null
   if (!authenticated) {
+    if (status.auth_method === 'gitlab') {
+      return <GitLabLoginScreen error={accessDenied} />
+    }
+    // Single-user password mode → show password overlay
     return <LoginOverlay onLogin={() => setAuthenticated(true)} />
   }
-  return <TerminalApp />
+
+  return <TerminalApp showLogout={status.auth_method !== 'none'} />
 }
 
 function AdminLoginPage() {
@@ -379,7 +416,7 @@ function AdminLoginPage() {
 
 type AdminTab = 'realtime' | 'history' | 'analytics'
 
-function AdminApp() {
+function AdminApp({ showLogout }: { showLogout: boolean }) {
   const initTab = (): AdminTab => {
     const p = window.location.pathname
     return p.startsWith('/admin/analytics') ? 'analytics' : p.startsWith('/admin/history') ? 'history' : 'realtime'
@@ -408,6 +445,12 @@ function AdminApp() {
         <button style={tabStyle(tab === 'realtime')} onClick={() => navigate('realtime')}>Live</button>
         <button style={tabStyle(tab === 'history')} onClick={() => navigate('history')}>History</button>
         <button style={tabStyle(tab === 'analytics')} onClick={() => navigate('analytics')}>Analytics</button>
+        <a href="/chat" style={{ marginLeft: 8, color: '#888', fontSize: 12, fontFamily: 'sans-serif', textDecoration: 'none' }}>→ Chat</a>
+        {showLogout && (
+          <div style={{ marginLeft: 'auto' }}>
+            <LogoutButton />
+          </div>
+        )}
       </div>
       <div style={{ flex: 1, overflowY: 'auto' }}>
         {tab === 'realtime' && <AdminRealtimePage />}
@@ -418,16 +461,76 @@ function AdminApp() {
   )
 }
 
+// Loading spinner shown while auth status is fetching
+function LoadingScreen() {
+  return (
+    <div style={{
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      height: '100dvh', background: '#1a1a1a', color: '#555', fontSize: 14,
+      fontFamily: 'monospace',
+    }}>
+      Loading…
+    </div>
+  )
+}
+
 export default function App() {
   const path = window.location.pathname
-  if (path.startsWith('/chat')) {
-    return <ChatPage userID={CHAT_USER_PLACEHOLDER} />
-  }
+  const [authStatus, setAuthStatus] = useState<AuthStatus | null>(null)
+  const [accessDenied, setAccessDenied] = useState(false)
+
+  useEffect(() => {
+    // Parse ?error=access_denied from URL on mount
+    const params = new URLSearchParams(window.location.search)
+    if (params.get('error') === 'access_denied') {
+      setAccessDenied(true)
+    }
+
+    // Fetch auth status
+    fetch('/api/auth/status')
+      .then(r => r.json())
+      .then((s: AuthStatus) => setAuthStatus(s))
+      .catch(() => {
+        // Fallback: assume single-mode, no auth, authenticated
+        setAuthStatus({ authenticated: true, username: '', role: '', mode: 'single', auth_method: 'none' })
+      })
+  }, [])
+
+  // Admin login page is always served as-is
   if (path === '/admin/login') {
     return <AdminLoginPage />
   }
-  if (path.startsWith('/admin')) {
-    return <AdminApp />
+
+  // Show loading while auth status is in-flight
+  if (authStatus === null) {
+    return <LoadingScreen />
   }
-  return <TerminalRoot />
+
+  // Multi-user unauthenticated: show inline login screen
+  if (authStatus.mode === 'multi' && !authStatus.authenticated) {
+    return <GitLabLoginScreen error={accessDenied} />
+  }
+
+  // Route based on path
+  if (path.startsWith('/chat')) {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', height: '100dvh' }}>
+        {authStatus.authenticated && authStatus.auth_method !== 'none' && (
+          <div style={{ display: 'flex', justifyContent: 'flex-end', background: '#111', padding: '4px 8px', borderBottom: '1px solid #222' }}>
+            <LogoutButton />
+          </div>
+        )}
+        <div style={{ flex: 1, overflow: 'hidden' }}>
+          <ChatPage userID="me" />
+        </div>
+      </div>
+    )
+  }
+
+  if (path.startsWith('/admin')) {
+    return <AdminApp showLogout={authStatus.authenticated && authStatus.auth_method !== 'none'} />
+  }
+
+  // Root: single-user terminal UI (or multi-user admin terminal)
+  return <TerminalRoot status={authStatus} accessDenied={accessDenied} />
 }

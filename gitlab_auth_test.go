@@ -94,7 +94,7 @@ func TestGitLabAuthCallbackTokenExchangeError(t *testing.T) {
 	}
 }
 
-func TestGitLabAuthCallbackValidFlow(t *testing.T) {
+func TestGitLabAuthCallbackValidFlowSingleMode(t *testing.T) {
 	mockGitLab := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/oauth/token":
@@ -113,6 +113,9 @@ func TestGitLabAuthCallbackValidFlow(t *testing.T) {
 		gitlabURL:    mockGitLab.URL,
 		redirectURI:  "https://app.example.com/auth/callback",
 		cookieSecret: "test-secret",
+		mode:         ModeSingle,
+		adminIDs:     make(map[string]bool),
+		allowedIDs:   make(map[string]bool),
 	}
 	state := "valid-state"
 	req := httptest.NewRequest(http.MethodGet, "/auth/callback?code=good-code&state="+state, nil)
@@ -124,8 +127,8 @@ func TestGitLabAuthCallbackValidFlow(t *testing.T) {
 		t.Fatalf("expected redirect (302), got %d", rr.Code)
 	}
 	loc := rr.Header().Get("Location")
-	if loc != "/chat" {
-		t.Errorf("expected redirect to /chat, got %q", loc)
+	if loc != "/" {
+		t.Errorf("expected redirect to / in single mode, got %q", loc)
 	}
 	// Verify session cookie is set.
 	var sessionCookie *http.Cookie
@@ -147,7 +150,67 @@ func TestGitLabAuthCallbackValidFlow(t *testing.T) {
 	}
 }
 
-func TestGitLabAuthMiddlewareMissingCookieRedirects(t *testing.T) {
+func TestGitLabAuthCallbackMultiModeAdminRedirect(t *testing.T) {
+	mockGitLab := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/oauth/token":
+			json.NewEncoder(w).Encode(map[string]string{"access_token": "tok123"})
+		case "/api/v4/user":
+			json.NewEncoder(w).Encode(map[string]any{"id": 42, "username": "admin"})
+		}
+	}))
+	defer mockGitLab.Close()
+
+	ga := &gitLabAuth{
+		clientID: "cid", clientSecret: "csecret",
+		gitlabURL: mockGitLab.URL, redirectURI: "https://app/auth/callback",
+		cookieSecret: "test-secret", mode: ModeMulti,
+		adminIDs: map[string]bool{"42": true}, allowedIDs: make(map[string]bool),
+	}
+	state := "s"
+	req := httptest.NewRequest(http.MethodGet, "/auth/callback?code=c&state="+state, nil)
+	req.AddCookie(&http.Cookie{Name: "oauth_state", Value: state})
+	rr := httptest.NewRecorder()
+	ga.handleCallback(rr, req)
+	if rr.Code != http.StatusFound {
+		t.Fatalf("expected 302, got %d", rr.Code)
+	}
+	if loc := rr.Header().Get("Location"); loc != "/admin" {
+		t.Errorf("expected /admin redirect, got %q", loc)
+	}
+}
+
+func TestGitLabAuthCallbackMultiModeAccessDenied(t *testing.T) {
+	mockGitLab := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/oauth/token":
+			json.NewEncoder(w).Encode(map[string]string{"access_token": "tok123"})
+		case "/api/v4/user":
+			json.NewEncoder(w).Encode(map[string]any{"id": 99, "username": "stranger"})
+		}
+	}))
+	defer mockGitLab.Close()
+
+	ga := &gitLabAuth{
+		clientID: "cid", clientSecret: "csecret",
+		gitlabURL: mockGitLab.URL, redirectURI: "https://app/auth/callback",
+		cookieSecret: "test-secret", mode: ModeMulti,
+		adminIDs: map[string]bool{"42": true}, allowedIDs: make(map[string]bool),
+	}
+	state := "s"
+	req := httptest.NewRequest(http.MethodGet, "/auth/callback?code=c&state="+state, nil)
+	req.AddCookie(&http.Cookie{Name: "oauth_state", Value: state})
+	rr := httptest.NewRecorder()
+	ga.handleCallback(rr, req)
+	if rr.Code != http.StatusFound {
+		t.Fatalf("expected 302, got %d", rr.Code)
+	}
+	if loc := rr.Header().Get("Location"); loc != "/?error=access_denied" {
+		t.Errorf("expected /?error=access_denied redirect, got %q", loc)
+	}
+}
+
+func TestGitLabAuthMiddlewareMissingCookieReturns401(t *testing.T) {
 	ga := &gitLabAuth{cookieSecret: "test-secret"}
 	handler := ga.middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -155,8 +218,87 @@ func TestGitLabAuthMiddlewareMissingCookieRedirects(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/chat", nil)
 	rr := httptest.NewRecorder()
 	handler.ServeHTTP(rr, req)
+	if rr.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 for missing cookie, got %d", rr.Code)
+	}
+}
+
+func TestHandleAuthStatusNoSession(t *testing.T) {
+	ga := &gitLabAuth{cookieSecret: "test-secret", adminIDs: make(map[string]bool), allowedIDs: make(map[string]bool)}
+	req := httptest.NewRequest(http.MethodGet, "/api/auth/status", nil)
+	rr := httptest.NewRecorder()
+	ga.handleAuthStatus(rr, req, ModeSingle, nil)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rr.Code)
+	}
+	var resp map[string]any
+	if err := json.NewDecoder(rr.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp["authenticated"] != false {
+		t.Errorf("expected authenticated=false, got %v", resp["authenticated"])
+	}
+	if resp["mode"] != "single" {
+		t.Errorf("expected mode=single, got %v", resp["mode"])
+	}
+}
+
+func TestHandleAuthStatusAdminSession(t *testing.T) {
+	ga := &gitLabAuth{cookieSecret: "test-secret", adminIDs: make(map[string]bool), allowedIDs: make(map[string]bool)}
+	claims := SessionClaims{UserID: "1", Username: "alice", Role: "admin", Exp: time.Now().Add(time.Hour).Unix()}
+	cv, _ := signCookie(claims, "test-secret")
+	req := httptest.NewRequest(http.MethodGet, "/api/auth/status", nil)
+	req.AddCookie(&http.Cookie{Name: "perch_session", Value: cv})
+	rr := httptest.NewRecorder()
+	ga.handleAuthStatus(rr, req, ModeMulti, nil)
+	var resp map[string]any
+	json.NewDecoder(rr.Body).Decode(&resp)
+	if resp["authenticated"] != true {
+		t.Errorf("expected authenticated=true")
+	}
+	if resp["role"] != "admin" {
+		t.Errorf("expected role=admin, got %v", resp["role"])
+	}
+	if resp["mode"] != "multi" {
+		t.Errorf("expected mode=multi, got %v", resp["mode"])
+	}
+}
+
+func TestHandleAuthStatusUserSession(t *testing.T) {
+	ga := &gitLabAuth{cookieSecret: "test-secret", adminIDs: make(map[string]bool), allowedIDs: make(map[string]bool)}
+	claims := SessionClaims{UserID: "2", Username: "bob", Role: "user", Exp: time.Now().Add(time.Hour).Unix()}
+	cv, _ := signCookie(claims, "test-secret")
+	req := httptest.NewRequest(http.MethodGet, "/api/auth/status", nil)
+	req.AddCookie(&http.Cookie{Name: "perch_session", Value: cv})
+	rr := httptest.NewRecorder()
+	ga.handleAuthStatus(rr, req, ModeMulti, nil)
+	var resp map[string]any
+	json.NewDecoder(rr.Body).Decode(&resp)
+	if resp["role"] != "user" {
+		t.Errorf("expected role=user, got %v", resp["role"])
+	}
+}
+
+func TestHandleLogoutClearsCookieAndRedirects(t *testing.T) {
+	ga := &gitLabAuth{cookieSecret: "test-secret", adminIDs: make(map[string]bool), allowedIDs: make(map[string]bool)}
+	req := httptest.NewRequest(http.MethodGet, "/auth/logout", nil)
+	req.AddCookie(&http.Cookie{Name: "perch_session", Value: "somevalue"})
+	rr := httptest.NewRecorder()
+	ga.handleLogout(rr, req)
 	if rr.Code != http.StatusFound {
-		t.Fatalf("expected redirect for missing cookie, got %d", rr.Code)
+		t.Fatalf("expected 302, got %d", rr.Code)
+	}
+	if loc := rr.Header().Get("Location"); loc != "/" {
+		t.Errorf("expected redirect to /, got %q", loc)
+	}
+	var cleared bool
+	for _, c := range rr.Result().Cookies() {
+		if c.Name == "perch_session" && c.MaxAge == -1 {
+			cleared = true
+		}
+	}
+	if !cleared {
+		t.Error("expected perch_session cookie to be cleared (MaxAge=-1)")
 	}
 }
 

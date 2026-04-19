@@ -1,6 +1,9 @@
 package main
 
 import (
+	"bytes"
+	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -124,6 +127,84 @@ func TestSessionWSKeystrokeForwarded(t *testing.T) {
 
 	if len(sp.written) == 0 || string(sp.written[0]) != "hello" {
 		t.Fatalf("expected keystroke forwarded, got %v", sp.written)
+	}
+}
+
+func postChat(t *testing.T, s *Server, userID, query string, newConversation bool) *httptest.ResponseRecorder {
+	t.Helper()
+	body, _ := json.Marshal(map[string]any{"query": query, "new_conversation": newConversation})
+	req := httptest.NewRequest(http.MethodPost, "/api/chat", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	ctx := context.WithValue(req.Context(), ctxUserID, userID)
+	ctx = context.WithValue(ctx, ctxUsername, "testuser")
+	req = req.WithContext(ctx)
+	rr := httptest.NewRecorder()
+	s.handleChatAPI(rr, req)
+	return rr
+}
+
+func TestHandleChatAPIHistory(t *testing.T) {
+	store := tempStore(t)
+	rt := makeTestRuntime()
+	hub := newAdminHub()
+	m := newUserSessionManager(rt, "", nil, store, hub)
+
+	// Insert a prior completed session for userID "u1"
+	store.InsertSession("prior-sess", "u1", "testuser", "prior query")
+	store.UpdateSessionDone("prior-sess", "prior response")
+
+	srv := newServer(newPTYManager(), nil, nil, nil, m, nil, nil, nil, nil, nil, nil)
+
+	// Second request from same user within 24h should use history
+	rr := postChat(t, srv, "u1", "follow-up question", false)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	// Verify the session's prompt includes conversation history
+	m.mu.Lock()
+	sess := m.sessions["u1"]
+	m.mu.Unlock()
+	if sess == nil {
+		t.Fatal("expected session to exist")
+	}
+	if !strings.Contains(sess.prompt, "<conversation_history>") {
+		t.Errorf("expected prompt to include conversation history, got:\n%s", sess.prompt)
+	}
+	if !strings.Contains(sess.prompt, "prior query") {
+		t.Errorf("expected prompt to include prior query, got:\n%s", sess.prompt)
+	}
+}
+
+func TestHandleChatAPINewConversation(t *testing.T) {
+	store := tempStore(t)
+	rt := makeTestRuntime()
+	hub := newAdminHub()
+	m := newUserSessionManager(rt, "", nil, store, hub)
+
+	// Insert a prior completed session
+	store.InsertSession("prior-sess2", "u2", "testuser", "old query")
+	store.UpdateSessionDone("prior-sess2", "old response")
+
+	srv := newServer(newPTYManager(), nil, nil, nil, m, nil, nil, nil, nil, nil, nil)
+
+	// Request with new_conversation:true should skip history
+	rr := postChat(t, srv, "u2", "fresh start", true)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	m.mu.Lock()
+	sess := m.sessions["u2"]
+	m.mu.Unlock()
+	if sess == nil {
+		t.Fatal("expected session to exist")
+	}
+	if strings.Contains(sess.prompt, "<conversation_history>") {
+		t.Errorf("expected no conversation history when new_conversation=true, got:\n%s", sess.prompt)
+	}
+	if sess.prompt != "fresh start" {
+		t.Errorf("expected raw query as prompt, got: %q", sess.prompt)
 	}
 }
 

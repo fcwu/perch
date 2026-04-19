@@ -112,6 +112,12 @@ func (s *Store) UpdateToolEventEnd(eventID int64, outputJSON string) error {
 	return err
 }
 
+// ConversationTurn represents a completed query/response pair from a prior session.
+type ConversationTurn struct {
+	Query    string
+	Response string
+}
+
 // SessionRow is a row returned by ListSessions.
 type SessionRow struct {
 	ID         string
@@ -122,6 +128,27 @@ type SessionRow struct {
 	StartedAt  int64
 	EndedAt    *int64
 	DurationMs *int64
+}
+
+// GetRecentHistory returns up to limit completed turns for userID with started_at >= since (ms).
+func (s *Store) GetRecentHistory(userID string, since int64, limit int) ([]ConversationTurn, error) {
+	rows, err := s.db.Query(
+		`SELECT query,response FROM query_sessions WHERE user_id=? AND status='done' AND started_at>=? ORDER BY started_at ASC LIMIT ?`,
+		userID, since, limit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []ConversationTurn
+	for rows.Next() {
+		var t ConversationTurn
+		if err := rows.Scan(&t.Query, &t.Response); err != nil {
+			return nil, err
+		}
+		out = append(out, t)
+	}
+	return out, rows.Err()
 }
 
 // ListSessions returns paginated sessions matching optional filters.

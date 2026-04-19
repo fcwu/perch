@@ -39,15 +39,20 @@ type Server struct {
 	adminHub        *AdminHub
 	store           *Store
 	userRateLimiter *UserRateLimiter
+	mode            OperatingMode
 	logger          *slog.Logger
 	mux             *http.ServeMux
 }
 
 func newServer(pm *PTYManager, auth *AuthMiddleware, im *IMManager, sessions SessionProvider, userSessions *UserSessionManager, gitlabAuth *gitLabAuth, adminAuth *adminAuth, adminHub *AdminHub, store *Store, userRL *UserRateLimiter, logger *slog.Logger) *Server {
+	return newServerWithMode(pm, auth, im, sessions, userSessions, gitlabAuth, adminAuth, adminHub, store, userRL, ModeSingle, logger)
+}
+
+func newServerWithMode(pm *PTYManager, auth *AuthMiddleware, im *IMManager, sessions SessionProvider, userSessions *UserSessionManager, gitlabAuth *gitLabAuth, adminAuth *adminAuth, adminHub *AdminHub, store *Store, userRL *UserRateLimiter, mode OperatingMode, logger *slog.Logger) *Server {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	s := &Server{pty: pm, auth: auth, im: im, sessions: sessions, userSessions: userSessions, gitlabAuth: gitlabAuth, adminAuth: adminAuth, adminHub: adminHub, store: store, userRateLimiter: userRL, logger: logger, mux: http.NewServeMux()}
+	s := &Server{pty: pm, auth: auth, im: im, sessions: sessions, userSessions: userSessions, gitlabAuth: gitlabAuth, adminAuth: adminAuth, adminHub: adminHub, store: store, userRateLimiter: userRL, mode: mode, logger: logger, mux: http.NewServeMux()}
 	s.mux.HandleFunc("/ws", s.handleWS)
 	s.mux.HandleFunc("/input", s.handleInput)
 	s.mux.HandleFunc("/sessions", s.handleSessions)
@@ -58,7 +63,13 @@ func newServer(pm *PTYManager, auth *AuthMiddleware, im *IMManager, sessions Ses
 	s.mux.Handle("/hook", newHookHandler(im, userSessions))
 	if auth != nil && auth.mode == "password" {
 		s.mux.HandleFunc("/login", auth.handleLogin)
-		s.mux.HandleFunc("/api/auth", auth.handleAuthStatus)
+	}
+	// Public auth endpoints.
+	if gitlabAuth != nil {
+		s.mux.HandleFunc("/api/auth/status", func(w http.ResponseWriter, r *http.Request) {
+			gitlabAuth.handleAuthStatus(w, r, mode, auth)
+		})
+		s.mux.HandleFunc("/auth/logout", gitlabAuth.handleLogout)
 	}
 	// Admin endpoints — POST handled by adminAuth, GET falls through to SPA below.
 	adminLoginHandler := adminAuth.handleLogin
@@ -95,20 +106,29 @@ func newServer(pm *PTYManager, auth *AuthMiddleware, im *IMManager, sessions Ses
 			}
 			serveIndexHTML(w, r, distFS)
 		})
-		// /chat: serve index.html (React router handles the path); protected by GitLab auth above.
-		if gitlabAuth != nil && gitlabAuth.enabled() {
-			s.mux.Handle("/chat", gitlabAuth.middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if mode == ModeMulti {
+			// Multi-user: /chat and /admin serve index.html without auth — API layer enforces auth.
+			s.mux.HandleFunc("/chat", func(w http.ResponseWriter, r *http.Request) {
 				serveIndexHTML(w, r, distFS)
-			})))
+			})
+			s.mux.HandleFunc("/admin", func(w http.ResponseWriter, r *http.Request) {
+				serveIndexHTML(w, r, distFS)
+			})
+		} else if gitlabAuth != nil && gitlabAuth.enabled() {
+			// Single-user GitLab mode: /chat served without auth (API enforces it).
+			s.mux.HandleFunc("/chat", func(w http.ResponseWriter, r *http.Request) {
+				serveIndexHTML(w, r, distFS)
+			})
 		}
 	}
 	return s
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	// Paths exempt from the primary auth middleware.
+	// Paths always exempt from primary auth middleware.
 	switch r.URL.Path {
-	case "/hook", "/auth/gitlab", "/auth/callback", "/admin/login":
+	case "/hook", "/auth/gitlab", "/auth/callback", "/auth/logout",
+		"/api/auth/status", "/admin/login", "/login":
 		s.mux.ServeHTTP(w, r)
 		return
 	}
@@ -121,19 +141,17 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.mux.ServeHTTP(w, r)
 		return
 	}
-	// Chat paths use GitLab session auth (applied at registration time) — skip primary auth.
-	// Include trailing-slash variant so /chat/ also hits the auth-gated handler.
-	if r.URL.Path == "/chat" || r.URL.Path == "/chat/" || r.URL.Path == "/api/chat" || r.URL.Path == "/api/chat/stream" || r.URL.Path == "/ws/chat" {
-		// Normalise /chat/ → /chat so the mux handler fires.
-		if r.URL.Path == "/chat/" {
-			r.URL.Path = "/chat"
-		}
+	// Normalise /chat/ → /chat.
+	if r.URL.Path == "/chat/" {
+		r.URL.Path = "/chat"
+	}
+	// Chat/API paths: auth enforced at handler registration, skip primary auth.
+	if r.URL.Path == "/chat" || r.URL.Path == "/api/chat" || r.URL.Path == "/api/chat/stream" || r.URL.Path == "/ws/chat" {
 		s.mux.ServeHTTP(w, r)
 		return
 	}
-	// Static assets and the SPA root must load without auth so the login UI can render.
-	// /api/auth and /login are also public (they are the auth endpoints themselves).
-	// Only protect the interactive API/WS endpoints.
+	// Static assets and the SPA root load without auth so the login UI can render.
+	// Only protect interactive API/WS endpoints under primary auth.
 	if s.auth != nil && s.auth.mode == "password" {
 		switch r.URL.Path {
 		case "/ws", "/input", "/sessions", "/ws/session":
@@ -332,7 +350,8 @@ func (s *Server) handleChatAPI(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		Query string `json:"query"`
+		Query           string `json:"query"`
+		NewConversation bool   `json:"new_conversation,omitempty"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Query == "" {
 		http.Error(w, "bad request: missing query", http.StatusBadRequest)
@@ -352,7 +371,7 @@ func (s *Server) handleChatAPI(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if err := s.userSessions.StartSession(userID, username, req.Query); err != nil {
+	if err := s.userSessions.StartSession(userID, username, req.Query, req.NewConversation); err != nil {
 		if ce, ok := err.(interface{ IsConflict() bool }); ok && ce.IsConflict() {
 			http.Error(w, "session already in progress", http.StatusConflict)
 			return

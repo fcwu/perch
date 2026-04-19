@@ -1,9 +1,36 @@
 package main
 
 import (
+	"strings"
 	"testing"
 	"time"
 )
+
+func TestBuildPrompt(t *testing.T) {
+	// Empty history returns raw query
+	if got := buildPrompt(nil, "hello"); got != "hello" {
+		t.Errorf("empty history: expected raw query, got %q", got)
+	}
+
+	// N turns produce correct prefix format
+	history := []ConversationTurn{
+		{Query: "q1", Response: "r1"},
+		{Query: "q2", Response: "r2"},
+	}
+	got := buildPrompt(history, "new question")
+	if !strings.Contains(got, "<conversation_history>") {
+		t.Error("expected <conversation_history> tag")
+	}
+	if !strings.Contains(got, "User: q1\nAssistant: r1") {
+		t.Error("expected first turn formatted correctly")
+	}
+	if !strings.Contains(got, "User: q2\nAssistant: r2") {
+		t.Error("expected second turn formatted correctly")
+	}
+	if !strings.HasSuffix(got, "</conversation_history>\n\nnew question") {
+		t.Errorf("expected prompt to end with query after closing tag, got: %q", got)
+	}
+}
 
 func makeTestRuntime() AgentRuntime {
 	return AgentRuntime{
@@ -15,7 +42,7 @@ func makeTestRuntime() AgentRuntime {
 func TestUserSessionManagerStartSession(t *testing.T) {
 	rt := makeTestRuntime()
 	m := newUserSessionManager(rt, "", nil, nil, nil)
-	if err := m.StartSession("u1", "alice", "what is X?"); err != nil {
+	if err := m.StartSession("u1", "alice", "what is X?", false); err != nil {
 		t.Fatalf("StartSession: %v", err)
 	}
 	m.mu.Lock()
@@ -37,7 +64,7 @@ func TestUserSessionManagerConflictWhileRunning(t *testing.T) {
 	m.sessions["u1"] = sess
 	m.mu.Unlock()
 
-	err := m.StartSession("u1", "alice", "again")
+	err := m.StartSession("u1", "alice", "again", false)
 	if err == nil {
 		t.Fatal("expected conflict error, got nil")
 	}
@@ -51,7 +78,7 @@ func TestUserSessionManagerCancelStopsPTY(t *testing.T) {
 	rt := makeTestRuntime()
 	m := newUserSessionManager(rt, "", nil, nil, nil)
 
-	if err := m.StartSession("u1", "alice", "q"); err != nil {
+	if err := m.StartSession("u1", "alice", "q", false); err != nil {
 		t.Fatalf("StartSession: %v", err)
 	}
 	m.mu.Lock()
@@ -76,7 +103,7 @@ func TestUserSessionManagerCancelStopsPTY(t *testing.T) {
 func TestUserSessionManagerClaimUUID(t *testing.T) {
 	rt := makeTestRuntime()
 	m := newUserSessionManager(rt, "", nil, nil, nil)
-	if err := m.StartSession("u1", "alice", "q"); err != nil {
+	if err := m.StartSession("u1", "alice", "q", false); err != nil {
 		t.Fatalf("StartSession: %v", err)
 	}
 	sess, ok := m.ClaimUUID("uuid-abc")

@@ -20,16 +20,47 @@ type gitLabAuth struct {
 	redirectURI  string
 	gitlabURL    string
 	cookieSecret string
+	mode         OperatingMode
+	authMethod   string          // AUTH_METHOD value: none | password | mtls | gitlab
+	adminIDs     map[string]bool // GitLab user IDs that get admin role
+	allowedIDs   map[string]bool // non-admin IDs allowed in multi-user mode; nil = deny all; "∗" sentinel = allow all
+	allowAll     bool            // true when GITLAB_ALLOWED_IDS=*
 }
 
-func newGitLabAuth() *gitLabAuth {
-	return &gitLabAuth{
+func newGitLabAuth(mode OperatingMode, authMethod string) *gitLabAuth {
+	g := &gitLabAuth{
 		clientID:     os.Getenv("GITLAB_CLIENT_ID"),
 		clientSecret: os.Getenv("GITLAB_CLIENT_SECRET"),
 		redirectURI:  os.Getenv("GITLAB_REDIRECT_URI"),
 		gitlabURL:    strings.TrimRight(os.Getenv("GITLAB_URL"), "/"),
 		cookieSecret: cookieSecret(),
+		mode:         mode,
+		authMethod:   authMethod,
+		adminIDs:     make(map[string]bool),
+		allowedIDs:   make(map[string]bool),
 	}
+	for _, id := range splitIDs(os.Getenv("GITLAB_ADMIN_IDS")) {
+		g.adminIDs[id] = true
+	}
+	allowed := os.Getenv("GITLAB_ALLOWED_IDS")
+	if allowed == "*" {
+		g.allowAll = true
+	} else {
+		for _, id := range splitIDs(allowed) {
+			g.allowedIDs[id] = true
+		}
+	}
+	return g
+}
+
+func splitIDs(s string) []string {
+	var out []string
+	for _, p := range strings.Split(s, ",") {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 func (g *gitLabAuth) enabled() bool {
@@ -141,9 +172,36 @@ func (g *gitLabAuth) handleCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	userID := fmt.Sprintf("%d", profile.ID)
+	role := ""
+	redirect := "/"
+
+	if g.mode == ModeMulti {
+		// Multi-user mode: admin check first, then allowedIDs.
+		if g.adminIDs[userID] {
+			role = "admin"
+			redirect = "/admin"
+		} else if g.allowAll || g.allowedIDs[userID] {
+			role = "user"
+			redirect = "/chat"
+		} else {
+			http.Redirect(w, r, "/?error=access_denied", http.StatusFound)
+			return
+		}
+	} else {
+		// Single-user GitLab mode: adminIDs as allowlist (empty = allow all).
+		if len(g.adminIDs) > 0 && !g.adminIDs[userID] {
+			http.Error(w, "access denied", http.StatusForbidden)
+			return
+		}
+		role = "admin"
+		redirect = "/"
+	}
+
 	claims := SessionClaims{
-		UserID:   fmt.Sprintf("%d", profile.ID),
+		UserID:   userID,
 		Username: profile.Username,
+		Role:     role,
 		Exp:      time.Now().Add(8 * time.Hour).Unix(),
 	}
 	cookieValue, err := signCookie(claims, g.cookieSecret)
@@ -159,7 +217,40 @@ func (g *gitLabAuth) handleCallback(w http.ResponseWriter, r *http.Request) {
 		MaxAge:   int(8 * time.Hour / time.Second),
 		SameSite: http.SameSiteLaxMode,
 	})
-	http.Redirect(w, r, "/chat", http.StatusFound)
+	http.Redirect(w, r, redirect, http.StatusFound)
+}
+
+// handleLogout clears session cookies and redirects to /.
+func (g *gitLabAuth) handleLogout(w http.ResponseWriter, r *http.Request) {
+	http.SetCookie(w, &http.Cookie{Name: "perch_session", Value: "", MaxAge: -1, Path: "/"})
+	http.SetCookie(w, &http.Cookie{Name: "session", Value: "", MaxAge: -1, Path: "/"})
+	http.Redirect(w, r, "/", http.StatusFound)
+}
+
+// handleAuthStatus returns the current auth state as JSON (always HTTP 200).
+func (g *gitLabAuth) handleAuthStatus(w http.ResponseWriter, r *http.Request, mode OperatingMode, auth *AuthMiddleware) {
+	type statusResponse struct {
+		Authenticated bool   `json:"authenticated"`
+		Username      string `json:"username"`
+		Role          string `json:"role"`
+		Mode          string `json:"mode"`
+		AuthMethod    string `json:"auth_method"`
+	}
+	resp := statusResponse{Mode: string(mode), AuthMethod: g.authMethod}
+	// Check GitLab session cookie.
+	if cookie, err := r.Cookie("perch_session"); err == nil {
+		if claims, err := parseCookie(cookie.Value, g.cookieSecret); err == nil {
+			resp.Authenticated = true
+			resp.Username = claims.Username
+			resp.Role = claims.Role
+		}
+	}
+	// Check password session cookie.
+	if !resp.Authenticated && auth.CheckSession(r) {
+		resp.Authenticated = true
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(resp)
 }
 
 type gitLabTokenResponse struct {
@@ -240,22 +331,17 @@ const (
 )
 
 // middleware protects routes requiring a valid GitLab session cookie.
-// Invalid/missing cookie → redirect to /auth/gitlab. Tampered cookie → 401.
+// Missing/invalid/expired session → HTTP 401 JSON (not redirect).
 func (g *gitLabAuth) middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		cookie, err := r.Cookie("perch_session")
 		if err != nil {
-			http.Redirect(w, r, "/auth/gitlab", http.StatusFound)
+			g.unauthorized(w)
 			return
 		}
 		claims, err := parseCookie(cookie.Value, g.cookieSecret)
 		if err != nil {
-			if err.Error() == "invalid cookie signature" {
-				http.Error(w, "unauthorized", http.StatusUnauthorized)
-				return
-			}
-			// Expired or missing → redirect to login
-			http.Redirect(w, r, "/auth/gitlab", http.StatusFound)
+			g.unauthorized(w)
 			return
 		}
 		ctx := r.Context()
@@ -263,4 +349,10 @@ func (g *gitLabAuth) middleware(next http.Handler) http.Handler {
 		ctx = context.WithValue(ctx, ctxUsername, claims.Username)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
+}
+
+func (g *gitLabAuth) unauthorized(w http.ResponseWriter) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusUnauthorized)
+	json.NewEncoder(w).Encode(map[string]string{"error": "unauthorized"})
 }

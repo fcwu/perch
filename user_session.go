@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 )
@@ -19,14 +20,37 @@ const (
 const (
 	userSessionTimeout  = 5 * time.Minute
 	userSessionRetain   = 5 * time.Minute
+	conversationWindow   = 24 * time.Hour
+	conversationMaxTurns = 20
 )
+
+// buildPrompt prepends serialised conversation history to query.
+// Returns the raw query when history is empty.
+func buildPrompt(history []ConversationTurn, query string) string {
+	if len(history) == 0 {
+		return query
+	}
+	var sb strings.Builder
+	sb.WriteString("<conversation_history>\n")
+	for _, t := range history {
+		sb.WriteString("User: ")
+		sb.WriteString(t.Query)
+		sb.WriteString("\nAssistant: ")
+		sb.WriteString(t.Response)
+		sb.WriteString("\n")
+	}
+	sb.WriteString("</conversation_history>\n\n")
+	sb.WriteString(query)
+	return sb.String()
+}
 
 // userSession is one per authenticated user: an independent OpenCode PTY session.
 type userSession struct {
 	userID      string
 	username    string
 	sessionUUID string
-	query       string
+	query       string  // original user query (stored in DB, shown in admin)
+	prompt      string  // final injected prompt sent to the agent (may include history)
 	startedAt   int64
 
 	pty    *PTYManager
@@ -121,8 +145,9 @@ func newUserSessionManager(runtime AgentRuntime, workdir string, logger *slog.Lo
 }
 
 // StartSession creates a new OpenCode session for the user.
+// When newConversation is false, recent history is prepended to the query.
 // Returns error with HTTP 409 status hint if a session is already running.
-func (m *UserSessionManager) StartSession(userID, username, query string) error {
+func (m *UserSessionManager) StartSession(userID, username, query string, newConversation bool) error {
 	m.mu.Lock()
 	existing, ok := m.sessions[userID]
 	if ok {
@@ -140,11 +165,22 @@ func (m *UserSessionManager) StartSession(userID, username, query string) error 
 		delete(m.sessions, userID)
 	}
 
+	prompt := query
+	if !newConversation && m.store != nil {
+		since := time.Now().UnixMilli() - conversationWindow.Milliseconds()
+		if history, err := m.store.GetRecentHistory(userID, since, conversationMaxTurns); err != nil {
+			m.logger.Warn("GetRecentHistory failed, proceeding without history", "err", err)
+		} else {
+			prompt = buildPrompt(history, query)
+		}
+	}
+
 	sess := newUserSession(userID, username, query)
+	sess.prompt = prompt
 	m.sessions[userID] = sess
 	m.mu.Unlock()
 
-	cmd, args := m.runtime.RunAgent("as-query", query, m.workdir)
+	cmd, args := m.runtime.RunAgent("as-query", prompt, m.workdir)
 
 	ctx, cancel := context.WithTimeout(context.Background(), userSessionTimeout)
 	sess.cancel = cancel

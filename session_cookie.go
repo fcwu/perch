@@ -16,7 +16,8 @@ import (
 type SessionClaims struct {
 	UserID   string `json:"user_id"`
 	Username string `json:"username"`
-	Exp      int64  `json:"exp"` // Unix timestamp
+	Role     string `json:"role,omitempty"` // "admin" | "user" | ""
+	Exp      int64  `json:"exp"`            // Unix timestamp
 }
 
 func cookieSecret() string {

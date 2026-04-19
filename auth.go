@@ -96,3 +96,12 @@ func (a *AuthMiddleware) validSession(token string) bool {
 	_, ok := a.sessions[token]
 	return ok
 }
+
+// CheckSession returns true if the request has a valid password session cookie.
+func (a *AuthMiddleware) CheckSession(r *http.Request) bool {
+	if a == nil || a.mode != "password" {
+		return false
+	}
+	cookie, err := r.Cookie("session")
+	return err == nil && a.validSession(cookie.Value)
+}
