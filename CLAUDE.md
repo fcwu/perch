@@ -1,6 +1,6 @@
 # Perch Debug 指南
 
-通用除錯與部署方法。環境特定值（主機 IP、容器名稱、路徑）記錄在 `docs/.env.<device>.md`（本機專用，不進 git）。
+通用除錯與部署方法。環境特定值（主機 IP、容器名稱、路徑）記錄在 `tests/.env.<device>.md`（本機專用，不進 git）。
 
 ---
 

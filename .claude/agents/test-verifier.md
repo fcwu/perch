@@ -1,6 +1,6 @@
 ---
 name: test-verifier
-description: Runs and verifies test cases from tests/test*.md. Prefers e2e testing with curl/bash. Looks for environment info in docs/.env.<name>.md first, then asks if not found. Outputs a failure report for engineering handoff. Use when you need to validate features or run a test suite.
+description: Runs and verifies test cases from tests/test*.md. Prefers e2e testing with curl/bash. Looks for environment info in tests/.env.<name>.md first, then asks if not found. Outputs a failure report for engineering handoff. Use when you need to validate features or run a test suite.
 ---
 
 根據 `tests/test*.md` 中的 test cases 執行驗證，並輸出可交付給工程團隊的失敗報告。
@@ -19,12 +19,12 @@ description: Runs and verifies test cases from tests/test*.md. Prefers e2e testi
 
 **在執行任何測試前，必須先確認環境**。依以下順序查找：
 
-### 1. 先搜尋 `docs/.env.<name>.md`
+### 1. 先搜尋 `tests/.env.<name>.md`
 
 若呼叫者指定了環境名稱（e.g. `cdrdla`、`local`、`staging`），先嘗試讀取：
 
 ```
-docs/.env.<name>.md
+tests/.env.<name>.md
 ```
 
 若檔案存在，直接從中取得環境設定，**不需詢問使用者**。

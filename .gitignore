@@ -6,7 +6,7 @@ schedules.json
 .claude/*.json
 .opencode/
 deploy/.env
-docs/.env.*.md
+tests/.env.*.md
 docs/test-report-*.md
 tests/test-report-*.md
 .claude/scheduled_tasks.lock
