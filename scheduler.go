@@ -313,7 +313,13 @@ func (s *Scheduler) run() {
 					if s.onFire != nil && job.Target != "" {
 						s.onFire(job.Target, job.Message)
 					}
-					if err := pm.write([]byte(job.Message + "\n")); err != nil {
+					// IM sessions (Discord, Telegram) expect \r to submit input,
+					// matching writeToPTY in im_discord.go. Local PTY needs \n.
+					terminator := "\n"
+					if job.Target != "" {
+						terminator = "\r"
+					}
+					if err := pm.write([]byte(job.Message + terminator)); err != nil {
 						s.logger.Warn("scheduler PTY write failed", "jobID", id, "target", job.Target, "err", err)
 					}
 				}
