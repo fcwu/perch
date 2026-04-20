@@ -48,33 +48,41 @@ description: Writes test cases into tests/test*.md based on openspec specs or us
 
 4. **產出 test cases**
 
-   每個 test case 格式：
+   每個 test case 使用 **BDD 格式**（Given / When / Then）：
 
    ````markdown
    ## T<N> — <功能描述>
 
    **層級**：Unit | Integration | E2E-curl | E2E-browser | E2E-gitlab
 
-   **目的**：<一句話說明這個 test 驗證什麼>
+   > **自動化**（若有對應 unit test）：`go test -run TestXxx ./...`
 
-   **背景**（若需要）：<前置條件或相關背景知識>
+   **Given** <前置條件與環境狀態>
+   **When** <使用者執行的操作>
+   **Then** <系統應回傳的結果>
 
-   **步驟**：
-   ```bash
-   # 具體指令或操作步驟
-   ```
-
-   **預期**：
-   - <預期結果 1>
-   - <預期結果 2>
+   **When** <另一個操作（同一情境的變體）>
+   **Then** <對應結果>
 
    **反向驗證**（若適用）：
    ```bash
-   # 驗證錯誤情況
+   # 驗證錯誤情況的 curl 指令
    ```
-
-   **自動化**（若有對應 unit test）：`go test -run TestXxx ./...`
    ````
+
+   BDD 撰寫原則：
+   - **Given**：描述環境與前置狀態（Perch 啟動設定、使用者狀態）
+   - **When**：描述單一操作（curl 指令、瀏覽器動作）
+   - **Then**：描述可觀察的結果（HTTP 狀態碼、cookie、回應 body）
+   - 同一 test case 可有多組 When/Then 涵蓋不同情境分支
+   - 具體指令（curl）可放在 When 或 Then 的 code block 中
+
+   **用戶導向原則**（最重要）：
+   - 測試描述的是**使用者能觀察到的行為**，不是程式內部狀態
+   - 禁止在 Given/When/Then 中出現：函式回傳值（`enabled() 回傳 true`）、變數名稱（`dbPath`）、記憶體狀態（`map 被初始化`）等實作細節
+   - 問自己：「使用者發送什麼請求？收到什麼回應？」這才是 test case 的主角
+   - 反例（不應出現）：`When 呼叫 gitlabAuth.enabled()` / `Then 回傳 false`
+   - 正例：`When 使用者造訪 /auth/gitlab` / `Then 收到 HTTP 404`
 
    層級選擇原則：
    - 能在 Unit / Integration 驗證的邏輯，**不要**標 E2E

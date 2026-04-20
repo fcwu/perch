@@ -72,4 +72,18 @@ go test ./...
 
 ## 測試案例
 
-詳見 [docs/test-cases.md](test-cases.md)。
+詳見 `tests/test-*.md`（依功能拆分）。
+
+---
+
+## 已知限制
+
+### AL23 — 登出後 server-side session 未撤銷（password 模式）
+
+`POST /api/logout` 會清除瀏覽器端 cookie（`Max-Age=0, SameSite=Lax`），一般瀏覽器使用下行為正確。但 `AuthMiddleware.sessions` map 不會移除已登出的 token，若攻擊者事先取得 session token 原始值（例如 curl cookie jar），仍可在登出後繼續使用。
+
+**影響範圍**：僅 `AUTH_METHOD=password` 模式；GitLab OAuth 使用有時效的 JWT，不受此限制影響。
+
+**未修原因**：perch 定位為個人工具，實際風險低；瀏覽器用戶不受影響。
+
+**修法**：`AuthMiddleware` 加 `DeleteSession(token string)` 方法，在 `handleLogout` 讀出 `session` cookie 後呼叫。

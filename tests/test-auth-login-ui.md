@@ -340,3 +340,42 @@
 **Given** Perch 以 multi-user 模式啟動（`GITLAB_ALLOWED_IDS=*`），使用者持有一般 user role 的 session cookie
 **When** 使用者開啟 `/chat`
 **Then** 頁面顯示對話輸入介面，不出現「Login with GitLab」按鈕
+
+---
+
+## AL32 — password 模式下，即使 GitLab env vars 存在，使用者仍可正常登入與使用 chat
+
+**層級**：E2E-curl
+
+**Given** Perch 以 `AUTH_METHOD=password` 啟動，且環境中同時存在 `GITLAB_CLIENT_ID`、`GITLAB_CLIENT_SECRET`、`GITLAB_URL`
+**When** 使用者以正確密碼呼叫 `POST /login`
+**Then** 收到 HTTP 204，取得 `session` cookie
+
+**When** 使用者持該 session cookie 呼叫 `POST /api/chat`
+**Then** 收到 HTTP 200（或 409，若 session 已存在），**不**收到 401 或 503
+
+```bash
+BASE="http://localhost:8080"
+curl -si -c /tmp/s.txt -X POST "${BASE}/login" \
+  -H "Content-Type: application/json" -d '{"password":"changeme"}'
+# 預期: HTTP 204, Set-Cookie: session=...
+
+curl -si -b /tmp/s.txt -X POST "${BASE}/api/chat" \
+  -H "Content-Type: application/json" -d '{"query":"hello"}'
+# 預期: HTTP 200 或 409（非 401、非 503）
+```
+
+---
+
+## AL33 — password 模式下，GitLab OAuth 登入入口不可用
+
+**層級**：E2E-curl
+
+**Given** Perch 以 `AUTH_METHOD=password` 啟動，且環境中存在 GitLab env vars
+**When** 使用者（已登入或未登入）造訪 `/auth/gitlab`
+**Then** 收到 HTTP 404，**不**被導向 GitLab OAuth 授權頁面
+
+```bash
+curl -si http://localhost:8080/auth/gitlab
+# 預期: HTTP 404（非 302 redirect 到 GitLab）
+```

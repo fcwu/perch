@@ -64,7 +64,7 @@ func splitIDs(s string) []string {
 }
 
 func (g *gitLabAuth) enabled() bool {
-	return g.clientID != "" && g.clientSecret != "" && g.gitlabURL != ""
+	return g.authMethod == "gitlab" && g.clientID != "" && g.clientSecret != "" && g.gitlabURL != ""
 }
 
 // randomState generates a cryptographically random state token.
