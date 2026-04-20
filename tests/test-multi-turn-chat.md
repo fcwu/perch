@@ -117,16 +117,62 @@ curl -s -X POST http://localhost:8080/api/chat \
 
 ## MT07 — 前端顯示多輪對話串
 
-**層級**：E2E-browser
+**層級**：E2E-browser（JS mock inject，無需真實 agent）
 
 **目的**：確認前端以訊息串（thread）呈現多輪對話，舊訊息不被覆蓋。
 
+**SSE 協議**（mock 依據）：
+- `POST /api/chat` → `200 {"user_id":"<id>"}`
+- `GET /api/chat/stream` → EventSource：
+  - `event: pty\ndata: <base64(文字)>\n\n`（重複，累積助理回應）
+  - `event: json\ndata: {"type":"done"}\n\n`（關閉 session）
+
 **步驟**：
-1. 瀏覽器開啟 `/chat`，送出訊息 A，等待回應。
-2. 繼續送出訊息 B，等待回應。
+```bash
+# 1. 偽造 user session cookie
+COOKIE=$(go run ./cmd/mkcookie -user=99 -username=testuser -role=user -secret=$COOKIE_SECRET)
+
+# 2. 注入 cookie 並導航至 /chat
+node ~/.agents/skills/chrome-cdp/scripts/cdp.mjs cookie-set <target> perch_session "$COOKIE" <host>
+node ~/.agents/skills/chrome-cdp/scripts/cdp.mjs nav <target> http://<host>/chat
+
+# 3. 注入 JS mock，覆蓋 fetch 和 EventSource
+node ~/.agents/skills/chrome-cdp/scripts/cdp.mjs eval <target> "
+let callCount = 0;
+const responses = ['回應 A', '回應 B'];
+window._origFetch = window.fetch;
+window.fetch = async (url, opts) => {
+  if (url === '/api/chat') return new Response(JSON.stringify({user_id:'99'}), {status:200,headers:{'Content-Type':'application/json'}});
+  return window._origFetch(url, opts);
+};
+window.EventSource = function(url) {
+  const self = this; self.listeners = {};
+  self.addEventListener = (t, fn) => { self.listeners[t] = fn; };
+  self.close = () => {};
+  const reply = responses[callCount++] || '回應';
+  setTimeout(() => {
+    self.listeners['pty']?.({data: btoa(reply)});
+    setTimeout(() => self.listeners['json']?.({data: JSON.stringify({type:'done'})}), 100);
+  }, 200);
+  return self;
+};
+"
+
+# 4. 送出訊息 A，等待回應
+node ~/.agents/skills/chrome-cdp/scripts/cdp.mjs eval <target> "document.querySelector('input[placeholder]').value='訊息 A'; document.querySelector('form button, button[type=submit]').click();"
+sleep 1
+
+# 5. 送出訊息 B，等待回應
+node ~/.agents/skills/chrome-cdp/scripts/cdp.mjs eval <target> "document.querySelector('input[placeholder]').value='訊息 B'; document.querySelector('form button, button[type=submit]').click();"
+sleep 1
+
+# 6. 截圖並讀取 AX tree
+node ~/.agents/skills/chrome-cdp/scripts/cdp.mjs snap <target>
+node ~/.agents/skills/chrome-cdp/scripts/cdp.mjs ax <target>
+```
 
 **預期**：
-- 頁面上同時顯示：使用者訊息 A → 助理回應 A → 使用者訊息 B → 助理回應 B
+- AX tree 同時包含「訊息 A」、「回應 A」、「訊息 B」、「回應 B」
 - 每個新回應 append 至底部，不替換先前的訊息
 - 對話串可垂直捲動
 
