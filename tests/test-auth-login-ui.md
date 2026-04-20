@@ -26,17 +26,9 @@
 
 **層級**：E2E-curl
 
-**目的**：確認未設定 `PERCH_MODE` 時，伺服器以 single-user 模式啟動。
-
-**步驟**：
-```bash
-AUTH_METHOD=none ./perch
-curl -s http://localhost:8080/api/auth/status
-```
-
-**預期**：
-- 伺服器正常啟動（無錯誤）
-- `/api/auth/status` 回傳 `{"mode":"single", ...}`
+**Given** 啟動 Perch 時未設定 `PERCH_MODE`
+**When** Perch 啟動並開始服務
+**Then** 伺服器以 single-user 模式運作，不出現任何錯誤
 
 ---
 
@@ -44,15 +36,9 @@ curl -s http://localhost:8080/api/auth/status
 
 **層級**：E2E-curl（mock GitLab URL 即可，不需真實 OAuth）
 
-**目的**：確認 `PERCH_MODE=multi` 加上正確 GitLab 設定時，以 multi-user 模式啟動。
-
-**步驟**：
-```bash
-PERCH_MODE=multi GITLAB_CLIENT_ID=xxx GITLAB_CLIENT_SECRET=yyy GITLAB_URL=https://gitlab.example.com ./perch
-curl -s http://localhost:8080/api/auth/status
-```
-
-**預期**：`/api/auth/status` 回傳 `{"mode":"multi", ...}`
+**Given** Perch 以 `PERCH_MODE=multi` 及正確的 GitLab 設定啟動
+**When** Perch 啟動並開始服務
+**Then** 伺服器以 multi-user 模式運作
 
 ---
 
@@ -60,14 +46,9 @@ curl -s http://localhost:8080/api/auth/status
 
 **層級**：E2E-curl（無需 GitLab）
 
-**目的**：確認 `PERCH_MODE=multi` 但缺少必要 GitLab 環境變數時，伺服器拒絕啟動。
-
-**步驟**：
-```bash
-PERCH_MODE=multi ./perch
-```
-
-**預期**：伺服器拒絕啟動並輸出明確的設定錯誤訊息（包含缺少的環境變數名稱）。
+**Given** `PERCH_MODE=multi` 但未提供必要的 GitLab 環境變數
+**When** 嘗試啟動 Perch
+**Then** 伺服器拒絕啟動，並輸出包含缺少設定項目名稱的明確錯誤訊息
 
 ---
 
@@ -75,42 +56,29 @@ PERCH_MODE=multi ./perch
 
 **層級**：E2E-curl（無需 GitLab）
 
-**步驟**：
-```bash
-PERCH_MODE=unknown ./perch
-```
-
-**預期**：伺服器拒絕啟動並輸出描述性錯誤。
+**Given** `PERCH_MODE` 設為未知的值（例如 `unknown`）
+**When** 嘗試啟動 Perch
+**Then** 伺服器拒絕啟動，並輸出描述性的設定錯誤
 
 ---
 
-### AL05 — HTML shell routes 不強制驗證（multi-user 模式）
+### AL05 — 頁面在 multi-user 模式下不強制驗證即可載入
 
-**層級**：E2E-curl（無需 GitLab，只需伺服器啟動）
+**層級**：E2E-browser（無需 GitLab）
 
-**目的**：確認 `/`、`/chat`、`/admin` 在未登入狀態下回傳 HTTP 200 index.html。
-
-**步驟**：
-```bash
-# 在 multi-user 模式啟動，未附帶 session cookie
-curl -s -o /dev/null -w "%{http_code}" http://localhost:8080/chat
-curl -s -o /dev/null -w "%{http_code}" http://localhost:8080/admin
-```
-
-**預期**：兩者均回傳 HTTP 200，response body 為 `index.html`（包含 `<!doctype html>`）。
+**Given** Perch 以 multi-user 模式啟動，使用者尚未登入
+**When** 使用者在瀏覽器開啟 `/chat` 或 `/admin`
+**Then** 頁面正常載入（顯示登入畫面），不出現錯誤頁面或被完全擋下
 
 ---
 
-### AL06 — GET /api/auth/status 為公開 endpoint，永遠回傳 200
+### AL06 — 任何人都可查詢認證狀態
 
 **層級**：E2E-curl（無需 GitLab）
 
-**步驟**：
-```bash
-curl -s http://localhost:8080/api/auth/status
-```
-
-**預期**：HTTP 200，JSON body 包含 `authenticated`、`username`、`role`、`mode` 四個欄位。
+**Given** Perch 以任何模式啟動
+**When** 使用者（含未登入者）查詢目前的認證狀態
+**Then** 成功取得包含 `authenticated`、`username`、`role`、`mode` 欄位的回應
 
 ---
 
@@ -118,16 +86,9 @@ curl -s http://localhost:8080/api/auth/status
 
 **層級**：Integration（mock OAuth server）
 
-**目的**：確認 `GITLAB_ADMIN_IDS` 中的使用者完成 OAuth 後被導向 `/admin`。
-
-**Mock 方式**：用 `httptest.NewServer` 模擬 GitLab 的 `/oauth/token` endpoint，回傳指定 GitLab user ID（在 `GITLAB_ADMIN_IDS` 中）。
-
-**步驟**：
-1. 啟動 mock OAuth server，設定回傳 user ID = `777`。
-2. 設定 `GITLAB_ADMIN_IDS=777`，`GITLAB_URL` 指向 mock server。
-3. 觸發 OAuth callback（`GET /auth/callback?code=mock`）。
-
-**預期**：OAuth callback 回應為 HTTP 302，`Location: /admin`。
+**Given** 使用者的 GitLab user ID 在 `GITLAB_ADMIN_IDS` 清單中
+**When** 使用者完成 GitLab OAuth 授權流程
+**Then** 使用者被導向 `/admin` 頁面
 
 ---
 
@@ -137,23 +98,19 @@ curl -s http://localhost:8080/api/auth/status
 
 **Go Test**：`TestGitLabAuthCallbackMultiModeAllowAllRedirectsToChat`（`gitlab_auth_test.go`）
 
-**Mock 方式**：mock server 回傳不在 `GITLAB_ADMIN_IDS` 中的 user ID，設定 `GITLAB_ALLOWED_IDS=*`。
-
-**步驟**：觸發 OAuth callback，mock 回傳 user ID = `999`（非 admin）。
-
-**預期**：HTTP 302，`Location: /chat`。
+**Given** 使用者的 GitLab user ID 不在 admin 清單中，且 `GITLAB_ALLOWED_IDS=*`
+**When** 使用者完成 GitLab OAuth 授權流程
+**Then** 使用者被導向 `/chat` 頁面
 
 ---
 
 ### AL09 — Admin 可直接存取 /chat（multi-user 模式）
 
-**層級**：Integration（mock OAuth server 取得 session cookie 後，curl 測試 API）
+**層級**：Integration（mock OAuth server 取得 session cookie 後驗證）
 
-**步驟**：
-1. 以 mock OAuth 取得 admin session cookie。
-2. `curl -b cookies.txt -X POST http://localhost:8080/api/chat -d '{"query":"hi"}'`
-
-**預期**：HTTP 200（非 403/401）。
+**Given** Admin 使用者已完成登入，持有有效的 session cookie
+**When** Admin 向 `/api/chat` 送出查詢
+**Then** 查詢被接受（非 403 / 401），Admin 可正常使用 chat 功能
 
 ---
 
@@ -161,36 +118,24 @@ curl -s http://localhost:8080/api/auth/status
 
 ### AL10 — AUTH_METHOD=none 不驗證
 
-**層級**：E2E-curl（無需 GitLab）
+**層級**：E2E-browser（無需 GitLab）
 
-**步驟**：
-```bash
-AUTH_METHOD=none ./perch
-curl -s -o /dev/null -w "%{http_code}" http://localhost:8080/
-```
-
-**預期**：HTTP 200，無需任何憑證。
+**Given** Perch 以 `AUTH_METHOD=none` 啟動
+**When** 使用者直接開啟頁面，不提供任何憑證
+**Then** 頁面正常載入，terminal 可使用，無任何驗證提示
 
 ---
 
 ### AL11 — AUTH_METHOD=password SPA root 回傳 HTML，API endpoint 無憑證回傳 401
 
-**層級**：E2E-curl（無需 GitLab）
+**層級**：E2E-browser（無需 GitLab）
 
-**設計說明**：SPA 設計（D4）—— HTML routes（`/`）永遠回傳 `index.html`（HTTP 200），認證由前端 overlay 執行；受保護的 API/WS endpoint（`/ws`、`/input`、`/sessions`）無 session cookie 時回傳 HTTP 401。
+**Given** Perch 以 `AUTH_METHOD=password` 啟動
+**When** 未登入的使用者開啟 `/`
+**Then** 頁面正常載入，前端顯示登入畫面（伺服器回傳 HTML，非錯誤頁面）
 
-**步驟**：
-```bash
-AUTH_METHOD=password PERCH_PASSWORD=secret ./perch
-
-# HTML route：應回傳 200 + HTML（前端自行渲染登入畫面）
-curl -s -o /dev/null -w "%{http_code}" http://localhost:8080/
-
-# 受保護 API：無 session cookie 應回傳 401
-curl -s -o /dev/null -w "%{http_code}" http://localhost:8080/sessions
-```
-
-**預期**：`GET /` → HTTP 200（HTML）；`GET /sessions` → HTTP 401。
+**When** 未登入的使用者嘗試直接存取受保護的 API（如 `/sessions`）
+**Then** 收到「未授權」的拒絕回應
 
 ---
 
@@ -198,18 +143,9 @@ curl -s -o /dev/null -w "%{http_code}" http://localhost:8080/sessions
 
 **層級**：E2E-curl（無需 GitLab）
 
-**步驟**：
-```bash
-AUTH_METHOD=password PERCH_USERNAME=admin PERCH_PASSWORD=secret ./perch
-
-# 第一次帶密碼
-curl -c cookies.txt -u admin:secret -s -o /dev/null -w "%{http_code}" http://localhost:8080/
-
-# 第二次用 cookie，不帶密碼
-curl -b cookies.txt -s -o /dev/null -w "%{http_code}" http://localhost:8080/
-```
-
-**預期**：兩次均回傳 HTTP 200。
+**Given** Perch 以 `AUTH_METHOD=password` 啟動
+**When** 使用者以正確的帳號密碼登入
+**Then** 伺服器發放 session cookie；之後使用者憑 cookie 即可繼續存取，不需再次輸入密碼
 
 ---
 
@@ -217,12 +153,9 @@ curl -b cookies.txt -s -o /dev/null -w "%{http_code}" http://localhost:8080/
 
 **層級**：E2E-curl（無需 GitLab）
 
-**步驟**：
-```bash
-AUTH_METHOD=password ./perch
-```
-
-**預期**：伺服器拒絕啟動並輸出設定錯誤。
+**Given** `AUTH_METHOD=password` 但未設定 `PERCH_PASSWORD`
+**When** 嘗試啟動 Perch
+**Then** 伺服器拒絕啟動，並輸出設定錯誤
 
 ---
 
@@ -230,35 +163,19 @@ AUTH_METHOD=password ./perch
 
 **層級**：E2E-curl（無需 GitLab）
 
-**設計說明**：`AUTH_METHOD=mtls` 不需要預先設定 `TLS_CERT`/`TLS_KEY`。伺服器啟動時自動生成 CA、server cert 與 client p12，並透過 `/bootstrap` endpoint 提供 client cert 下載。
-
-**步驟**：
-```bash
-AUTH_METHOD=mtls ./perch
-
-# 下載 client cert p12（首次存取）
-curl -k -o client.p12 https://localhost:8080/bootstrap
-
-# 帶 client cert 存取
-curl -k --cert-type P12 --cert client.p12:perch \
-  -o /dev/null -w "%{http_code}" https://localhost:8080/
-```
-
-**預期**：伺服器正常啟動；`/bootstrap` 回傳 p12 檔案；帶 client cert 存取回傳 HTTP 200。
+**Given** Perch 以 `AUTH_METHOD=mtls` 啟動（不預先設定 TLS 憑證）
+**When** 伺服器啟動，使用者造訪 `/bootstrap` 頁面
+**Then** 可下載 `client.p12` 憑證檔案；持憑證連線後可正常存取
 
 ---
 
 ### AL15 — AUTH_METHOD=gitlab（single-user）未登入時顯示 GitLab 登入按鈕
 
-**層級**：E2E-browser（無需真實 GitLab — 只驗證 UI 渲染，不需完成 OAuth）
+**層級**：E2E-browser（無需真實 GitLab）
 
-**目的**：確認 SPA 在未登入狀態自行渲染登入畫面，而非伺服器端重導向。
-
-**步驟**：
-1. 以 `AUTH_METHOD=gitlab`、`GITLAB_URL=http://fake.example` 啟動。
-2. 瀏覽器開啟 `/`，未登入。
-
-**預期**：SPA 顯示含「Login with GitLab」按鈕的登入畫面。DevTools Network 顯示 `GET /` 為 HTTP 200（非 302）。
+**Given** Perch 以 `AUTH_METHOD=gitlab` 啟動，使用者尚未登入
+**When** 使用者開啟 `/`
+**Then** 頁面顯示含「Login with GitLab」按鈕的登入畫面；瀏覽器未被強制跳轉，頁面以正常載入（非 302 redirect）的方式呈現
 
 ---
 
@@ -266,13 +183,11 @@ curl -k --cert-type P12 --cert client.p12:perch \
 
 **層級**：Integration（mock OAuth server）
 
-**目的**：確認不在 allowlist 的帳號被拒絕。
+**Go Test**：相關測試於 `gitlab_auth_test.go`
 
-**Mock 方式**：mock server 回傳 user ID = `999`，`GITLAB_ADMIN_IDS=123456`。
-
-**步驟**：觸發 OAuth callback。
-
-**預期**：HTTP 403，不發放 session cookie。
+**Given** `GITLAB_ADMIN_IDS` 設定為特定的 user ID 清單，使用者的 ID 不在清單中
+**When** 使用者完成 OAuth 授權
+**Then** 登入被拒絕，使用者不取得 session cookie
 
 ---
 
@@ -282,13 +197,11 @@ curl -k --cert-type P12 --cert client.p12:perch \
 
 ### AL17 — GITLAB_ALLOWED_IDS 未設定時拒絕非 admin 使用者
 
-**層級**：Unit（直接測試 allowlist 比對函式）或 Integration（mock OAuth）
+**層級**：Unit 或 Integration（mock OAuth）
 
-**步驟**：
-- Unit：呼叫 `isAllowed(userID, adminIDs, allowedIDs)` with `allowedIDs=[]`，預期回傳 false。
-- Integration：mock 回傳非 admin user ID，不設 `GITLAB_ALLOWED_IDS`，觸發 callback。
-
-**預期**：HTTP 403，重導向至 `/?error=access_denied`。
+**Given** `GITLAB_ALLOWED_IDS` 未設定，使用者不是 admin
+**When** 使用者嘗試完成 OAuth 登入
+**Then** 登入被拒絕，使用者看到存取被拒的頁面
 
 ---
 
@@ -298,9 +211,9 @@ curl -k --cert-type P12 --cert client.p12:perch \
 
 **Go Test**：`TestGitLabAuthCallbackMultiModeAllowAllRedirectsToChat`（`gitlab_auth_test.go`）
 
-**步驟**：mock 回傳非 admin user ID，設 `GITLAB_ALLOWED_IDS=*`。
-
-**預期**：使用者被允許並重導向至 `/chat`。
+**Given** `GITLAB_ALLOWED_IDS=*`，使用者不是 admin
+**When** 使用者完成 OAuth 授權
+**Then** 使用者被允許登入，並導向 `/chat` 頁面
 
 ---
 
@@ -310,9 +223,9 @@ curl -k --cert-type P12 --cert client.p12:perch \
 
 **Go Test**：`TestGitLabAuthCallbackMultiModeAllowedListPermitted`（`gitlab_auth_test.go`）
 
-**步驟**：mock 回傳 user ID = `55`，設 `GITLAB_ALLOWED_IDS=55`。
-
-**預期**：使用者被允許並重導向至 `/chat`。
+**Given** `GITLAB_ALLOWED_IDS=55`，使用者的 ID 為 55
+**When** 使用者完成 OAuth 授權
+**Then** 使用者被允許登入，並導向 `/chat` 頁面
 
 ---
 
@@ -320,9 +233,9 @@ curl -k --cert-type P12 --cert client.p12:perch \
 
 **層級**：Unit 或 Integration（mock OAuth）
 
-**步驟**：mock 回傳 user ID = `999`，設 `GITLAB_ALLOWED_IDS=111,222`。
-
-**預期**：HTTP 403，重導向至 `/?error=access_denied`。
+**Given** `GITLAB_ALLOWED_IDS=111,222`，使用者的 ID 為 999（不在清單中）
+**When** 使用者嘗試完成 OAuth 登入
+**Then** 登入被拒絕，使用者看到存取被拒的頁面
 
 ---
 
@@ -332,57 +245,39 @@ curl -k --cert-type P12 --cert client.p12:perch \
 
 **Go Test**：`TestGitLabAuthCallbackAdminIgnoresAllowedIDs`（`gitlab_auth_test.go`）
 
-**步驟**：mock 回傳 user ID = `42`，設 `GITLAB_ADMIN_IDS=42`，`GITLAB_ALLOWED_IDS=99`（admin 不在 allowedIDs 內）。
-
-**預期**：使用者被允許並重導向至 `/admin`。
+**Given** 使用者的 ID 在 `GITLAB_ADMIN_IDS` 中，但不在 `GITLAB_ALLOWED_IDS` 中
+**When** 使用者完成 OAuth 授權
+**Then** 使用者被允許登入，並導向 `/admin` 頁面（admin 身份無視 allowed list 限制）
 
 ---
 
-### AL22 — 未驗證的 API 呼叫回傳 401 JSON（非 302）
+### AL22 — 未驗證的 API 呼叫回傳 401（非跳轉）
 
 **層級**：E2E-curl（無需 GitLab）
 
-**步驟**：
-```bash
-curl -s -w "\n%{http_code}" -X POST http://localhost:8080/api/chat \
-  -H "Content-Type: application/json" \
-  -d '{"query":"hello"}'
-```
-
-**預期**：HTTP 401，response body 為 `{"error":"unauthorized"}`，回應標頭無 `Location` 欄位。
+**Given** 使用者未登入
+**When** 使用者直接呼叫受保護的 API（如 `/api/chat`）
+**Then** 收到「未授權」的 JSON 錯誤回應，不被跳轉到登入頁
 
 ---
 
-### AL23 — GET /auth/logout 清除 cookie 並重導向至 /
+### AL23 — 登出後 session 清除並返回首頁
 
-**層級**：E2E-curl（無需 GitLab — 可用 password auth 取得 session）
+**層級**：E2E-browser（可用 password auth，無需 GitLab）
 
-**步驟**：
-```bash
-# 用 password auth 取得 session cookie
-AUTH_METHOD=password PERCH_PASSWORD=secret ./perch
-curl -c cookies.txt -u admin:secret -s http://localhost:8080/
-
-# 執行 logout
-curl -b cookies.txt -v http://localhost:8080/auth/logout
-```
-
-**預期**：
-- `Set-Cookie` header 含 `Max-Age=0`（清除 cookie）
-- HTTP 302，`Location: /`
+**Given** 使用者已登入並持有 session cookie
+**When** 使用者執行登出
+**Then** session cookie 被清除，使用者被導向首頁，需重新登入才能存取
 
 ---
 
-### AL24 — 未登入時也可呼叫 /auth/logout（idempotent）
+### AL24 — 未登入時也可執行登出（idempotent）
 
 **層級**：E2E-curl（無需 GitLab）
 
-**步驟**：
-```bash
-curl -v http://localhost:8080/auth/logout
-```
-
-**預期**：HTTP 302，`Location: /`，無錯誤。
+**Given** 使用者尚未登入（沒有 session cookie）
+**When** 使用者觸發登出操作
+**Then** 操作成功完成，被導向首頁，不出現任何錯誤
 
 ---
 
@@ -392,15 +287,9 @@ curl -v http://localhost:8080/auth/logout
 
 **層級**：E2E-browser（無需真實 GitLab）
 
-**目的**：確認 SPA 自行渲染登入畫面，不依賴伺服器端重導向。
-
-**步驟**：
-1. `PERCH_MODE=multi`、`GITLAB_URL=http://fake.example` 啟動。
-2. 瀏覽器開啟 `/chat`，未登入。
-
-**預期**：
-- 顯示置中的登入畫面，含「Login with GitLab」按鈕。
-- DevTools Network：`GET /chat` 為 HTTP 200，無 302。
+**Given** Perch 以 multi-user 模式啟動，使用者尚未登入
+**When** 使用者在瀏覽器開啟 `/chat`
+**Then** 頁面顯示置中的登入畫面，含「Login with GitLab」按鈕；瀏覽器未被強制跳轉（頁面以正常載入的方式呈現）
 
 ---
 
@@ -408,33 +297,29 @@ curl -v http://localhost:8080/auth/logout
 
 **層級**：E2E-browser（可用 password auth，無需 GitLab）
 
-**步驟**：
-1. 以 `AUTH_METHOD=password` 完成登入。
-2. 觀察頁面 UI。
-
-**預期**：頁面可見登出按鈕。
+**Given** 使用者已完成登入
+**When** 使用者查看頁面
+**Then** 頁面上可見登出按鈕
 
 ---
 
-### AL28 — 點擊登出按鈕導向 /auth/logout
+### AL28 — 點擊登出按鈕清除 session 並返回首頁
 
 **層級**：E2E-browser（可用 password auth，無需 GitLab）
 
-**步驟**：已登入，點擊登出按鈕。
-
-**預期**：瀏覽器發送 `GET /auth/logout`，session 清除，導回 `/`。
+**Given** 使用者已登入並看到登出按鈕
+**When** 使用者點擊登出按鈕
+**Then** session 被清除，使用者被導回首頁，登出按鈕消失
 
 ---
 
-### AL29 — Single-user 模式已驗證時顯示 terminal UI
+### AL29 — Single-user 模式已驗證時直接顯示 terminal UI
 
 **層級**：E2E-browser（無需 GitLab）
 
-**步驟**：
-1. `PERCH_MODE=single`、`AUTH_METHOD=none` 啟動。
-2. 瀏覽器開啟 `/`。
-
-**預期**：SPA 渲染 terminal（Claude Code）UI，而非登入畫面。
+**Given** Perch 以 `PERCH_MODE=single`、`AUTH_METHOD=none` 啟動
+**When** 使用者開啟 `/`
+**Then** 頁面直接顯示 terminal（Claude Code）UI，不出現任何登入畫面
 
 ---
 
@@ -442,20 +327,9 @@ curl -v http://localhost:8080/auth/logout
 
 **層級**：E2E-browser（偽造 session cookie，無需 GitLab OAuth）
 
-**前置條件**：perch 以 multi-user 模式啟動，`GITLAB_ADMIN_IDS` 包含 user ID `42`，`COOKIE_SECRET` 已知。
-
-**步驟**：
-```bash
-# 1. 產生 admin session cookie（使用與 perch 相同的 COOKIE_SECRET）
-COOKIE=$(go run ./cmd/mkcookie -user=42 -username=admin -role=admin -secret=$COOKIE_SECRET)
-
-# 2. 用 chrome-cdp 注入 cookie 並導航至 /admin
-node ~/.agents/skills/chrome-cdp/scripts/cdp.mjs cookie-set <target> perch_session "$COOKIE" <host>
-node ~/.agents/skills/chrome-cdp/scripts/cdp.mjs nav <target> http://<host>/admin
-node ~/.agents/skills/chrome-cdp/scripts/cdp.mjs snap <target>
-```
-
-**預期**：SPA 渲染 admin UI（AX tree 含管理面板相關元素，不含「Login with GitLab」按鈕）。
+**Given** Perch 以 multi-user 模式啟動，使用者持有 admin role 的 session cookie
+**When** 使用者開啟 `/admin`
+**Then** 頁面顯示 admin 管理介面，不出現「Login with GitLab」按鈕
 
 ---
 
@@ -463,17 +337,6 @@ node ~/.agents/skills/chrome-cdp/scripts/cdp.mjs snap <target>
 
 **層級**：E2E-browser（偽造 session cookie，無需 GitLab OAuth）
 
-**前置條件**：perch 以 multi-user 模式啟動，`GITLAB_ALLOWED_IDS=*`，`COOKIE_SECRET` 已知。
-
-**步驟**：
-```bash
-# 1. 產生 user session cookie
-COOKIE=$(go run ./cmd/mkcookie -user=999 -username=regularuser -role=user -secret=$COOKIE_SECRET)
-
-# 2. 注入 cookie 並導航至 /chat
-node ~/.agents/skills/chrome-cdp/scripts/cdp.mjs cookie-set <target> perch_session "$COOKIE" <host>
-node ~/.agents/skills/chrome-cdp/scripts/cdp.mjs nav <target> http://<host>/chat
-node ~/.agents/skills/chrome-cdp/scripts/cdp.mjs snap <target>
-```
-
-**預期**：SPA 渲染聊天 UI（AX tree 含對話輸入框，不含「Login with GitLab」按鈕）。
+**Given** Perch 以 multi-user 模式啟動（`GITLAB_ALLOWED_IDS=*`），使用者持有一般 user role 的 session cookie
+**When** 使用者開啟 `/chat`
+**Then** 頁面顯示對話輸入介面，不出現「Login with GitLab」按鈕
