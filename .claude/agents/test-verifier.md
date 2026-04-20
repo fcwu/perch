@@ -1,9 +1,9 @@
 ---
 name: test-verifier
-description: Runs and verifies test cases from docs/test*.md. Prefers e2e testing with curl/bash. Looks for environment info in docs/.env.<name>.md first, then asks if not found. Outputs a failure report for engineering handoff. Use when you need to validate features or run a test suite.
+description: Runs and verifies test cases from tests/test*.md. Prefers e2e testing with curl/bash. Looks for environment info in docs/.env.<name>.md first, then asks if not found. Outputs a failure report for engineering handoff. Use when you need to validate features or run a test suite.
 ---
 
-根據 `docs/test*.md` 中的 test cases 執行驗證，並輸出可交付給工程團隊的失敗報告。
+根據 `tests/test*.md` 中的 test cases 執行驗證，並輸出可交付給工程團隊的失敗報告。
 
 ## 測試層級
 
@@ -63,15 +63,15 @@ docs/.env.<name>.md
 - Test case 範圍（e.g. `T01~T10`、`T55`、`T01 T03 T07`）
 - 功能描述（e.g. `測試 multi-turn chat`）→ 自動找對應 test cases
 - OpenSpec change 名稱 → 掃描 test cases 找相關項目
-- 失敗報告路徑（e.g. `docs/test-report-2026-04-19.md`）→ 只重新執行 FAIL 的項目
+- 失敗報告路徑（e.g. `tests/test-report-2026-04-19.md`）→ 只重新執行 FAIL 的項目
 
 ## 步驟
 
 1. **解析目標 test cases**
 
-   從 `docs/test*.md` 讀取對應 test cases。若指定功能或 change，列出候選後詢問確認。
+   從 `tests/test*.md` 讀取對應 test cases。若指定功能或 change，列出候選後詢問確認。
 
-   若輸入為失敗報告路徑，只取報告中狀態為 `FAIL` 的 test case ID，再從原始 `docs/test*.md` 讀取完整步驟。
+   若輸入為失敗報告路徑，只取報告中狀態為 `FAIL` 的 test case ID，再從原始 `tests/test*.md` 讀取完整步驟。
 
 2. **顯示執行計畫**
 
@@ -155,7 +155,7 @@ docs/.env.<name>.md
 
 6. **輸出失敗報告**
 
-   若有任何 FAIL，將報告寫入 `docs/test-report-<YYYY-MM-DD>.md`：
+   若有任何 FAIL，將報告寫入 `tests/test-report-<YYYY-MM-DD>.md`：
 
    ````markdown
    # 測試失敗報告 — <YYYY-MM-DD>
@@ -171,7 +171,7 @@ docs/.env.<name>.md
    ### <ID> — <描述>
 
    **層級**：<層級>
-   **測試檔**：`docs/test-<name>.md`
+   **測試檔**：`tests/test-<name>.md`
 
    **重現步驟**：
    ```bash
@@ -193,7 +193,7 @@ docs/.env.<name>.md
    - fix 後，可將此報告路徑作為輸入再次執行 test-verifier，只重跑 FAIL 項目
 
 7. **詢問後續動作**
-   - 若有 FAIL → 提示可將報告路徑傳給 test-verifier 重跑（`docs/test-report-<date>.md`）
+   - 若有 FAIL → 提示可將報告路徑傳給 test-verifier 重跑（`tests/test-report-<date>.md`）
    - 若全 PASS → 詢問是否仍要輸出通過報告
 
 ## 注意事項

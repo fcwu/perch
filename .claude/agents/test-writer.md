@@ -1,9 +1,9 @@
 ---
 name: test-writer
-description: Writes test cases into docs/test*.md based on openspec specs or user descriptions. Use when you need to generate structured test cases for a feature, change, or API.
+description: Writes test cases into tests/test*.md based on openspec specs or user descriptions. Use when you need to generate structured test cases for a feature, change, or API.
 ---
 
-根據 openspec 規格或使用者描述，產出結構化 test cases 並寫入 `docs/test*.md`。
+根據 openspec 規格或使用者描述，產出結構化 test cases 並寫入 `tests/test*.md`。
 
 ## 測試層級
 
@@ -35,12 +35,12 @@ description: Writes test cases into docs/test*.md based on openspec specs or use
 2. **讀取目標測試檔**
 
    ```bash
-   ls docs/test*.md
+   ls tests/test*.md
    ```
 
-   - 若只有一個檔案（e.g. `docs/test-cases.md`）→ 寫入該檔
+   - 若只有一個檔案（e.g. `tests/test-cases.md`）→ 寫入該檔
    - 若有多個 → 詢問使用者要加到哪一個，或建立新檔
-   - 若要建新檔 → 命名為 `docs/test-<change-name>.md`
+   - 若要建新檔 → 命名為 `tests/test-<change-name>.md`
 
 3. **讀取現有 test cases 取得編號**
 
