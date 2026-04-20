@@ -237,12 +237,17 @@ func (g *gitLabAuth) handleAuthStatus(w http.ResponseWriter, r *http.Request, mo
 		AuthMethod    string `json:"auth_method"`
 	}
 	resp := statusResponse{Mode: string(mode), AuthMethod: g.authMethod}
+	if g.authMethod == "none" {
+		resp.Authenticated = true
+	}
 	// Check GitLab session cookie.
-	if cookie, err := r.Cookie("perch_session"); err == nil {
-		if claims, err := parseCookie(cookie.Value, g.cookieSecret); err == nil {
-			resp.Authenticated = true
-			resp.Username = claims.Username
-			resp.Role = claims.Role
+	if !resp.Authenticated {
+		if cookie, err := r.Cookie("perch_session"); err == nil {
+			if claims, err := parseCookie(cookie.Value, g.cookieSecret); err == nil {
+				resp.Authenticated = true
+				resp.Username = claims.Username
+				resp.Role = claims.Role
+			}
 		}
 	}
 	// Check password session cookie.
