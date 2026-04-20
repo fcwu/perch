@@ -70,6 +70,7 @@ func newServerWithMode(pm *PTYManager, auth *AuthMiddleware, im *IMManager, sess
 			gitlabAuth.handleAuthStatus(w, r, mode, auth)
 		})
 		s.mux.HandleFunc("/auth/logout", gitlabAuth.handleLogout)
+		s.mux.HandleFunc("/api/logout", gitlabAuth.handleLogout)
 	}
 	// Admin endpoints — POST handled by adminAuth, GET falls through to SPA below.
 	adminLoginHandler := adminAuth.handleLogin
@@ -81,9 +82,15 @@ func newServerWithMode(pm *PTYManager, auth *AuthMiddleware, im *IMManager, sess
 		s.mux.Handle("/ws/admin", adminMW(http.HandlerFunc(s.handleAdminWS)))
 	}
 	// GitLab OAuth endpoints (no auth required).
+	// Chat routes use GitLab middleware only when GitLab auth is active AND
+	// the primary auth method is not password (password sessions use a different
+	// cookie and would be rejected by the GitLab middleware).
+	gitlabChatAuth := gitlabAuth != nil && gitlabAuth.enabled() && (auth == nil || auth.mode != "password")
 	if gitlabAuth != nil && gitlabAuth.enabled() {
 		s.mux.HandleFunc("/auth/gitlab", gitlabAuth.handleRedirect)
 		s.mux.HandleFunc("/auth/callback", gitlabAuth.handleCallback)
+	}
+	if gitlabChatAuth {
 		// Chat API and SSE stream: protected by GitLab session cookie.
 		chatHandler := gitlabAuth.middleware(http.HandlerFunc(s.handleChatAPI))
 		s.mux.Handle("/api/chat", chatHandler)
@@ -135,7 +142,7 @@ func newServerWithMode(pm *PTYManager, auth *AuthMiddleware, im *IMManager, sess
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Paths always exempt from primary auth middleware.
 	switch r.URL.Path {
-	case "/hook", "/auth/gitlab", "/auth/callback", "/auth/logout",
+	case "/hook", "/auth/gitlab", "/auth/callback", "/auth/logout", "/api/logout",
 		"/api/auth/status", "/admin/login", "/login":
 		s.mux.ServeHTTP(w, r)
 		return

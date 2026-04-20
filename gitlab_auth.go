@@ -222,8 +222,8 @@ func (g *gitLabAuth) handleCallback(w http.ResponseWriter, r *http.Request) {
 
 // handleLogout clears session cookies and redirects to /.
 func (g *gitLabAuth) handleLogout(w http.ResponseWriter, r *http.Request) {
-	http.SetCookie(w, &http.Cookie{Name: "perch_session", Value: "", MaxAge: -1, Path: "/"})
-	http.SetCookie(w, &http.Cookie{Name: "session", Value: "", MaxAge: -1, Path: "/"})
+	http.SetCookie(w, &http.Cookie{Name: "perch_session", Value: "", MaxAge: -1, Path: "/", SameSite: http.SameSiteLaxMode})
+	http.SetCookie(w, &http.Cookie{Name: "session", Value: "", MaxAge: -1, Path: "/", SameSite: http.SameSiteLaxMode})
 	http.Redirect(w, r, "/", http.StatusFound)
 }
 
