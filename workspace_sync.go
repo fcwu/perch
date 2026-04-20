@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 )
 
@@ -28,6 +29,8 @@ type WorkspaceSyncConfig struct {
 	GitUserEmail    string
 	NotifyChannelID string
 	SyncSubmodules  bool
+	UID             uint32 // run git as this user (0 = root, no change)
+	GID             uint32
 }
 
 // LoadSyncConfig reads WorkspaceSyncConfig from environment variables.
@@ -56,6 +59,17 @@ func LoadSyncConfig() WorkspaceSyncConfig {
 	if v := os.Getenv("WORKSPACE_GIT_SYNC_SUBMODULES"); v == "true" || v == "1" {
 		cfg.SyncSubmodules = true
 	}
+	var puid, pgid uint32
+	if v := os.Getenv("PUID"); v != "" {
+		fmt.Sscanf(v, "%d", &puid)
+	}
+	if v := os.Getenv("PGID"); v != "" {
+		fmt.Sscanf(v, "%d", &pgid)
+	} else {
+		pgid = puid
+	}
+	cfg.UID = puid
+	cfg.GID = pgid
 	return cfg
 }
 
@@ -86,11 +100,22 @@ func isRebasing(path string) bool {
 
 // runGit runs a git command in the given working directory and returns combined stdout+stderr.
 // GIT_TERMINAL_PROMPT=0 prevents git from hanging waiting for interactive credential input.
+// If cfg is non-nil and cfg.UID > 0, the command runs as that user so pulled files
+// are owned by the workspace user rather than root.
 func runGit(ctx context.Context, dir string, args ...string) (string, error) {
+	return runGitAs(ctx, dir, 0, 0, args...)
+}
+
+func runGitAs(ctx context.Context, dir string, uid, gid uint32, args ...string) (string, error) {
 	allArgs := append([]string{"-c", "safe.directory=*"}, args...)
 	cmd := exec.CommandContext(ctx, "git", allArgs...)
 	cmd.Dir = dir
 	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
+	if uid > 0 {
+		cmd.SysProcAttr = &syscall.SysProcAttr{
+			Credential: &syscall.Credential{Uid: uid, Gid: gid},
+		}
+	}
 	var buf bytes.Buffer
 	cmd.Stdout = &buf
 	cmd.Stderr = &buf
@@ -190,12 +215,16 @@ func (d *debouncer) allow(errType string) bool {
 // All git command outputs are logged. Errors trigger notify if debounce allows.
 func syncOnce(ctx context.Context, cfg WorkspaceSyncConfig, notify NotifyFunc, dbnc *debouncer, logger *slog.Logger) error {
 	path := cfg.WorkspacePath
+	uid, gid := cfg.UID, cfg.GID
+	git := func(ctx context.Context, dir string, args ...string) (string, error) {
+		return runGitAs(ctx, dir, uid, gid, args...)
+	}
 	logger.Debug("workspace_sync: starting sync")
 
 	// Abort any in-progress rebase before attempting pull
 	if isRebasing(path) {
 		logger.Warn("workspace_sync: rebase in progress, aborting")
-		out, err := runGit(ctx, path, "rebase", "--abort")
+		out, err := git(ctx, path, "rebase", "--abort")
 		logger.Info("workspace_sync: rebase abort output", "output", strings.TrimSpace(out))
 		if err != nil {
 			logger.Error("workspace_sync: rebase abort failed", "err", err)
@@ -217,7 +246,7 @@ func syncOnce(ctx context.Context, cfg WorkspaceSyncConfig, notify NotifyFunc, d
 	}
 	if dirty {
 		logger.Debug("workspace_sync: dirty workspace, committing")
-		addOut, addErr := runGit(ctx, path, "add", "-A")
+		addOut, addErr := git(ctx, path, "add", "-A")
 		logger.Debug("workspace_sync: add output", "output", strings.TrimSpace(addOut))
 		if addErr != nil {
 			logger.Error("workspace_sync: add failed", "output", strings.TrimSpace(addOut), "err", addErr)
@@ -232,7 +261,7 @@ func syncOnce(ctx context.Context, cfg WorkspaceSyncConfig, notify NotifyFunc, d
 			commitArgs = append(commitArgs, "-c", "user.email="+cfg.GitUserEmail)
 		}
 		commitArgs = append(commitArgs, "commit", "-m", "auto-sync: "+ts)
-		commitOut, commitErr := runGit(ctx, path, commitArgs...)
+		commitOut, commitErr := git(ctx, path, commitArgs...)
 		logger.Info("workspace_sync: commit output", "output", strings.TrimSpace(commitOut))
 		if commitErr != nil {
 			logger.Error("workspace_sync: commit failed", "output", strings.TrimSpace(commitOut), "err", commitErr)
@@ -251,13 +280,13 @@ func syncOnce(ctx context.Context, cfg WorkspaceSyncConfig, notify NotifyFunc, d
 		pullArgs = append(pullArgs, "-c", "user.email="+cfg.GitUserEmail)
 	}
 	pullArgs = append(pullArgs, "pull", "--rebase")
-	out, err := runGit(ctx, path, pullArgs...)
+	out, err := git(ctx, path, pullArgs...)
 	logger.Info("workspace_sync: pull output", "output", strings.TrimSpace(out))
 	if err != nil && strings.Contains(out, "local changes to the following files would be overwritten") {
 		logger.Warn("workspace_sync: pull blocked by residual changes, resetting and retrying")
-		resetOut, _ := runGit(ctx, path, "reset", "--hard")
+		resetOut, _ := git(ctx, path, "reset", "--hard")
 		logger.Info("workspace_sync: reset output", "output", strings.TrimSpace(resetOut))
-		out, err = runGit(ctx, path, pullArgs...)
+		out, err = git(ctx, path, pullArgs...)
 		logger.Info("workspace_sync: pull retry output", "output", strings.TrimSpace(out))
 	}
 	if err != nil {
@@ -269,7 +298,7 @@ func syncOnce(ctx context.Context, cfg WorkspaceSyncConfig, notify NotifyFunc, d
 
 	// Update submodules if enabled
 	if cfg.SyncSubmodules {
-		subOut, subErr := runGit(ctx, path, "submodule", "update", "--init", "--recursive")
+		subOut, subErr := git(ctx, path, "submodule", "update", "--init", "--recursive")
 		logger.Info("workspace_sync: submodule update output", "output", strings.TrimSpace(subOut))
 		if subErr != nil {
 			logger.Error("workspace_sync: submodule update failed", "output", strings.TrimSpace(subOut), "err", subErr)
@@ -279,7 +308,7 @@ func syncOnce(ctx context.Context, cfg WorkspaceSyncConfig, notify NotifyFunc, d
 	}
 
 	// Push
-	pushOut, pushErr := runGit(ctx, path, "push")
+	pushOut, pushErr := git(ctx, path, "push")
 	logger.Info("workspace_sync: push output", "output", strings.TrimSpace(pushOut))
 	if pushErr != nil {
 		logger.Error("workspace_sync: push failed", "output", strings.TrimSpace(pushOut), "err", pushErr)
