@@ -1,8 +1,8 @@
 # Discord IM 整合 測試案例
 
 > 功能：discord-im
-> 涵蓋範圍：單一 Channel 模式、Open-Channel 模式（per-channel PTY）、排程觸發回傳、Discord DM、@mention 過濾、backward compat。
-> 相關 openspec：`im-integration`、`discord-dynamic-channel-support`、`discord-dm-allowlist`。
+> 涵蓋範圍：單一 Channel 模式、Open-Channel 模式（per-channel PTY）、排程觸發回傳、Discord DM、@mention 過濾、backward compat、ACP 模式。
+> 相關 openspec：`im-integration`、`discord-dynamic-channel-support`、`discord-dm-allowlist`、`discord-acp`。
 > 撰寫日期：2026-04-20
 
 ---
@@ -35,9 +35,11 @@
 
 ## T28 — Discord Session Web Viewer（分頁顯示）
 
+> **適用模式**：僅 PTY 模式（`DISCORD_ACP_ENABLED` 未設或為 false）。ACP 模式下無 terminal tab，此測試**不適用**。
+
 **層級**：E2E-browser（含 Discord 整合）
 
-**Given** Perch 以 Discord Bot 設定啟動
+**Given** Perch 以 Discord Bot 設定啟動（PTY 模式，未設 `DISCORD_ACP_ENABLED`）
 **When** 使用者在瀏覽器開啟 Perch，並點擊頁面上方 tab 列中的 Discord channel tab
 **Then**
 - terminal 畫面切換為該 Discord channel 的輸出
@@ -50,9 +52,11 @@
 
 ## T29 — Discord Session PTY Resize
 
+> **適用模式**：僅 PTY 模式。ACP 模式下沒有 terminal tab，此測試**不適用**。
+
 **層級**：E2E-browser（含 Discord 整合）
 
-**Given** 使用者正在瀏覽器中檢視 Discord channel tab
+**Given** 使用者正在瀏覽器中檢視 Discord channel tab（PTY 模式）
 **When** 使用者調整瀏覽器視窗大小，然後在 Discord 傳送一個指令
 **Then**
 - terminal 畫面填滿調整後的視窗，無空白邊緣
@@ -161,3 +165,109 @@
 **Then**
 - Claude 收到的問題只有「列出 /workspace 下的檔案」，沒有 `<@BOT_ID>` 前綴
 - Claude 正常執行對應指令並回覆結果
+
+---
+
+## T40 — ACP 模式啟動確認
+
+**層級**：E2E-curl
+
+**Given** 環境變數設定如下：
+```
+DISCORD_BOT_TOKEN=<token>
+DISCORD_ACP_ENABLED=true
+ACP_EXECUTABLE=claude-agent-acp
+ACP_RUN_TIMEOUT=120
+LISTEN_ADDR=:18080
+```
+**When** 啟動 Perch binary
+**Then**
+- 啟動 log 中出現 ACP 模式已啟用的訊息（包含 `acp` 或 `ACP` 關鍵字），而非 PTY 模式訊息
+- `curl http://localhost:18080/` 回傳 HTTP 200，服務正常運作
+- 啟動後瀏覽器 tab 列不出現 Discord channel terminal tab（ACP 模式無 web terminal）
+
+**反向驗證**：移除 `DISCORD_ACP_ENABLED` 後重啟，log 顯示 PTY 模式，瀏覽器 tab 列出現 Discord channel tab。
+
+---
+
+## T41 — ACP 模式基本問答（👀 → 💬 → reply）
+
+**層級**：E2E-browser（含 Discord 整合）
+
+**Given** Perch 以 ACP 模式啟動（`DISCORD_ACP_ENABLED=true`），Discord bot 已上線
+**When** 使用者在 Discord channel 傳送訊息：「今天幾號？」
+**Then**
+- 訊息傳送後數秒內，訊息上出現 👀 reaction（Bot 已收到，正在處理）
+- Claude 完成回應後：
+  - 👀 reaction 消失
+  - 訊息上出現 💬 reaction
+  - Discord channel 出現 Bot 的 reply，內容包含正確日期
+- 回應期間 Perch web terminal 不出現任何新輸出（ACP 模式不寫入 PTY）
+
+---
+
+## T42 — ACP 模式：Web Terminal Tab 不存在
+
+**層級**：E2E-browser
+
+**Given** Perch 以 ACP 模式啟動（`DISCORD_ACP_ENABLED=true`）
+**When** 使用者在瀏覽器開啟 Perch 首頁，查看頁面上方的 tab 列
+**Then**
+- tab 列中只顯示主 terminal tab
+- 沒有任何 Discord channel 對應的 terminal tab
+- 即使在 Discord 傳送訊息並收到回覆後，重新整理頁面仍無 channel tab
+
+---
+
+## T43 — ACP Subprocess Crash Recovery
+
+**層級**：E2E-browser（含 Discord 整合）
+
+**Given** Perch 以 ACP 模式啟動，使用者已在 Discord channel 成功完成過一次問答（subprocess 曾正常執行）
+**When** 使用者（或管理員）在 server 端手動 kill 對應 channel 的 `claude-agent-acp` process，然後在 Discord 傳送新訊息：「你還在嗎？」
+**Then**
+- 訊息上出現 👀 reaction（Bot 正在處理）
+- Perch 自動重啟該 channel 的 subprocess
+- Claude 正常回應，Discord 收到 reply，訊息上出現 💬 reaction
+- 不需要重啟 Perch，crash recovery 全自動完成
+
+---
+
+## T44 — ACP Timeout 行為（❌ + 錯誤訊息）
+
+**層級**：E2E-browser（含 Discord 整合）
+
+**Given** Perch 以 ACP 模式啟動，`ACP_RUN_TIMEOUT` 設為較短的值（如 5 秒）以便測試
+**When** 使用者在 Discord 傳送一個會讓 Claude 長時間處理的任務，使其超過 timeout 上限
+**Then**
+- 訊息上的 👀 reaction 在 timeout 後消失
+- 訊息上出現 ❌ reaction
+- Discord channel 收到一則錯誤訊息，說明處理逾時或失敗
+- 不出現無限等待（Bot 沒有卡住）
+
+---
+
+## T45 — ACP 模式：多 Channel 各自獨立的 Subprocess
+
+**層級**：E2E-browser（含 Discord 整合）
+
+**Given** Perch 以 ACP 模式啟動，已有兩個不同的 Discord channel（channel-A、channel-B）各自傳送過訊息
+**When** 使用者在 channel-A 詢問：「你記得我剛才說什麼嗎？」（前一則訊息是「apple」），同時在 channel-B 詢問同樣問題（前一則訊息是「banana」）
+**Then**
+- channel-A 的 Claude 回應提及「apple」，反映該 channel 的對話脈絡
+- channel-B 的 Claude 回應提及「banana」，反映該 channel 的對話脈絡
+- 兩個 channel 的回應互不干擾（subprocess 各自獨立）
+
+---
+
+## T46 — PTY Fallback（未設 DISCORD_ACP_ENABLED 維持原行為）
+
+**層級**：E2E-browser（含 Discord 整合）
+
+**Given** Perch 啟動時只設定 `DISCORD_BOT_TOKEN`，未設定 `DISCORD_ACP_ENABLED`（或設為 false）
+**When** 使用者在 Discord channel 傳送訊息，並在瀏覽器開啟 Perch 首頁
+**Then**
+- Discord channel 訊息出現 👀 reaction，Claude 正常回應
+- 瀏覽器 tab 列出現對應的 Discord channel terminal tab
+- terminal tab 可看到 Claude 的輸出（PTY 模式行為維持不變）
+- 與 ACP 模式下的行為（無 terminal tab）明顯不同
