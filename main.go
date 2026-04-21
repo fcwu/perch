@@ -118,6 +118,16 @@ func main() {
 	if discordToken != "" || telegramToken != "" && telegramChatStr != "" {
 		im = newIMManager(logger.Logger)
 	}
+	// --- ACP mode (optional): DISCORD_ACP_ENABLED=true uses claude-agent-acp subprocess ---
+	acpEnabled := os.Getenv("DISCORD_ACP_ENABLED") == "true"
+	if acpEnabled {
+		exe := os.Getenv("ACP_EXECUTABLE")
+		if exe == "" {
+			exe = "claude-agent-acp"
+		}
+		logger.Info("Discord ACP mode enabled", "executable", exe)
+	}
+
 	if im != nil && discordToken != "" {
 		discordSess = newDiscordSessionManager(runtime, discordToken, discordChannel, discordAllowedDMUsers, workdir, logger.Logger)
 		im.addAdapter(discordSess)
@@ -131,7 +141,7 @@ func main() {
 		im.addAdapter(newTelegramAdapter(telegramToken, chatID, logger.Logger))
 	}
 	if im != nil {
-		im.start(pm)
+		im.start(IMConfig{PTY: pm, ACPEnabled: acpEnabled})
 	}
 	if discordSess != nil {
 		sched.ptyLookup = discordSess.PTYForTarget
