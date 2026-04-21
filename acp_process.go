@@ -25,6 +25,7 @@ type ACPProcess struct {
 
 	// lifecycle
 	mu        sync.Mutex
+	initMu    sync.Mutex // serializes EnsureRunning→Start to prevent concurrent init races
 	cmd       *exec.Cmd
 	stdinW    io.WriteCloser
 	running   bool
@@ -80,7 +81,11 @@ func (p *ACPProcess) IsRunning() bool {
 }
 
 // EnsureRunning starts the subprocess if it is not already running.
+// initMu serializes concurrent callers so only one goroutine runs Start()
+// at a time; others wait and then find the process already running.
 func (p *ACPProcess) EnsureRunning(ctx context.Context) error {
+	p.initMu.Lock()
+	defer p.initMu.Unlock()
 	if p.IsRunning() {
 		return nil
 	}

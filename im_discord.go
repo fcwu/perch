@@ -733,6 +733,23 @@ func (d *DiscordSessionManager) onMessage(s *discordgo.Session, m *discordgo.Mes
 // handleWithACP sends message to the claude-agent-acp subprocess and routes the reply to Discord.
 // It runs in its own goroutine and never returns an error (logs instead).
 func (sess *discordSession) handleWithACP(s *discordgo.Session, channelID, messageID, content string, logger *slog.Logger) {
+	// One message at a time per session — drop concurrent duplicates.
+	sess.mu.Lock()
+	if sess.last != nil {
+		sess.mu.Unlock()
+		logger.Debug("Discord ACP: session busy, dropping duplicate", "channel", channelID, "msgID", messageID)
+		return
+	}
+	sess.last = &discordPending{MessageID: messageID, ChannelID: channelID}
+	sess.mu.Unlock()
+	defer func() {
+		sess.mu.Lock()
+		if sess.last != nil && sess.last.MessageID == messageID {
+			sess.last = nil
+		}
+		sess.mu.Unlock()
+	}()
+
 	if err := s.MessageReactionAdd(channelID, messageID, emojiEyes); err != nil {
 		logger.Warn("Discord ACP: add 👀 reaction failed", "err", err)
 	}
