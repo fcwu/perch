@@ -6,10 +6,8 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
-	"strconv"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/creack/pty"
@@ -128,25 +126,9 @@ func (p *PTYManager) runOnce(command string, args []string, workdir string, logg
 	if workdir != "" {
 		cmd.Dir = workdir
 	}
-	home := "/home/perchuser"
-	if puidStr := os.Getenv("PUID"); puidStr != "" {
-		uid, err := strconv.ParseUint(puidStr, 10, 32)
-		if err == nil {
-			pgidStr := os.Getenv("PGID")
-			if pgidStr == "" {
-				pgidStr = puidStr
-			}
-			gid, err := strconv.ParseUint(pgidStr, 10, 32)
-			if err == nil {
-				home = "/home/perchuser"
-				cmd.SysProcAttr = &syscall.SysProcAttr{
-					Credential: &syscall.Credential{
-						Uid: uint32(uid),
-						Gid: uint32(gid),
-					},
-				}
-			}
-		}
+	home := os.Getenv("HOME")
+	if home == "" {
+		home = "/root"
 	}
 	env := os.Environ()
 	set := make(map[string]bool, len(env))

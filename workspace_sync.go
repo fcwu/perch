@@ -11,7 +11,6 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 )
 
@@ -100,23 +99,15 @@ func isRebasing(path string) bool {
 
 // runGit runs a git command in the given working directory and returns combined stdout+stderr.
 // GIT_TERMINAL_PROMPT=0 prevents git from hanging waiting for interactive credential input.
-// If cfg is non-nil and cfg.UID > 0, the command runs as that user so pulled files
-// are owned by the workspace user rather than root.
 func runGit(ctx context.Context, dir string, args ...string) (string, error) {
-	return runGitAs(ctx, dir, 0, 0, args...)
+	return runGitAs(ctx, dir, args...)
 }
 
-func runGitAs(ctx context.Context, dir string, uid, gid uint32, args ...string) (string, error) {
+func runGitAs(ctx context.Context, dir string, args ...string) (string, error) {
 	allArgs := append([]string{"-c", "safe.directory=*"}, args...)
 	cmd := exec.CommandContext(ctx, "git", allArgs...)
 	cmd.Dir = dir
 	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
-	if uid > 0 {
-		cmd.SysProcAttr = &syscall.SysProcAttr{
-			Credential: &syscall.Credential{Uid: uid, Gid: gid},
-		}
-		cmd.Env = append(cmd.Env, "HOME=/home/perchuser")
-	}
 	var buf bytes.Buffer
 	cmd.Stdout = &buf
 	cmd.Stderr = &buf
@@ -190,7 +181,7 @@ func injectGitToken(token string, workspacePath string, uid, gid uint32, logger 
 	logger.Info("workspace_sync: ~/.git-credentials updated", "host", host)
 
 	// Set credential.helper = store
-	if out, err := runGitAs(context.Background(), workspacePath, uid, gid, "config", "--global", "credential.helper", "store"); err != nil {
+	if out, err := runGitAs(context.Background(), workspacePath, "config", "--global", "credential.helper", "store"); err != nil {
 		logger.Error("workspace_sync: credential injection: set credential.helper failed", "output", out, "err", err)
 		return err
 	}
@@ -225,9 +216,8 @@ func (d *debouncer) allow(errType string) bool {
 // All git command outputs are logged. Errors trigger notify if debounce allows.
 func syncOnce(ctx context.Context, cfg WorkspaceSyncConfig, notify NotifyFunc, dbnc *debouncer, logger *slog.Logger) error {
 	path := cfg.WorkspacePath
-	uid, gid := cfg.UID, cfg.GID
 	git := func(ctx context.Context, dir string, args ...string) (string, error) {
-		return runGitAs(ctx, dir, uid, gid, args...)
+		return runGitAs(ctx, dir, args...)
 	}
 	logger.Debug("workspace_sync: starting sync")
 
