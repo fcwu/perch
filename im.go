@@ -25,10 +25,16 @@ type TranscriptMsg struct {
 	Content any    `json:"content"`
 }
 
+// IMConfig carries dependencies that IM adapters may need at startup.
+type IMConfig struct {
+	PTY        *PTYManager
+	ACPEnabled bool // true = Discord uses ACP stdio subprocess mode
+}
+
 // IMAdapter is implemented by each IM platform (Discord, Telegram, …).
 type IMAdapter interface {
-	// Start begins listening for messages and stores a ref to pty for write.
-	Start(pty *PTYManager) error
+	// Start begins listening for messages using the provided config.
+	Start(cfg IMConfig) error
 	// Stop shuts down the adapter gracefully.
 	Stop()
 	// Notify dispatches a Claude hook event to the platform.
@@ -67,13 +73,13 @@ func (m *IMManager) addAdapter(a IMAdapter) {
 	m.mu.Unlock()
 }
 
-func (m *IMManager) start(pty *PTYManager) {
+func (m *IMManager) start(cfg IMConfig) {
 	m.mu.Lock()
 	adapters := make([]IMAdapter, len(m.adapters))
 	copy(adapters, m.adapters)
 	m.mu.Unlock()
 	for _, a := range adapters {
-		if err := a.Start(pty); err != nil {
+		if err := a.Start(cfg); err != nil {
 			m.logger.Error("IM adapter start failed", "err", err)
 		}
 	}

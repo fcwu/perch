@@ -29,9 +29,9 @@ func newTelegramAdapter(token string, chatID int64, logger *slog.Logger) *Telegr
 	return &TelegramAdapter{token: token, chatID: chatID, logger: logger}
 }
 
-func (t *TelegramAdapter) Start(pty *PTYManager) error {
+func (t *TelegramAdapter) Start(cfg IMConfig) error {
 	t.mu.Lock()
-	t.pty = pty
+	t.pty = cfg.PTY
 	t.mu.Unlock()
 
 	bot, err := telebot.NewBot(telebot.Settings{

@@ -5,7 +5,9 @@ import (
 	"crypto/sha1"
 	"fmt"
 	"log/slog"
+	"os"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -380,32 +382,41 @@ type discordPending struct {
 	AutoReply bool
 }
 
-// discordSession is one per Discord channel: its own PTY + pending state.
+// discordSession is one per Discord channel.
+// In ACP mode (acpProcess != nil), pty is nil; messages go via ACP JSON-RPC stdio.
+// In PTY mode (acpProcess == nil), pty holds the agent process.
 type discordSession struct {
 	channelID   string
 	runtime     AgentRuntime
 	sessionUUID string
-	pty         *PTYManager
+	acpProcess  *ACPProcess // non-nil when ACP mode is active (lazy-started)
+	pty         *PTYManager // non-nil in PTY mode
 
 	mu   sync.Mutex
 	last *discordPending
-	warm bool // true after the first message has been successfully written to the PTY
+	warm bool // PTY mode only: true after the first write to PTY
 
 	watcherMu     sync.Mutex
-	watcherCancel func() // non-nil while a PTY-change watcher goroutine is running
+	watcherCancel func() // PTY mode only: non-nil while watcher goroutine runs
 }
 
-func newDiscordSession(runtime AgentRuntime, channelID string, logger *slog.Logger, workdir string) *discordSession {
-	pty := newPTYManager()
-	target := "discord:" + channelID
-	go pty.start(runtime.Command, runtime.SessionArgs(target), workdir, logger, runtime.DefaultEnv,
-		runtime.SessionEnv(target)...)
-	return &discordSession{
+func newDiscordSession(runtime AgentRuntime, channelID string, acpEnabled bool, executable, workdir string, logger *slog.Logger) *discordSession {
+	sess := &discordSession{
 		channelID: channelID,
 		runtime:   runtime,
-		// sessionUUID is empty until the first hook event claims it.
-		pty: pty,
 	}
+	if acpEnabled {
+		// ACP mode: subprocess is lazy-started on first Prompt().
+		sess.acpProcess = NewACPProcess(executable, workdir, logger)
+	} else {
+		// PTY mode: launch the agent process immediately.
+		pty := newPTYManager()
+		target := "discord:" + channelID
+		go pty.start(runtime.Command, runtime.SessionArgs(target), workdir, logger, runtime.DefaultEnv,
+			runtime.SessionEnv(target)...)
+		sess.pty = pty
+	}
+	return sess
 }
 
 // SessionView is the JSON representation of a live Discord session.
@@ -414,7 +425,9 @@ type SessionView struct {
 	SessionUUID string `json:"session_uuid"`
 }
 
-// DiscordSessionManager listens on Discord and routes each channel to its own PTY.
+// DiscordSessionManager listens on Discord and routes each channel to its own session.
+// In ACP mode (acpEnabled true), each session owns an ACPProcess subprocess (claude-agent-acp).
+// In PTY mode (acpEnabled false), each session owns a PTY process running the agent CLI.
 type DiscordSessionManager struct {
 	runtime          AgentRuntime
 	token            string
@@ -424,6 +437,8 @@ type DiscordSessionManager struct {
 	workdir          string
 
 	mu             sync.Mutex
+	acpEnabled     bool   // true = ACP mode; false = PTY mode
+	acpExecutable  string // path to claude-agent-acp binary (default from ACP_EXECUTABLE / "claude-agent-acp")
 	dgo            *discordgo.Session
 	sessions       map[string]*discordSession // channelID → session
 	channelPrivate map[string]bool            // channelID → isPrivate, cached
@@ -444,6 +459,16 @@ func newDiscordSessionManager(runtime AgentRuntime, token, channelID string, all
 		sessions:         make(map[string]*discordSession),
 		channelPrivate:   make(map[string]bool),
 	}
+}
+
+// acpRunTimeout reads ACP_RUN_TIMEOUT (seconds) or returns the default 5 minutes.
+func acpRunTimeout() time.Duration {
+	if v := os.Getenv("ACP_RUN_TIMEOUT"); v != "" {
+		if secs, err := strconv.Atoi(v); err == nil && secs > 0 {
+			return time.Duration(secs) * time.Second
+		}
+	}
+	return 5 * time.Minute
 }
 
 // isPrivateChannel returns true if the channel is not visible to @everyone.
@@ -478,9 +503,13 @@ func (d *DiscordSessionManager) isPrivateChannel(s *discordgo.Session, channelID
 	return isPrivate
 }
 
-func (d *DiscordSessionManager) Start(_ *PTYManager) error {
-	// Pre-start the allowed channel's session so PTY is ready before first message.
-	if d.allowedChannelID != "" {
+func (d *DiscordSessionManager) Start(cfg IMConfig) error {
+	d.mu.Lock()
+	d.acpEnabled = cfg.ACPEnabled
+	d.mu.Unlock()
+
+	// In PTY mode, pre-start the allowed channel session so the agent is warm.
+	if !cfg.ACPEnabled && d.allowedChannelID != "" {
 		d.getOrCreateSession(d.allowedChannelID)
 	}
 
@@ -496,7 +525,11 @@ func (d *DiscordSessionManager) Start(_ *PTYManager) error {
 	d.mu.Lock()
 	d.dgo = session
 	d.mu.Unlock()
-	d.logger.Info("Discord bot connected (per-channel PTY mode)")
+	if cfg.ACPEnabled {
+		d.logger.Info("Discord bot connected (ACP mode)")
+	} else {
+		d.logger.Info("Discord bot connected (PTY mode)")
+	}
 	return nil
 }
 
@@ -513,7 +546,12 @@ func (d *DiscordSessionManager) Stop() {
 		s.Close()
 	}
 	for _, sess := range sessions {
-		sess.pty.stop()
+		if sess.pty != nil {
+			sess.pty.stop()
+		}
+		if sess.acpProcess != nil {
+			sess.acpProcess.Stop()
+		}
 	}
 }
 
@@ -570,6 +608,12 @@ func (d *DiscordSessionManager) onMessage(s *discordgo.Session, m *discordgo.Mes
 	}
 
 	sess := d.getOrCreateSession(m.ChannelID)
+
+	// ACP mode: handle via ACPProcess subprocess, no PTY involved.
+	if sess.acpProcess != nil {
+		go sess.handleWithACP(s, m.ChannelID, m.ID, content, d.logger)
+		return
+	}
 
 	sess.mu.Lock()
 	idle := sess.last == nil
@@ -686,13 +730,75 @@ func (d *DiscordSessionManager) onMessage(s *discordgo.Session, m *discordgo.Mes
 	}
 }
 
+// handleWithACP sends message to the claude-agent-acp subprocess and routes the reply to Discord.
+// It runs in its own goroutine and never returns an error (logs instead).
+func (sess *discordSession) handleWithACP(s *discordgo.Session, channelID, messageID, content string, logger *slog.Logger) {
+	if err := s.MessageReactionAdd(channelID, messageID, emojiEyes); err != nil {
+		logger.Warn("Discord ACP: add 👀 reaction failed", "err", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), acpRunTimeout())
+	defer cancel()
+
+	// Ensure the subprocess is running (lazy start / auto-recovery after crash).
+	if err := sess.acpProcess.EnsureRunning(ctx); err != nil {
+		logger.Warn("Discord ACP: process start failed", "channel", channelID, "err", err)
+		_ = s.MessageReactionRemove(channelID, messageID, emojiEyes, "@me")
+		_ = s.MessageReactionAdd(channelID, messageID, emojiCross)
+		_, _ = s.ChannelMessageSendComplex(channelID, &discordgo.MessageSend{
+			Content:   "❌ Agent unavailable: " + err.Error(),
+			Reference: &discordgo.MessageReference{MessageID: messageID},
+		})
+		return
+	}
+
+	text, err := sess.acpProcess.Prompt(ctx, content)
+	_ = s.MessageReactionRemove(channelID, messageID, emojiEyes, "@me")
+
+	if err != nil {
+		logger.Warn("Discord ACP: prompt failed", "channel", channelID, "err", err)
+		_ = s.MessageReactionAdd(channelID, messageID, emojiCross)
+		errMsg := err.Error()
+		if ctx.Err() == context.DeadlineExceeded {
+			errMsg = "⏱️ Agent timed out."
+		}
+		_, _ = s.ChannelMessageSendComplex(channelID, &discordgo.MessageSend{
+			Content:   "❌ " + errMsg,
+			Reference: &discordgo.MessageReference{MessageID: messageID},
+		})
+		return
+	}
+
+	_ = s.MessageReactionAdd(channelID, messageID, emojiSpeech)
+	if text == "" {
+		return // nothing to send
+	}
+	chunks := splitForDiscord(text)
+	logger.Info("Discord ACP: sending reply", "channel", channelID, "replyTo", messageID, "chunks", len(chunks))
+	for i, chunk := range chunks {
+		if i == 0 {
+			_, err := s.ChannelMessageSendComplex(channelID, &discordgo.MessageSend{
+				Content:   chunk,
+				Reference: &discordgo.MessageReference{MessageID: messageID},
+			})
+			if err != nil {
+				logger.Warn("Discord ACP: send reply failed", "channel", channelID, "err", err)
+			}
+			continue
+		}
+		if _, err := s.ChannelMessageSend(channelID, chunk); err != nil {
+			logger.Warn("Discord ACP: send continuation failed", "channel", channelID, "part", i, "err", err)
+		}
+	}
+}
+
 func (d *DiscordSessionManager) getOrCreateSession(channelID string) *discordSession {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	if sess, ok := d.sessions[channelID]; ok {
 		return sess
 	}
-	sess := newDiscordSession(d.runtime, channelID, d.logger, d.workdir)
+	sess := newDiscordSession(d.runtime, channelID, d.acpEnabled, d.acpExecutable, d.workdir, d.logger)
 	d.sessions[channelID] = sess
 	return sess
 }
@@ -701,6 +807,10 @@ func (d *DiscordSessionManager) Notify(event HookEvent, lastText string) error {
 	d.mu.Lock()
 	var target *discordSession
 	for _, sess := range d.sessions {
+		// ACP sessions handle their own reply flow; skip hook routing for them.
+		if sess.acpProcess != nil {
+			continue
+		}
 		if sess.sessionUUID == event.SessionID {
 			target = sess
 			break
@@ -841,11 +951,12 @@ func (d *DiscordSessionManager) ListSessions() []SessionView {
 }
 
 // SubscribeSession returns a read channel for the PTY output of channelID.
+// Returns false if the session is in ACP mode (no PTY) or does not exist.
 func (d *DiscordSessionManager) SubscribeSession(channelID string) (<-chan []byte, func(), bool) {
 	d.mu.Lock()
 	sess, ok := d.sessions[channelID]
 	d.mu.Unlock()
-	if !ok {
+	if !ok || sess.pty == nil {
 		return nil, nil, false
 	}
 	ch, unsub := sess.pty.subscribe()
@@ -886,7 +997,7 @@ func (d *DiscordSessionManager) OnScheduledFire(target, message string) {
 }
 
 // PTYForTarget returns the PTYManager for a session target string (e.g. "discord:<channelID>").
-// Returns nil if the target is not a known Discord session.
+// Returns nil if the target is not a known Discord session or if the session is in ACP mode.
 func (d *DiscordSessionManager) PTYForTarget(target string) *PTYManager {
 	const prefix = "discord:"
 	if !strings.HasPrefix(target, prefix) {
@@ -899,15 +1010,15 @@ func (d *DiscordSessionManager) PTYForTarget(target string) *PTYManager {
 	if !ok {
 		return nil
 	}
-	return sess.pty
+	return sess.pty // nil in ACP mode
 }
 
-// ResizeSession resizes the PTY for the given Discord channel.
+// ResizeSession resizes the PTY for the given Discord channel (no-op in ACP mode).
 func (d *DiscordSessionManager) ResizeSession(channelID string, cols, rows uint16) {
 	d.mu.Lock()
 	sess, ok := d.sessions[channelID]
 	d.mu.Unlock()
-	if ok {
+	if ok && sess.pty != nil {
 		sess.pty.resize(cols, rows)
 	}
 }
@@ -926,12 +1037,16 @@ func (d *DiscordSessionManager) SendToChannel(channelID string, msg string) erro
 }
 
 // WriteSession writes data to the PTY stdin for the given Discord channel.
+// Returns an error if the session is in ACP mode (no PTY).
 func (d *DiscordSessionManager) WriteSession(channelID string, data []byte) error {
 	d.mu.Lock()
 	sess, ok := d.sessions[channelID]
 	d.mu.Unlock()
 	if !ok {
 		return fmt.Errorf("session not found: %s", channelID)
+	}
+	if sess.pty == nil {
+		return fmt.Errorf("session %s is in ACP mode (no PTY)", channelID)
 	}
 	return sess.pty.write(data)
 }

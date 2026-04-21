@@ -78,7 +78,7 @@ type captureAdapter struct {
 	onNotify func(HookEvent, string)
 }
 
-func (c *captureAdapter) Start(_ *PTYManager) error { return nil }
+func (c *captureAdapter) Start(_ IMConfig) error { return nil }
 func (c *captureAdapter) Stop()                     {}
 func (c *captureAdapter) Notify(e HookEvent, text string) error {
 	if c.onNotify != nil {

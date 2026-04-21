@@ -20,7 +20,7 @@ FROM ubuntu:24.04
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates curl git jq nodejs npm gosu && \
     rm -rf /var/lib/apt/lists/*
-RUN npm install -g @anthropic-ai/claude-code
+RUN npm install -g @anthropic-ai/claude-code @agentclientprotocol/claude-agent-acp
 RUN curl -fsSL https://api.github.com/repos/anomalyco/opencode/releases/latest | \
     jq -r '(.assets[] | select(.name=="opencode-linux-arm64.tar.gz") | .browser_download_url)' | \
     xargs -I {} sh -lc 'tmp=$(mktemp -d) && curl -fsSL "{}" -o "$tmp/opencode.tgz" && tar -xzf "$tmp/opencode.tgz" -C /usr/local/bin && chmod +x /usr/local/bin/opencode && rm -rf "$tmp"'
