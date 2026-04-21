@@ -70,4 +70,7 @@ if [ -n "$WORKDIR" ]; then
     fi
 fi
 
+AUTH_METHOD="${AUTH_METHOD:-${AUTH_MODE:-none}}"
+export AUTH_METHOD
+
 exec /app/perch
