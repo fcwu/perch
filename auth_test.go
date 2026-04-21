@@ -130,6 +130,28 @@ func TestAuthMTLSBootstrapAccessibleWithoutClientCert(t *testing.T) {
 	}
 }
 
+func TestAuthPasswordInjectsUserIDInContext(t *testing.T) {
+	mw := newAuthMiddleware("password", "secret")
+	token := mw.newSession()
+
+	var gotUserID string
+	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotUserID, _ = r.Context().Value(ctxUserID).(string)
+		w.WriteHeader(http.StatusOK)
+	})
+	req := httptest.NewRequest("GET", "/api/chat", nil)
+	req.AddCookie(&http.Cookie{Name: "session", Value: token})
+	w := httptest.NewRecorder()
+	mw.wrap(next).ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	if gotUserID == "" {
+		t.Error("expected ctxUserID to be injected in password auth mode")
+	}
+}
+
 func TestAuthPasswordSessionCookieNotSecure(t *testing.T) {
 	// password mode uses plain HTTP; the Secure flag would prevent the browser
 	// from sending the cookie back over HTTP, breaking the login flow entirely.

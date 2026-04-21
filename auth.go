@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
@@ -38,7 +39,9 @@ func (a *AuthMiddleware) wrap(next http.Handler) http.Handler {
 				http.Error(w, "unauthorized", http.StatusUnauthorized)
 				return
 			}
-			next.ServeHTTP(w, r)
+			ctx := context.WithValue(r.Context(), ctxUserID, "local")
+			ctx = context.WithValue(ctx, ctxUsername, "local")
+			next.ServeHTTP(w, r.WithContext(ctx))
 		case "mtls":
 			if r.URL.Path == "/bootstrap" {
 				next.ServeHTTP(w, r)

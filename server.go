@@ -86,9 +86,12 @@ func newServerWithMode(pm *PTYManager, auth *AuthMiddleware, im *IMManager, sess
 	// the primary auth method is not password (password sessions use a different
 	// cookie and would be rejected by the GitLab middleware).
 	gitlabChatAuth := gitlabAuth != nil && gitlabAuth.enabled() && (auth == nil || auth.mode != "password")
-	if gitlabAuth != nil && gitlabAuth.enabled() {
+	if gitlabAuth != nil && gitlabAuth.enabled() && (auth == nil || auth.mode != "password") {
 		s.mux.HandleFunc("/auth/gitlab", gitlabAuth.handleRedirect)
 		s.mux.HandleFunc("/auth/callback", gitlabAuth.handleCallback)
+	} else if auth != nil && auth.mode == "password" {
+		s.mux.HandleFunc("/auth/gitlab", http.NotFound)
+		s.mux.HandleFunc("/auth/callback", http.NotFound)
 	}
 	if gitlabChatAuth {
 		// Chat API and SSE stream: protected by GitLab session cookie.

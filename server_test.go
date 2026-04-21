@@ -235,3 +235,27 @@ func TestSessionWSResizeNotForwarded(t *testing.T) {
 		t.Fatal("ResizeSession should have been called")
 	}
 }
+
+
+func TestPasswordModeGitLabRouteReturns404(t *testing.T) {
+	pm := newPTYManager()
+	auth := newAuthMiddleware("password", "secret")
+	ga := &gitLabAuth{
+		clientID:     "id",
+		clientSecret: "secret",
+		gitlabURL:    "http://gitlab.example.com",
+		authMethod:   "gitlab",
+		mode:         ModeSingle,
+		adminIDs:     map[string]bool{},
+		allowedIDs:   map[string]bool{},
+	}
+	srv := newServerWithMode(pm, auth, nil, nil, nil, ga, nil, nil, nil, nil, ModeSingle, nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/auth/gitlab", nil)
+	rr := httptest.NewRecorder()
+	srv.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusNotFound {
+		t.Errorf("/auth/gitlab in password mode: expected 404, got %d", rr.Code)
+	}
+}
