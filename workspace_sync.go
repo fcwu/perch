@@ -182,6 +182,11 @@ func injectGitToken(token string, workspacePath string, uid, gid uint32, logger 
 		logger.Error("workspace_sync: credential injection: write ~/.git-credentials failed", "err", err)
 		return err
 	}
+	if uid > 0 {
+		if err := os.Chown(credPath, int(uid), int(gid)); err != nil {
+			logger.Warn("workspace_sync: credential injection: chown ~/.git-credentials failed", "err", err)
+		}
+	}
 	logger.Info("workspace_sync: ~/.git-credentials updated", "host", host)
 
 	// Set credential.helper = store

@@ -289,6 +289,10 @@ func (p *ACPProcess) call(ctx context.Context, method string, params any) (json.
 // pending callers and accumulating agent_message_chunk notifications.
 // It exits when the subprocess closes stdout (normal shutdown or kill).
 func (p *ACPProcess) readLoop(r io.Reader) {
+	p.mu.Lock()
+	cmd := p.cmd
+	p.mu.Unlock()
+
 	scanner := bufio.NewScanner(r)
 	scanner.Buffer(make([]byte, 1024*1024), 1024*1024) // 1 MB line buffer for large responses
 
@@ -358,6 +362,11 @@ func (p *ACPProcess) readLoop(r io.Reader) {
 				p.chunkMu.Unlock()
 			}
 		}
+	}
+
+	// Reap the subprocess to prevent zombies.
+	if cmd != nil {
+		_ = cmd.Wait()
 	}
 
 	// Subprocess has closed stdout — mark as not running and drain pending callers.

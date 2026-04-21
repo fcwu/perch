@@ -7,6 +7,7 @@ if [ -n "$PUID" ]; then
     PGID="${PGID:-$PUID}"
     mkdir -p /home/perchuser
     chown "${PUID}:${PGID}" /home/perchuser
+    export HOME=/home/perchuser
 fi
 
 # Determine workspace directory (same logic as main.go)
