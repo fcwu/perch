@@ -1,8 +1,6 @@
 #!/bin/sh
 set -e
 
-# If PUID is set, create a home directory owned by PUID:PGID so the
-# non-root claude process has a writable home. perch itself stays root.
 if [ -n "$PUID" ]; then
     PGID="${PGID:-$PUID}"
     mkdir -p /home/perchuser
@@ -74,4 +72,7 @@ fi
 AUTH_METHOD="${AUTH_METHOD:-${AUTH_MODE:-none}}"
 export AUTH_METHOD
 
+if [ -n "$PUID" ]; then
+    exec gosu "${PUID}:${PGID}" /app/perch
+fi
 exec /app/perch
