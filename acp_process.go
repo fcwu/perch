@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 )
 
 // ACPProcess manages a long-lived claude-agent-acp subprocess per Discord channel.
@@ -131,6 +132,7 @@ func (p *ACPProcess) Start(ctx context.Context) error {
 	p.mu.Unlock() // release before handshake — call() also acquires p.mu
 
 	// ACP handshake: initialize (protocolVersion must be an integer)
+	t0 := time.Now()
 	if _, err := p.call(ctx, "initialize", map[string]any{
 		"protocolVersion":    1,
 		"clientInfo":         map[string]any{"name": "perch", "version": "1.0"},
@@ -139,8 +141,10 @@ func (p *ACPProcess) Start(ctx context.Context) error {
 		p.Stop()
 		return fmt.Errorf("acp: initialize: %w", err)
 	}
+	p.logger.Debug("ACP handshake: initialize done", "elapsed", time.Since(t0).Round(time.Millisecond))
 
 	// ACP handshake: session/new (permissionMode comes from settings, set via session/set_mode below)
+	t1 := time.Now()
 	result, err := p.call(ctx, "session/new", map[string]any{
 		"cwd":        p.workdir,
 		"mcpServers": []any{},
@@ -149,6 +153,7 @@ func (p *ACPProcess) Start(ctx context.Context) error {
 		p.Stop()
 		return fmt.Errorf("acp: session/new: %w", err)
 	}
+	p.logger.Debug("ACP handshake: session/new done", "elapsed", time.Since(t1).Round(time.Millisecond))
 
 	var sess struct {
 		SessionID string `json:"sessionId"`
@@ -169,7 +174,7 @@ func (p *ACPProcess) Start(ctx context.Context) error {
 		p.logger.Warn("acp: session/set_mode bypassPermissions failed (continuing)", "err", err)
 	}
 
-	p.logger.Info("ACP process started", "sessionId", p.sessionID, "executable", p.executable)
+	p.logger.Info("ACP process started", "sessionId", p.sessionID, "executable", p.executable, "totalHandshake", time.Since(t0).Round(time.Millisecond))
 	return nil
 }
 
@@ -185,6 +190,7 @@ func (p *ACPProcess) Prompt(ctx context.Context, text string) (string, error) {
 	sessionID := p.sessionID
 	p.mu.Unlock()
 
+	tPrompt := time.Now()
 	if _, err := p.call(ctx, "session/prompt", map[string]any{
 		"sessionId": sessionID,
 		"prompt":    []map[string]any{{"type": "text", "text": text}},
@@ -196,6 +202,7 @@ func (p *ACPProcess) Prompt(ctx context.Context, text string) (string, error) {
 		}
 		return "", err
 	}
+	p.logger.Debug("ACP prompt done", "elapsed", time.Since(tPrompt).Round(time.Millisecond))
 
 	p.chunkMu.Lock()
 	out := p.chunkBuf.String()
