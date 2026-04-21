@@ -76,9 +76,9 @@ func newServerWithMode(pm *PTYManager, auth *AuthMiddleware, im *IMManager, sess
 	adminLoginHandler := adminAuth.handleLogin
 	if adminAuth != nil {
 		adminMW := adminAuth.middleware
-		s.mux.Handle("/admin/history/", adminMW(http.HandlerFunc(s.handleAdminHistoryDetail)))
-		s.mux.Handle("/admin/history", adminMW(http.HandlerFunc(s.handleAdminHistory)))
-		s.mux.Handle("/admin/analytics", adminMW(http.HandlerFunc(s.handleAdminAnalytics)))
+		s.mux.Handle("/api/admin/history/", adminMW(http.HandlerFunc(s.handleAdminHistoryDetail)))
+		s.mux.Handle("/api/admin/history", adminMW(http.HandlerFunc(s.handleAdminHistory)))
+		s.mux.Handle("/api/admin/analytics", adminMW(http.HandlerFunc(s.handleAdminAnalytics)))
 		s.mux.Handle("/ws/admin", adminMW(http.HandlerFunc(s.handleAdminWS)))
 	}
 	// GitLab OAuth endpoints (no auth required).
@@ -151,9 +151,8 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Admin paths use their own cookie auth or are public (login page, SPA).
-	if r.URL.Path == "/ws/admin" || r.URL.Path == "/admin/history" ||
-		strings.HasPrefix(r.URL.Path, "/admin/history/") ||
-		r.URL.Path == "/admin/analytics" ||
+	if r.URL.Path == "/ws/admin" ||
+		strings.HasPrefix(r.URL.Path, "/api/admin/") ||
 		r.URL.Path == "/admin/login" ||
 		r.URL.Path == "/admin" || strings.HasPrefix(r.URL.Path, "/admin/") {
 		s.mux.ServeHTTP(w, r)
@@ -620,7 +619,7 @@ func (s *Server) handleAdminHistory(w http.ResponseWriter, r *http.Request) {
 
 // handleAdminHistoryDetail handles GET /admin/history/<id>
 func (s *Server) handleAdminHistoryDetail(w http.ResponseWriter, r *http.Request) {
-	id := r.URL.Path[len("/admin/history/"):]
+	id := r.URL.Path[len("/api/admin/history/"):]
 	if id == "" || s.store == nil {
 		http.Error(w, "not found", http.StatusNotFound)
 		return
