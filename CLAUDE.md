@@ -62,7 +62,21 @@ docker exec <container> df -h /tmp
 
 ## 3. 瀏覽器自動化（chrome-cdp）
 
-使用 `chrome-cdp` skill（需先在 Chrome 開啟 remote debugging）。
+使用 `chrome-cdp` skill 搭配專用 Chrome agent instance，**不使用用戶主 Chrome**（避免跳出授權對話框）。
+
+### 啟動專用 Chrome（測試前必做）
+
+```bash
+# 啟動（已在跑就直接略過）
+tests/chrome-agent.sh
+
+# 停止
+tests/chrome-agent.sh stop
+```
+
+`CDP_PORT_FILE` 已在 `settings.local.json` 設定為 `tests/.chrome-agent/DevToolsActivePort`，`chrome-cdp` skill 會自動使用此 instance，無需額外設定。
+
+### CDP 操作
 
 ```bash
 CDP=/Users/dorowu/.claude/skills/chrome-cdp/scripts/cdp.mjs
@@ -84,71 +98,7 @@ node $CDP evalraw <target> Network.getCookies '{"urls":["<url>"]}' # 查 cookies
 
 ---
 
-## 4. Discord ACP 模式
-
-設定 `DISCORD_ACP_ENABLED=true` 以啟用 ACP stdio 模式；未設定時 Discord 維持 PTY 模式。
-
-Perch 直接管理 `claude-agent-acp` subprocess，每個 Discord channel 對應一個獨立的 subprocess，多輪對話上下文由 ACP session 保留。不需要外部 bridge service。
-
-### 安裝 claude-agent-acp
-
-Dockerfile 的 Node.js stage 中加入：
-
-```dockerfile
-RUN npm install -g @agentclientprotocol/claude-agent-acp
-```
-
-本機測試：
-
-```bash
-npm install -g @agentclientprotocol/claude-agent-acp
-```
-
-### 環境變數
-
-| 環境變數 | 說明 | 預設值 |
-|---------|------|--------|
-| `DISCORD_ACP_ENABLED` | 設為 `true` 啟用 ACP stdio 模式 | 未設 = PTY 模式 |
-| `ACP_EXECUTABLE` | ACP subprocess 執行檔路徑 | `claude-agent-acp` |
-| `ACP_RUN_TIMEOUT` | 每個 prompt 的逾時秒數 | `300`（5 分鐘）|
-
-### 模式說明
-
-**PTY 模式**（`DISCORD_ACP_ENABLED` 未設）：每個 Discord channel 持有一個獨立的 Claude Code CLI PTY 行程。
-
-**ACP 模式**（`DISCORD_ACP_ENABLED=true`）：Perch fork `claude-agent-acp` subprocess，透過 ACP JSON-RPC over stdio 通訊。每個 channel 一個 subprocess，subprocess crash 後下一則訊息自動重啟。`permissionMode: "bypassPermissions"` 已在 `new_session` 時傳入，等效於 `--dangerously-skip-permissions`。
-
-### 架構
-
-```
-Discord message
-    → discordSession.handleWithACP()
-        → ACPProcess.EnsureRunning()   (lazy start / crash recovery)
-        → ACPProcess.Prompt(text)
-            ┌─ write: {jsonrpc, id, method:"prompt", params:{sessionId, content}}
-            │         → claude-agent-acp stdin
-            │
-            │  claude-agent-acp stdout →
-            ├─ read:  agent_message_chunk notifications  (accumulated)
-            └─ read:  response {result:{status:"completed"}}
-        → return accumulated text
-    → split & send Discord reply
-```
-
-### 快速測試
-
-```bash
-# 驗證 claude-agent-acp binary 可用
-claude-agent-acp --version
-
-# 手動模擬 ACP handshake（確認 JSON-RPC 格式正確）
-echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-05-16","clientInfo":{"name":"perch","version":"1.0"}}}' \
-  | claude-agent-acp
-```
-
----
-
-## 5. 瀏覽器網路面板快速診斷
+## 4. 瀏覽器網路面板快速診斷
 
 | 現象 | 意義 |
 |------|------|

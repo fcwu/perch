@@ -1,4 +1,4 @@
-## ADDED Requirements
+## MODIFIED Requirements
 
 ### Requirement: DM allowlist via environment variable
 The system SHALL read `DISCORD_ALLOWED_USER_IDS` at startup as a comma-separated list of Discord user IDs. Only users whose ID appears in this list MAY interact with the Bot via DM.
@@ -17,4 +17,4 @@ The system SHALL read `DISCORD_ALLOWED_USER_IDS` at startup as a comma-separated
 
 #### Scenario: Unknown user sends DM
 - **WHEN** a user whose ID is not in the allowlist sends a DM
-- **THEN** the Bot does not add any reaction and does not write to PTY
+- **THEN** the Bot does not add any reaction and does not trigger an ACP run or PTY write

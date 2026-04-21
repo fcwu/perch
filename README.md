@@ -246,6 +246,9 @@ docker run -d \
 | `DISCORD_BOT_TOKEN` | — | Discord bot token（啟用 Discord 整合） |
 | `DISCORD_CHANNEL_ID` | — | **選填**。限制只監聽指定 channel ID；不設定時監聽所有頻道 |
 | `DISCORD_ALLOWED_USER_IDS` | — | **選填**。逗號分隔的 Discord 用戶 ID 白名單；**未設定時 DM 功能完全關閉** |
+| `DISCORD_ACP_ENABLED` | — | 設為 `true` 啟用 ACP stdio 模式（推薦）；未設定時使用 PTY 模式 |
+| `ACP_EXECUTABLE` | `claude-agent-acp` | ACP subprocess 執行檔路徑 |
+| `ACP_RUN_TIMEOUT` | `300` | 每個 prompt 的逾時秒數 |
 
 ### Workspace Git Sync
 
@@ -459,7 +462,23 @@ Claude 會透過內建的 `local-schedule` skill 設定排程。排程資料存�
 
 ## Discord 整合
 
-訊息從 Discord 進來，寫進 PTY，再由目前選定的 agent runtime 處理後回傳到 Discord。
+Perch 支援兩種 Discord 處理模式：**PTY 模式**（預設）和 **ACP 模式**（`DISCORD_ACP_ENABLED=true`）。
+
+### ACP 模式（推薦）
+
+設定 `DISCORD_ACP_ENABLED=true` 啟用 ACP stdio 模式。Perch 直接管理 `claude-agent-acp` subprocess，每個 Discord channel 對應一個獨立的 subprocess，多輪對話上下文由 ACP session 保留。Subprocess crash 後下一則訊息自動重啟，不需重啟 Perch。
+
+**安裝 claude-agent-acp：**
+
+```bash
+npm install -g @agentclientprotocol/claude-agent-acp
+```
+
+**PTY 模式**（`DISCORD_ACP_ENABLED` 未設）：每個 Discord channel 持有一個獨立的 Claude Code CLI PTY 行程，訊息從 Discord 進來寫進 PTY，再由 agent runtime 處理後回傳。
+
+---
+
+訊息從 Discord 進來，寫進 PTY（PTY 模式）或 ACP subprocess（ACP 模式），再由 agent runtime 處理後回傳到 Discord。
 
 ### Hook 與 Reaction 對應
 
