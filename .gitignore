@@ -11,3 +11,4 @@ docs/test-report-*.md
 tests/test-report-*.md
 .claude/scheduled_tasks.lock
 data/
+tests/.chrome-agent/
