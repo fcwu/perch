@@ -254,7 +254,7 @@ func main() {
 	// --- Workspace git auto-sync (optional) ---
 	syncCfg := LoadSyncConfig()
 	if syncCfg.Enabled {
-		if err := injectGitToken(syncCfg.GitToken, syncCfg.WorkspacePath, logger.Logger); err != nil {
+		if err := injectGitToken(syncCfg.GitToken, syncCfg.WorkspacePath, syncCfg.UID, syncCfg.GID, logger.Logger); err != nil {
 			logger.Warn("workspace_sync: credential injection error", "err", err)
 		}
 		var notifyFn NotifyFunc

@@ -170,7 +170,7 @@ func TestInjectGitToken_Empty(t *testing.T) {
 	dir := makeGitRepo(t)
 	var logBuf strings.Builder
 	logger := newTestLogger(&logBuf)
-	if err := injectGitToken("", dir, logger); err != nil {
+	if err := injectGitToken("", dir, 0, 0, logger); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(logBuf.String(), "no WORKSPACE_GIT_TOKEN") {
@@ -188,7 +188,7 @@ func TestInjectGitToken_SSHRemote(t *testing.T) {
 	}
 	var logBuf strings.Builder
 	logger := newTestLogger(&logBuf)
-	if err := injectGitToken("mytoken", dir, logger); err != nil {
+	if err := injectGitToken("mytoken", dir, 0, 0, logger); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(logBuf.String(), "ignored for SSH remote") {
@@ -210,7 +210,7 @@ func TestInjectGitToken_HTTPSDoesNotLogToken(t *testing.T) {
 	var logBuf strings.Builder
 	logger := newTestLogger(&logBuf)
 	const secret = "supersecrettoken"
-	if err := injectGitToken(secret, dir, logger); err != nil {
+	if err := injectGitToken(secret, dir, 0, 0, logger); err != nil {
 		t.Fatal(err)
 	}
 	// Token must not appear in any log output

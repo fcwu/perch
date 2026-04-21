@@ -115,6 +115,7 @@ func runGitAs(ctx context.Context, dir string, uid, gid uint32, args ...string) 
 		cmd.SysProcAttr = &syscall.SysProcAttr{
 			Credential: &syscall.Credential{Uid: uid, Gid: gid},
 		}
+		cmd.Env = append(cmd.Env, "HOME=/home/perchuser")
 	}
 	var buf bytes.Buffer
 	cmd.Stdout = &buf
@@ -125,7 +126,7 @@ func runGitAs(ctx context.Context, dir string, uid, gid uint32, args ...string) 
 
 // injectGitToken configures git credential store with the provided token.
 // Only acts on HTTPS remotes; logs each step without revealing the token value.
-func injectGitToken(token string, workspacePath string, logger *slog.Logger) error {
+func injectGitToken(token string, workspacePath string, uid, gid uint32, logger *slog.Logger) error {
 	if token == "" {
 		logger.Info("workspace_sync: no WORKSPACE_GIT_TOKEN set, skipping credential injection")
 		return nil
@@ -156,7 +157,11 @@ func injectGitToken(token string, workspacePath string, logger *slog.Logger) err
 
 	// Write to ~/.git-credentials
 	credLine := fmt.Sprintf("https://x-token-auth:%s@%s\n", token, host)
-	credPath := filepath.Join(os.Getenv("HOME"), ".git-credentials")
+	home := os.Getenv("HOME")
+	if uid > 0 {
+		home = "/home/perchuser"
+	}
+	credPath := filepath.Join(home, ".git-credentials")
 	existing, _ := os.ReadFile(credPath)
 	// Replace existing entry for this host or append
 	prefix := fmt.Sprintf("https://x-token-auth:")
@@ -180,7 +185,7 @@ func injectGitToken(token string, workspacePath string, logger *slog.Logger) err
 	logger.Info("workspace_sync: ~/.git-credentials updated", "host", host)
 
 	// Set credential.helper = store
-	if out, err := runGit(context.Background(), workspacePath, "config", "--global", "credential.helper", "store"); err != nil {
+	if out, err := runGitAs(context.Background(), workspacePath, uid, gid, "config", "--global", "credential.helper", "store"); err != nil {
 		logger.Error("workspace_sync: credential injection: set credential.helper failed", "output", out, "err", err)
 		return err
 	}
