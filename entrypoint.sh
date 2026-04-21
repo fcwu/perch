@@ -73,6 +73,6 @@ AUTH_METHOD="${AUTH_METHOD:-${AUTH_MODE:-none}}"
 export AUTH_METHOD
 
 if [ -n "$PUID" ]; then
-    exec gosu "${PUID}:${PGID}" /app/perch
+    exec gosu "${PUID}:${PGID}" env HOME=/home/perchuser /app/perch
 fi
 exec /app/perch
