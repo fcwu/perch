@@ -953,12 +953,16 @@ func (sess *discordSession) notify(s *discordgo.Session, event HookEvent, lastTe
 	return nil
 }
 
-// ListSessions returns all active Discord sessions (implements SessionProvider).
+// ListSessions returns active PTY-mode Discord sessions (implements SessionProvider).
+// ACP sessions (sess.pty == nil) are excluded — they have no web-viewable PTY stream.
 func (d *DiscordSessionManager) ListSessions() []SessionView {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	out := make([]SessionView, 0, len(d.sessions))
 	for _, sess := range d.sessions {
+		if sess.pty == nil {
+			continue
+		}
 		out = append(out, SessionView{
 			ChannelID:   sess.channelID,
 			SessionUUID: sess.sessionUUID,

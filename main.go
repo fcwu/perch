@@ -180,10 +180,7 @@ func main() {
 		}
 	}
 
-	var userSessions *UserSessionManager
-	if gitlabAuth.enabled() {
-		userSessions = newUserSessionManager(runtime, workdir, logger.Logger, store, adminHub)
-	}
+	userSessions := newUserSessionManager(runtime, workdir, logger.Logger, store, adminHub)
 	// Per-user rate limiter
 	rateLimitRPM := 10
 	if v := os.Getenv("RATE_LIMIT_RPM"); v != "" {
