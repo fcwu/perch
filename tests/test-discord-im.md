@@ -11,7 +11,9 @@
 
 **層級**：E2E-browser（含 Discord 整合）
 
-**Given** Perch 已完成 Discord Bot 設定並啟動
+**前置操作**：需先切換到 PTY 模式（參考 `tests/.env.home2.md`「模式切換」→「PTY 模式」，將 `DISCORD_ACP_ENABLED=false`），容器重啟後再執行測試，測試完畢後還原為 `DISCORD_ACP_ENABLED=true`。
+
+**Given** Perch 已完成 Discord Bot 設定並以 PTY 模式啟動（`DISCORD_ACP_ENABLED=false`）
 **When** 使用者在指定 Discord channel 傳送訊息：「你好，今天幾號？」
 **Then**
 - 訊息上出現 👀 reaction，表示 Bot 已收到
@@ -23,7 +25,9 @@
 
 **層級**：E2E-browser（含 Discord 整合）
 
-**Given** Discord bot 已連線，Claude Code Hooks 已啟用
+**前置操作**：需先切換到 PTY 模式（`DISCORD_ACP_ENABLED=false`），容器重啟後再執行測試，測試完畢後還原。
+
+**Given** Discord bot 已連線，Claude Code Hooks 已啟用，Perch 以 PTY 模式啟動（`DISCORD_ACP_ENABLED=false`）
 **When** 使用者在 Discord 傳送會觸發工具的指令，例如：「列出 /workspace 下的所有檔案」
 **Then** 訊息上的 reaction 依序變化：
 - 傳送後 → 👀 出現（已接收）
@@ -38,6 +42,8 @@
 > **適用模式**：僅 PTY 模式（`DISCORD_ACP_ENABLED` 未設或為 false）。ACP 模式下無 terminal tab，此測試**不適用**。
 
 **層級**：E2E-browser（含 Discord 整合）
+
+**前置操作**：需先切換到 PTY 模式（將 `DISCORD_ACP_ENABLED=false`，容器重啟），確認 Discord bot 已連線（觀察 log 有 `Discord bot connected` 訊息），再於 Discord 頻道傳送一則測試訊息確認 bot 正常回應，最後再執行本測試，測試完畢後還原為 `DISCORD_ACP_ENABLED=true`。
 
 **Given** Perch 以 Discord Bot 設定啟動（PTY 模式，未設 `DISCORD_ACP_ENABLED`）
 **When** 使用者在瀏覽器開啟 Perch，並點擊頁面上方 tab 列中的 Discord channel tab
@@ -55,6 +61,8 @@
 > **適用模式**：僅 PTY 模式。ACP 模式下沒有 terminal tab，此測試**不適用**。
 
 **層級**：E2E-browser（含 Discord 整合）
+
+**前置操作**：需先切換到 PTY 模式（`DISCORD_ACP_ENABLED=false`），容器重啟後在瀏覽器開啟 Perch，確認頁面 tab 列中已出現 Discord channel tab，且 tab 可正常點擊切換，再執行本測試，測試完畢後還原為 `DISCORD_ACP_ENABLED=true`。
 
 **Given** 使用者正在瀏覽器中檢視 Discord channel tab（PTY 模式）
 **When** 使用者調整瀏覽器視窗大小，然後在 Discord 傳送一個指令
@@ -134,8 +142,10 @@
 
 **層級**：E2E-browser（含 Discord 整合）
 
-**Given** Perch 以純 `DISCORD_BOT_TOKEN` 啟動
-**When** 使用者在 Discord 開啟與 Bot 的私訊（DM），直接傳送：「今天日期是？」
+**前置操作**：需以 Discord user ID `1075643998632419380` 對 bot 發送 DM。確認環境未設定 `DISCORD_CHANNEL_ID`（open-channel 模式）。
+
+**Given** Perch 以純 `DISCORD_BOT_TOKEN` 啟動（無 `DISCORD_CHANNEL_ID`），Discord user ID 為 `1075643998632419380` 的使用者開啟與 Bot 的私訊（DM）
+**When** 使用者直接傳送：「今天日期是？」
 **Then**
 - 訊息出現 👀 reaction
 - Claude 回應後，Bot 在 DM 中回覆正確日期
@@ -147,7 +157,9 @@
 
 **層級**：E2E-browser（含 Discord 整合）
 
-**Given** Perch 同時設定 `DISCORD_BOT_TOKEN` 與 `DISCORD_CHANNEL_ID`（指向特定頻道）
+**前置操作**：需加入 `DISCORD_CHANNEL_ID=1496278101166915694` 並重啟容器（參考 `tests/.env.home2.md`「模式切換」→「CHANNEL_ID backward compat 模式」），測試完畢後移除該變數並還原。
+
+**Given** Perch 同時設定 `DISCORD_BOT_TOKEN` 與 `DISCORD_CHANNEL_ID=1496278101166915694`（指向特定頻道）
 **When** 使用者在指定頻道傳送訊息（不需 @mention）：「你好」
 **Then** 訊息出現 👀 reaction，Claude 正常回應（維持原有行為）
 
@@ -223,7 +235,9 @@ LISTEN_ADDR=:18080
 
 **層級**：E2E-browser（含 Discord 整合）
 
-**Given** Perch 以 ACP 模式啟動，使用者已在 Discord channel 成功完成過一次問答（subprocess 曾正常執行）
+**前置操作**：確認 `DISCORD_ACP_ENABLED=true`（預設模式）。先在 Discord 發送一則訊息確認 ACP subprocess 已啟動，再手動 kill process 後測試。
+
+**Given** Perch 以 ACP 模式啟動（`DISCORD_ACP_ENABLED=true`），使用者已在 Discord channel 成功完成過一次問答（subprocess 曾正常執行）
 **When** 使用者（或管理員）在 server 端手動 kill 對應 channel 的 `claude-agent-acp` process，然後在 Discord 傳送新訊息：「你還在嗎？」
 **Then**
 - 訊息上出現 👀 reaction（Bot 正在處理）
@@ -237,7 +251,9 @@ LISTEN_ADDR=:18080
 
 **層級**：E2E-browser（含 Discord 整合）
 
-**Given** Perch 以 ACP 模式啟動，`ACP_RUN_TIMEOUT` 設為較短的值（如 5 秒）以便測試
+**前置操作**：需先設定短 timeout 並重啟容器（參考 `tests/.env.home2.md`「模式切換」→「ACP timeout 模式」，加入 `ACP_RUN_TIMEOUT=8`），測試完畢後移除並還原。傳送「請列出 /workspace 下所有檔案並逐一分析」等耗時指令即可觸發 timeout。
+
+**Given** Perch 以 ACP 模式啟動（`DISCORD_ACP_ENABLED=true`），`ACP_RUN_TIMEOUT=8`（8 秒 timeout）
 **When** 使用者在 Discord 傳送一個會讓 Claude 長時間處理的任務，使其超過 timeout 上限
 **Then**
 - 訊息上的 👀 reaction 在 timeout 後消失
@@ -264,7 +280,9 @@ LISTEN_ADDR=:18080
 
 **層級**：E2E-browser（含 Discord 整合）
 
-**Given** Perch 啟動時只設定 `DISCORD_BOT_TOKEN`，未設定 `DISCORD_ACP_ENABLED`（或設為 false）
+**前置操作**：需先切換到 PTY 模式（參考 `tests/.env.home2.md`「模式切換」→「PTY 模式」，將 `DISCORD_ACP_ENABLED=false`），容器重啟後再執行測試，測試完畢後還原為 `DISCORD_ACP_ENABLED=true`。
+
+**Given** Perch 啟動時設定 `DISCORD_BOT_TOKEN`，且 `DISCORD_ACP_ENABLED=false`（PTY 模式）
 **When** 使用者在 Discord channel 傳送訊息，並在瀏覽器開啟 Perch 首頁
 **Then**
 - Discord channel 訊息出現 👀 reaction，Claude 正常回應

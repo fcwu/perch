@@ -11,6 +11,8 @@
 
 **層級**：E2E-browser
 
+**前置條件**：需以 `AUTH_METHOD=gitlab`、`GITLAB_CLIENT_ID`、`GITLAB_CLIENT_SECRET`、`GITLAB_URL` 啟動本機 binary，並在瀏覽器對應的 URL 操作。
+
 **Given** GitLab OAuth 已設定，使用者尚未登入（沒有 session cookie）
 **When** 使用者在瀏覽器開啟 `/chat`
 **Then** 頁面自動導向 GitLab 授權頁面，使用者可從那裡完成登入
@@ -24,6 +26,8 @@
 ## T51 — GitLab OAuth：完整登入流程
 
 **層級**：E2E-browser（需連接 GitLab instance）
+
+**前置條件**：需真實 GitLab instance 並完成 OAuth Application 設定（需 GitLab 回調可達），此為真實 E2E 測試，無法用 mock 替代。
 
 **Given** 使用者尚未登入，GitLab OAuth Application 已建立
 **When** 使用者開啟 `/chat`，被導向 GitLab 授權頁面，在 GitLab 頁面授權後返回

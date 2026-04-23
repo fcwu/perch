@@ -7,13 +7,13 @@ description: Runs and verifies test cases from tests/test*.md. Prefers e2e testi
 
 ## 測試層級
 
-| 層級 | 說明 | GitLab 相依 |
-|------|------|-------------|
-| **Unit** | Go unit test，mock `GitLabAuthProvider` interface，無需啟動伺服器 | 無 |
-| **Integration** | `httptest` + mock OAuth server（`httptest.NewServer` 模擬 `/oauth/token`） | 無（mock） |
-| **E2E-curl** | 啟動真實 perch binary，用 curl 驗證 HTTP 行為 | 無（不需 GitLab） |
-| **E2E-browser** | 啟動真實 perch binary，瀏覽器操作驗證 | 視情況 |
-| **E2E-gitlab** | 需要連接真實 GitLab 實例完成 OAuth 流程 | **是** |
+| 層級            | 說明                                                                       | GitLab 相依       |
+| --------------- | -------------------------------------------------------------------------- | ----------------- |
+| **Unit**        | Go unit test，mock `GitLabAuthProvider` interface，無需啟動伺服器          | 無                |
+| **Integration** | `httptest` + mock OAuth server（`httptest.NewServer` 模擬 `/oauth/token`） | 無（mock）        |
+| **E2E-curl**    | 啟動真實 perch binary，用 curl 驗證 HTTP 行為                              | 無（不需 GitLab） |
+| **E2E-browser** | 啟動真實 perch binary，瀏覽器操作驗證                                      | 視情況            |
+| **E2E-gitlab**  | 需要連接真實 GitLab 實例完成 OAuth 流程                                    | **是**            |
 
 ## 執行前：收集環境資訊
 
@@ -67,42 +67,90 @@ tests/.env.<name>.md
 
 ## 步驟
 
+0. **Binary 版本預檢（規劃批次之前）**
+
+   從部署環境取得 binary 版本（啟動 log 的 `built=` 欄位，或 `/api/version`）：
+
+   ```bash
+   # 例：從 docker log 取 build time
+   ssh <host> "<docker> logs <container> 2>&1 | grep 'built='"
+   ```
+
+   再查 main 最新 commit：
+
+   ```bash
+   git log --oneline -5
+   ```
+
+   若 main 有比 deployed binary 更新的 commit：
+   1. 列出哪些 test case 因 binary 過舊而無法執行（標示為「可部署解鎖」）
+   2. **詢問是否先部署再測試**（預設：是）
+   3. 若使用者同意，依 `tests/.env.<name>.md` 的 Build & Deploy 章節執行部署，等容器就緒後繼續
+
 1. **解析目標 test cases**
 
    從 `tests/test*.md` 讀取對應 test cases。若指定功能或 change，列出候選後詢問確認。
 
    若輸入為失敗報告路徑，只取報告中狀態為 `FAIL` 的 test case ID，再從原始 `tests/test*.md` 讀取完整步驟。
 
-2. **顯示執行計畫**
+2. **分析設定需求，規劃執行批次**
+
+   掃描所有 test cases 的前置條件，依需要的容器設定（`AUTH_METHOD`、`PERCH_MODE` 等）分組：
+
+   ```
+   批次規劃：
+   - 批次 A（目前設定，不需 redeploy）：AL11, AL12, MC01 … (N 個)
+   - 批次 B（AUTH_METHOD=gitlab）：AL21, AL22 … (N 個)
+   - 批次 C（PERCH_MODE=multi）：MU01, MU02 … (N 個)
+   - 永久 SKIP（需 GitLab / 手機 / 特殊硬體）：… (N 個)
+   總計 redeploy 次數：X 次
+   ```
+
+   **原則**：只要能透過修改遠端 `.env` + `docker compose up --force-recreate` 滿足的前置條件，**就規劃成一個批次執行，不得 SKIP**。真正不可自動化的條件（需真實 GitLab OAuth、手機裝置、mTLS 憑證未配置）才列為永久 SKIP。
+
+3. **顯示執行計畫並確認**
 
    ```
    準備執行以下 test cases：
    - AL11 [E2E-curl]   — password SPA root 回傳 HTML，API endpoint 無憑證回傳 401
    - AL14 [E2E-curl]   — mtls 自動生成憑證並啟動
    共 X 個（Unit: A, Integration: B, E2E-curl: C, E2E-browser: D, E2E-gitlab: E）
-   略過（缺少環境）：E2E-gitlab × N 個
+   略過（無法自動化）：E2E-gitlab × N 個
    繼續？
    ```
 
-3. **逐一執行**
+4. **依批次執行**
 
-   對每個 test case：
+   每個批次：
 
-   a. 顯示標題：`### 執行 <ID> [<層級>] — <描述>`
+   a. 若此批次需要與當前容器設定不同的 env（`AUTH_METHOD`、`PERCH_MODE` 等），**不自行修改 `.env`**，直接將該批次所有 test cases 標記為 `⚠️ SKIP`，並在備註欄填入所需設定（e.g. `需要 AUTH_METHOD=gitlab`），讓呼叫方（qa agent）決定是否調整環境後重跑
+   b. 若批次設定與當前容器相符，逐一執行該批次的 test cases
 
-   b. 執行測試步驟（用 bash 執行 curl / go test 指令）
+   對每個 test case，**執行前先檢查並滿足前置條件**：
 
-   c. 比對實際結果與預期結果
-
-   d. 標記結果：
+   a. 讀取該 test case 的 `**前置條件**` 欄位
+   b. 逐一確認每個前置條件是否已滿足：
+   - **環境變數類**（`WORKSPACE_GIT_SYNC_ENABLED=true`、`AUTH_METHOD=gitlab` 等）：**不自行修改**，標記 SKIP 並回報所需設定
+   - **資料/狀態類**（需要特定檔案、git repo、已存在的 session 等）：先執行必要的 setup 指令建立狀態
+   - **外部服務類**（需要真實 GitLab OAuth 完整流程、無法程式觸發的第三方操作）：列為永久 SKIP
+   c. 前置條件全部滿足後，顯示標題：`### 執行 <ID> [<層級>] — <描述>`
+   d. 執行測試步驟（用 bash 執行 curl / go test 指令）
+   e. 比對實際結果與預期結果
+   f. 標記結果：
    - `✅ PASS` — 符合預期
    - `❌ FAIL` — 不符預期，附上實際輸出
-   - `⚠️ SKIP` — 無法執行（缺少環境），說明原因
+   - `⚠️ SKIP` — 需要不同容器設定或缺少外部服務，說明所需設定
    - `⚠️ MANUAL` — 需要手動操作，列出步驟讓使用者執行並回報
 
-4. **E2E-browser 測試：優先用 chrome-cdp 自動化**
+5. **E2E-browser 測試：優先用 chrome-cdp 自動化**
 
    若 test case 標記為 `E2E-browser`，**優先使用 chrome-cdp 自動執行**，不要標記為 MANUAL：
+
+   **啟動 Chrome agent（每次測試前必做）**：
+
+   ```bash
+   tests/chrome-agent.sh   # 已在跑則無害，會直接略過
+   ```
 
    **工具路徑**：`node /Users/dorowu/.agents/skills/chrome-cdp/scripts/cdp.mjs`
 
@@ -140,10 +188,10 @@ tests/.env.<name>.md
    - chrome-cdp 連不上（Chrome 未開啟 remote debugging）
    - 使用者明確要求手動執行
 
-5. **彙整報告（console）**
+6. **彙整報告（console）**
 
    ```
-   ## 測試結果摘要
+   ## 測試結果
 
    | Test | 層級 | 名稱 | 結果 | 備註 |
    |------|------|------|------|------|
@@ -153,20 +201,28 @@ tests/.env.<name>.md
    統計：X PASS / Y FAIL / Z SKIP / W MANUAL
    ```
 
-6. **輸出失敗報告**
+7. **輸出原始記錄**
 
-   若有任何 FAIL，將報告寫入 `tests/test-report-<YYYY-MM-DD>.md`：
+   無論有無 FAIL，將完整執行記錄寫入 `tests/test-report-<YYYY-MM-DD-HHmm>.md`：
 
    ````markdown
-   # 測試失敗報告 — <YYYY-MM-DD>
+   # 測試報告 — <YYYY-MM-DD HH:mm>
 
    **測試環境**：<URL、AUTH_METHOD、binary 版本>
    **執行範圍**：<test 檔案、test case 範圍>
-   **統計**：X PASS / Y FAIL / Z SKIP / W MANUAL
 
    ---
 
-   ## 失敗項目
+   ## 結果明細
+
+   | Test | 層級     | 名稱 | 結果    | 備註   |
+   | ---- | -------- | ---- | ------- | ------ |
+   | AL11 | E2E-curl | …    | ✅ PASS |        |
+   | AL14 | E2E-curl | …    | ❌ FAIL | 見下方 |
+
+   ---
+
+   ## 失敗 / SKIP 詳細
 
    ### <ID> — <描述>
 
@@ -174,6 +230,7 @@ tests/.env.<name>.md
    **測試檔**：`tests/test-<name>.md`
 
    **重現步驟**：
+
    ```bash
    # 完整可重現的指令，含環境變數
    AUTH_METHOD=password PERCH_PASSWORD=secret ./perch &
@@ -189,12 +246,37 @@ tests/.env.<name>.md
    ````
 
    報告用途：
+   - 作為 QA agent 彙整最終報告的原始資料
    - 工程師依照「重現步驟」可直接重現問題
    - fix 後，可將此報告路徑作為輸入再次執行 test-verifier，只重跑 FAIL 項目
 
-7. **詢問後續動作**
-   - 若有 FAIL → 提示可將報告路徑傳給 test-verifier 重跑（`tests/test-report-<date>.md`）
-   - 若全 PASS → 詢問是否仍要輸出通過報告
+8. **詢問後續動作**
+   - 若有 FAIL → 提示可將報告路徑傳給 test-verifier 重跑（`tests/test-report-<YYYY-MM-DD-HHmm>.md`）
+   - 若由 QA agent 呼叫 → 不需詢問，直接回傳報告路徑給 QA
+
+## 前置條件的處理
+
+每個 test case 若有 `**前置條件**` 欄位，test-verifier 應：
+
+1. **讀懂前置條件**，判斷當前環境是否已滿足
+2. **嘗試自行滿足**，不要直接 SKIP——能做到的就做
+3. **測試完畢後還原**，避免影響後續測試
+
+如何滿足常見類型（以下為通用原則，不限特定 test case）：
+
+- **需要修改容器設定**（例：切換 auth 模式、調整某個 env var）：**不自行修改**，標記 SKIP 並在備註填入所需設定（e.g. `需要 AUTH_METHOD=password`），由 qa agent 透過 deployer 調整後重跑
+- **需要用本機 binary 測試**（例：測試特定啟動參數組合）：`go build -o /tmp/perch_test .`，以指定 env vars 啟動並監聽非衝突 port，測完 kill process
+- **需要多個瀏覽器分頁**（例：測試多連線並發行為）：用 CDP `nav` 開新分頁，以不同 target ID 操作
+
+在以下情況才標記為永久 SKIP（qa 也無法解決），並在報告中說明原因：
+
+- 需要真實 GitLab instance（無法 mock）
+- 需要 mTLS 憑證（環境未配置）
+
+**以下是合法的 SKIP 理由，回報給呼叫方處理**：
+
+- 需要切換模式（`DISCORD_ACP_ENABLED`、`AUTH_METHOD` 等）→ 標記 SKIP，備註所需設定，由 qa agent 命令 deployer 調整後重跑
+- 需要重啟容器以套用不同設定 → 同上，不自行 recreate
 
 ## 注意事項
 

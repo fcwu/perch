@@ -36,6 +36,8 @@
 
 **層級**：E2E-curl（mock GitLab URL 即可，不需真實 OAuth）
 
+**前置條件**：需以 `PERCH_MODE=multi` 及正確的 GitLab 設定（`GITLAB_CLIENT_ID`、`GITLAB_CLIENT_SECRET`、`GITLAB_URL`）啟動本機 binary（`go build` 後執行），mock GitLab URL 即可，不需真實 OAuth。
+
 **Given** Perch 以 `PERCH_MODE=multi` 及正確的 GitLab 設定啟動
 **When** Perch 啟動並開始服務
 **Then** 伺服器以 multi-user 模式運作
@@ -65,6 +67,8 @@
 ### AL05 — 頁面在 multi-user 模式下不強制驗證即可載入
 
 **層級**：E2E-browser（無需 GitLab）
+
+**前置條件**：需以 `PERCH_MODE=multi` 啟動本機 binary，無需真實 GitLab，mock URL 即可。
 
 **Given** Perch 以 multi-user 模式啟動，使用者尚未登入
 **When** 使用者在瀏覽器開啟 `/chat` 或 `/admin`
@@ -130,6 +134,8 @@
 
 **層級**：E2E-browser（無需 GitLab）
 
+**前置操作**：需先切換到 password 模式（參考 `tests/.env.home2.md`「模式切換」→「Password 模式」），密碼為 `testpass123`，測試完畢後還原。
+
 **Given** Perch 以 `AUTH_METHOD=password` 啟動
 **When** 未登入的使用者開啟 `/`
 **Then** 頁面正常載入，前端顯示登入畫面（伺服器回傳 HTML，非錯誤頁面）
@@ -142,6 +148,8 @@
 ### AL12 — AUTH_METHOD=password 正確憑證發放 session cookie
 
 **層級**：E2E-curl（無需 GitLab）
+
+**前置操作**：需先切換到 password 模式（參考 `tests/.env.home2.md`「模式切換」→「Password 模式」），密碼為 `testpass123`，測試完畢後還原。
 
 **Given** Perch 以 `AUTH_METHOD=password` 啟動
 **When** 使用者以正確的帳號密碼登入
@@ -172,6 +180,8 @@
 ### AL15 — AUTH_METHOD=gitlab（single-user）未登入時顯示 GitLab 登入按鈕
 
 **層級**：E2E-browser（無需真實 GitLab）
+
+**前置條件**：需以 `AUTH_METHOD=gitlab`、`GITLAB_CLIENT_ID`、`GITLAB_CLIENT_SECRET`、`GITLAB_URL` 啟動本機 binary（mock GitLab URL 即可，不需真實 OAuth，只驗證前端是否渲染登入按鈕）。
 
 **Given** Perch 以 `AUTH_METHOD=gitlab` 啟動，使用者尚未登入
 **When** 使用者開啟 `/`
@@ -265,7 +275,9 @@
 
 **層級**：E2E-browser（可用 password auth，無需 GitLab）
 
-**Given** 使用者已登入並持有 session cookie
+**前置操作**：需先切換到 password 模式（參考 `tests/.env.home2.md`「模式切換」→「Password 模式」），以 `testpass123` 登入取得 session cookie 後執行，測試完畢後還原。
+
+**Given** 使用者已以 password 模式登入並持有 session cookie
 **When** 使用者執行登出
 **Then** session cookie 被清除，使用者被導向首頁，需重新登入才能存取
 
@@ -287,6 +299,8 @@
 
 **層級**：E2E-browser（無需真實 GitLab）
 
+**前置條件**：需以 `PERCH_MODE=multi`、mock GitLab URL 啟動本機 binary，無需真實 GitLab OAuth。
+
 **Given** Perch 以 multi-user 模式啟動，使用者尚未登入
 **When** 使用者在瀏覽器開啟 `/chat`
 **Then** 頁面顯示置中的登入畫面，含「Login with GitLab」按鈕；瀏覽器未被強制跳轉（頁面以正常載入的方式呈現）
@@ -297,7 +311,9 @@
 
 **層級**：E2E-browser（可用 password auth，無需 GitLab）
 
-**Given** 使用者已完成登入
+**前置操作**：需先切換到 password 模式（參考 `tests/.env.home2.md`「模式切換」→「Password 模式」），以 `testpass123` 登入後執行，測試完畢後還原。
+
+**Given** 使用者已以 password 模式完成登入
 **When** 使用者查看頁面
 **Then** 頁面上可見登出按鈕
 
@@ -307,7 +323,9 @@
 
 **層級**：E2E-browser（可用 password auth，無需 GitLab）
 
-**Given** 使用者已登入並看到登出按鈕
+**前置操作**：需先切換到 password 模式（參考 `tests/.env.home2.md`「模式切換」→「Password 模式」），以 `testpass123` 登入後執行，測試完畢後還原。
+
+**Given** 使用者已以 password 模式登入並看到登出按鈕
 **When** 使用者點擊登出按鈕
 **Then** session 被清除，使用者被導回首頁，登出按鈕消失
 
@@ -327,6 +345,8 @@
 
 **層級**：E2E-browser（偽造 session cookie，無需 GitLab OAuth）
 
+**前置條件**：需以 `PERCH_MODE=multi` 啟動本機 binary，並偽造一個 admin role 的 session cookie（無需真實 GitLab OAuth，只需讓 perch 接受偽造 session）。
+
 **Given** Perch 以 multi-user 模式啟動，使用者持有 admin role 的 session cookie
 **When** 使用者開啟 `/admin`
 **Then** 頁面顯示 admin 管理介面，不出現「Login with GitLab」按鈕
@@ -336,6 +356,8 @@
 ### AL31 — Multi-user 一般使用者在 /chat 看到聊天 UI
 
 **層級**：E2E-browser（偽造 session cookie，無需 GitLab OAuth）
+
+**前置條件**：需以 `PERCH_MODE=multi`、`GITLAB_ALLOWED_IDS=*` 啟動本機 binary，並偽造一般 user role session cookie。
 
 **Given** Perch 以 multi-user 模式啟動（`GITLAB_ALLOWED_IDS=*`），使用者持有一般 user role 的 session cookie
 **When** 使用者開啟 `/chat`

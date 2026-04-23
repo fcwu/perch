@@ -10,7 +10,9 @@
 
 **層級**：E2E-curl
 
-**Given** Perch 以 password 模式啟動
+**前置操作**：需先切換到 password 模式（參考 `tests/.env.home2.md`「模式切換」→「Password 模式」），容器重啟後再執行測試，測試完畢後還原。密碼為 `testpass123`。
+
+**Given** Perch 以 password 模式啟動（`AUTH_MODE=password`，`AUTH_PASSWORD=testpass123`）
 **When** 使用者在短時間內對登入端點發送超過 5 次錯誤的密碼嘗試
 **Then** 前 5 次收到「密碼錯誤」或「找不到」的正常錯誤回應；第 6 次起收到「請求過多」的限速回應（HTTP 429）
 
@@ -20,7 +22,9 @@
 
 **層級**：E2E-curl
 
-**Given** Perch 以 `AUTH_MODE=password` 及 `AUTH_PASSWORD=testpass` 啟動
+**前置操作**：需先切換到 password 模式（參考 `tests/.env.home2.md`「模式切換」→「Password 模式」），容器重啟後再執行測試，測試完畢後還原。密碼為 `testpass123`。
+
+**Given** Perch 以 `AUTH_MODE=password` 及 `AUTH_PASSWORD=testpass123` 啟動
 **When** 使用者以正確密碼登入
 **Then** 登入成功，伺服器發放 session cookie，使用者可繼續存取頁面
 
@@ -34,6 +38,8 @@
 ## T12 — mTLS Bootstrap 流程
 
 **層級**：E2E-curl
+
+**前置操作**：需先切換到 mTLS 模式（參考 `tests/.env.home2.md`「模式切換」→「mTLS 模式」，將 `AUTH_METHOD=mtls`），容器重啟後再執行測試，測試完畢後還原。注意：此模式有已知 Bug（generateClientP12 key mismatch），建議在 Bug 修復後執行。
 
 **Given** Perch 以 `AUTH_MODE=mtls` 啟動
 **When** 使用者首次造訪 `/bootstrap` 端點（不帶任何用戶端憑證）
