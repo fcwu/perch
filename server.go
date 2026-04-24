@@ -124,7 +124,8 @@ func newServerWithMode(pm *PTYManager, auth *AuthMiddleware, im *IMManager, sess
 	if err == nil {
 		fileServer := http.FileServer(http.FS(distFS))
 		// Serve index.html for SPA routes that don't correspond to static files.
-		spaHandler := &spaFileServer{fs: distFS, fileServer: fileServer}
+		// / redirects to /chat; other paths fall through to SPA.
+		spaHandler := &spaFileServer{fs: distFS, fileServer: fileServer, redirectRoot: true}
 		s.mux.Handle("/", spaHandler)
 		// /admin/login GET → SPA, POST → login handler.
 		s.mux.HandleFunc("/admin/login", func(w http.ResponseWriter, r *http.Request) {
@@ -147,6 +148,30 @@ func newServerWithMode(pm *PTYManager, auth *AuthMiddleware, im *IMManager, sess
 			s.mux.HandleFunc("/chat", func(w http.ResponseWriter, r *http.Request) {
 				serveIndexHTML(w, r, distFS)
 			})
+		}
+		// /terminal: admin-only route serving the SPA.
+		// Admin check: cookie-based admin (adminAuth.middleware) in single-user mode,
+		// or GitLab role-based in multi-user mode.
+		terminalHandler := func(w http.ResponseWriter, r *http.Request) {
+			serveIndexHTML(w, r, distFS)
+		}
+		if mode == ModeMulti && gitlabAuth != nil && gitlabAuth.enabled() {
+			// Multi-user GitLab: wrap with role check.
+			s.mux.Handle("/terminal", gitlabAuth.middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				// Check if user has admin role.
+				role, _ := r.Context().Value(ctxRole).(string)
+				if role != "admin" {
+					http.Error(w, "forbidden", http.StatusForbidden)
+					return
+				}
+				terminalHandler(w, r)
+			})))
+		} else if adminAuth != nil {
+			// Single-user: wrap with adminAuth.middleware.
+			s.mux.Handle("/terminal", adminAuth.middleware(http.HandlerFunc(terminalHandler)))
+		} else {
+			// No admin auth configured: allow everyone (shouldn't happen in production).
+			s.mux.HandleFunc("/terminal", terminalHandler)
 		}
 	}
 	return s
@@ -349,13 +374,19 @@ func serveIndexHTML(w http.ResponseWriter, _ *http.Request, distFS fs.FS) {
 
 // spaFileServer wraps a standard file server and falls back to index.html for unknown paths.
 type spaFileServer struct {
-	fs         fs.FS
-	fileServer http.Handler
+	fs            fs.FS
+	fileServer    http.Handler
+	redirectRoot  bool // if true, GET / redirects to /chat
 }
 
 func (s *spaFileServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	path := r.URL.Path
 	if path == "" || path == "/" {
+		// Redirect GET / to /chat if redirectRoot is enabled.
+		if s.redirectRoot && r.Method == http.MethodGet {
+			http.Redirect(w, r, "/chat", http.StatusFound)
+			return
+		}
 		s.fileServer.ServeHTTP(w, r)
 		return
 	}

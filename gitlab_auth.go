@@ -333,6 +333,7 @@ type contextKey string
 const (
 	ctxUserID   contextKey = "userID"
 	ctxUsername contextKey = "username"
+	ctxRole     contextKey = "role"
 )
 
 // middleware protects routes requiring a valid GitLab session cookie.
@@ -352,6 +353,7 @@ func (g *gitLabAuth) middleware(next http.Handler) http.Handler {
 		ctx := r.Context()
 		ctx = context.WithValue(ctx, ctxUserID, claims.UserID)
 		ctx = context.WithValue(ctx, ctxUsername, claims.Username)
+		ctx = context.WithValue(ctx, ctxRole, claims.Role)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
