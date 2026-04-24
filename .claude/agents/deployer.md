@@ -54,17 +54,18 @@ git fetch origin
 git log --oneline origin/main -5   # 確認最新 commits
 ```
 
-### 2. 確認 & 顯示執行計畫
+### 2. 顯示執行計畫
 
 ```
 準備部署：
   來源：local HEAD / origin/main (<commit hash>) / image tag
   目標：<env>（<container>@<host>）
   步驟：build → save | pipe → remote load → compose up
-繼續？
 ```
 
-**等待用戶確認後才執行。**
+若呼叫者傳入 `autonomous: true`，**直接執行，不等用戶確認**。
+
+否則等待用戶確認後才執行。
 
 ### 3. Build image
 
@@ -192,7 +193,7 @@ ssh admin@<IP> "rm -f ${REMOTE_TAR} && echo 'cleanup OK'"
 - **docker binary 路徑**：QNAP 的 docker 不在標準路徑，從環境檔取得
 - **SSH 主機優先用 IP**：FQDN 的 port 22 有時被防火牆擋
 - **不修改 source code**：只做 build & deploy，不改程式
-- **確認再執行**：顯示計畫後等用戶確認，才開始傳輸
+- **確認再執行**：直接呼叫時顯示計畫後等用戶確認；`autonomous: true` 時直接執行
 
 ## 錯誤處理
 

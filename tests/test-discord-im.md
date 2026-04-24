@@ -7,11 +7,25 @@
 
 ---
 
+## Discord 頻道對照表
+
+| 頻道 | 類型 | Channel ID |
+|------|------|-----------|
+| #general | public | `1496275503961608287` |
+| #myprivate | private | `1496278101166915694` |
+| #myprivate2 | private（設定頻道） | `1496644257149353994` |
+| DM with perch-dev | DM | `1492891645413167194` |
+| Server ID | — | `1496275499482091611` |
+
+> **傳訊自動化**：所有需要「使用者在 Discord 傳訊」的步驟，均可用 `chrome-cdp` 導航到對應 channel URL，點擊輸入框 `[data-slate-editor]`，`type` 訊息後送出 Enter key event，不需真人操作。
+
+---
+
 ## T18 — Discord 訊息寫入 PTY
 
 **層級**：E2E-browser（含 Discord 整合）
 
-**前置操作**：需先切換到 PTY 模式（參考 `tests/.env.home2.md`「模式切換」→「PTY 模式」，將 `DISCORD_ACP_ENABLED=false`），容器重啟後再執行測試，測試完畢後還原為 `DISCORD_ACP_ENABLED=true`。
+**前置操作**：需先切換到 PTY 模式（將 `DISCORD_ACP_ENABLED=false`），容器重啟後再執行測試，測試完畢後還原為 `DISCORD_ACP_ENABLED=true`。容器重啟需使用兩個 compose 檔：`docker compose -f docker-compose.yml -f docker-compose.local.yml`。
 
 **Given** Perch 已完成 Discord Bot 設定並以 PTY 模式啟動（`DISCORD_ACP_ENABLED=false`）
 **When** 使用者在指定 Discord channel 傳送訊息：「你好，今天幾號？」
@@ -117,7 +131,9 @@
 
 **層級**：E2E-browser（含 Discord 整合）
 
-**Given** Perch 以純 `DISCORD_BOT_TOKEN`（不帶 `DISCORD_CHANNEL_ID`）啟動，測試頻道為 public
+**前置操作**：移除 `DISCORD_CHANNEL_ID` 並重啟容器（open-channel 模式）。
+
+**Given** Perch 以純 `DISCORD_BOT_TOKEN`（不帶 `DISCORD_CHANNEL_ID`）啟動，測試頻道為 public（#general）
 **When** 使用者在 public 頻道直接傳送訊息（不 @mention Bot）：「你好」
 **Then** 30 秒內無任何 reaction 或回應，Bot 靜默忽略
 
@@ -130,7 +146,9 @@
 
 **層級**：E2E-browser（含 Discord 整合）
 
-**Given** Perch 以純 `DISCORD_BOT_TOKEN` 啟動，測試頻道為 private（@everyone 無法查看但 Bot 可以）
+**前置操作**：移除 `DISCORD_CHANNEL_ID` 並重啟容器（open-channel 模式）。
+
+**Given** Perch 以純 `DISCORD_BOT_TOKEN` 啟動，測試頻道為 private（#myprivate）
 **When** 使用者在 private 頻道直接傳送訊息（不 @mention）：「你是誰？」
 **Then**
 - 訊息出現 👀 reaction
@@ -142,7 +160,7 @@
 
 **層級**：E2E-browser（含 Discord 整合）
 
-**前置操作**：需以 Discord user ID `1075643998632419380` 對 bot 發送 DM。確認環境未設定 `DISCORD_CHANNEL_ID`（open-channel 模式）。
+**前置操作**：移除 `DISCORD_CHANNEL_ID` 並重啟容器（open-channel 模式）。
 
 **Given** Perch 以純 `DISCORD_BOT_TOKEN` 啟動（無 `DISCORD_CHANNEL_ID`），Discord user ID 為 `1075643998632419380` 的使用者開啟與 Bot 的私訊（DM）
 **When** 使用者直接傳送：「今天日期是？」
@@ -157,13 +175,13 @@
 
 **層級**：E2E-browser（含 Discord 整合）
 
-**前置操作**：需加入 `DISCORD_CHANNEL_ID=1496278101166915694` 並重啟容器（參考 `tests/.env.home2.md`「模式切換」→「CHANNEL_ID backward compat 模式」），測試完畢後移除該變數並還原。
+**前置操作**：設定 `DISCORD_CHANNEL_ID=1496278101166915694`（#myprivate）並重啟容器，測試完畢後還原為 `DISCORD_CHANNEL_ID=1496644257149353994`。
 
-**Given** Perch 同時設定 `DISCORD_BOT_TOKEN` 與 `DISCORD_CHANNEL_ID=1496278101166915694`（指向特定頻道）
-**When** 使用者在指定頻道傳送訊息（不需 @mention）：「你好」
+**Given** Perch 同時設定 `DISCORD_BOT_TOKEN` 與 `DISCORD_CHANNEL_ID=1496278101166915694`（指向 #myprivate）
+**When** 使用者在指定頻道（#myprivate）傳送訊息（不需 @mention）：「你好」
 **Then** 訊息出現 👀 reaction，Claude 正常回應（維持原有行為）
 
-**When** 使用者在其他頻道傳送相同訊息
+**When** 使用者在其他頻道（#myprivate2）傳送相同訊息
 **Then** 無任何 reaction 或回應（channel filter 生效）
 
 ---
@@ -172,7 +190,9 @@
 
 **層級**：E2E-browser（含 Discord 整合）
 
-**Given** Perch 以純 `DISCORD_BOT_TOKEN` 啟動（無 channel filter），測試頻道為 public
+**前置操作**：移除 `DISCORD_CHANNEL_ID` 並重啟容器（open-channel 模式）。
+
+**Given** Perch 以純 `DISCORD_BOT_TOKEN` 啟動（無 channel filter），測試頻道為 public（#general）
 **When** 使用者傳送：`@Perch 列出 /workspace 下的檔案`
 **Then**
 - Claude 收到的問題只有「列出 /workspace 下的檔案」，沒有 `<@BOT_ID>` 前綴
@@ -251,7 +271,7 @@ LISTEN_ADDR=:18080
 
 **層級**：E2E-browser（含 Discord 整合）
 
-**前置操作**：需先設定短 timeout 並重啟容器（參考 `tests/.env.home2.md`「模式切換」→「ACP timeout 模式」，加入 `ACP_RUN_TIMEOUT=8`），測試完畢後移除並還原。傳送「請列出 /workspace 下所有檔案並逐一分析」等耗時指令即可觸發 timeout。
+**前置操作**：需先設定短 timeout 並重啟容器（加入 `ACP_RUN_TIMEOUT=8`），測試完畢後還原為 `ACP_RUN_TIMEOUT=120`。
 
 **Given** Perch 以 ACP 模式啟動（`DISCORD_ACP_ENABLED=true`），`ACP_RUN_TIMEOUT=8`（8 秒 timeout）
 **When** 使用者在 Discord 傳送一個會讓 Claude 長時間處理的任務，使其超過 timeout 上限
@@ -267,7 +287,7 @@ LISTEN_ADDR=:18080
 
 **層級**：E2E-browser（含 Discord 整合）
 
-**Given** Perch 以 ACP 模式啟動，已有兩個不同的 Discord channel（channel-A、channel-B）各自傳送過訊息
+**Given** Perch 以 ACP 模式啟動，已有兩個不同的 Discord channel（channel-A #myprivate2、channel-B #myprivate）各自傳送過訊息
 **When** 使用者在 channel-A 詢問：「你記得我剛才說什麼嗎？」（前一則訊息是「apple」），同時在 channel-B 詢問同樣問題（前一則訊息是「banana」）
 **Then**
 - channel-A 的 Claude 回應提及「apple」，反映該 channel 的對話脈絡
@@ -280,7 +300,7 @@ LISTEN_ADDR=:18080
 
 **層級**：E2E-browser（含 Discord 整合）
 
-**前置操作**：需先切換到 PTY 模式（參考 `tests/.env.home2.md`「模式切換」→「PTY 模式」，將 `DISCORD_ACP_ENABLED=false`），容器重啟後再執行測試，測試完畢後還原為 `DISCORD_ACP_ENABLED=true`。
+**前置操作**：需先切換到 PTY 模式（將 `DISCORD_ACP_ENABLED=false`），容器重啟後再執行測試，測試完畢後還原為 `DISCORD_ACP_ENABLED=true`。
 
 **Given** Perch 啟動時設定 `DISCORD_BOT_TOKEN`，且 `DISCORD_ACP_ENABLED=false`（PTY 模式）
 **When** 使用者在 Discord channel 傳送訊息，並在瀏覽器開啟 Perch 首頁

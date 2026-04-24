@@ -60,10 +60,13 @@ tests/.env.<name>.md
 
 可以是：
 
+- **單一測試檔**（e.g. `tests/test-auth.md`）→ 只執行該檔內的 test cases（qa agent 逐檔呼叫時使用）
 - Test case 範圍（e.g. `T01~T10`、`T55`、`T01 T03 T07`）
 - 功能描述（e.g. `測試 multi-turn chat`）→ 自動找對應 test cases
 - OpenSpec change 名稱 → 掃描 test cases 找相關項目
 - 失敗報告路徑（e.g. `tests/test-report-2026-04-19.md`）→ 只重新執行 FAIL 的項目
+
+呼叫者可額外指定 **報告路徑**（e.g. `tests/test-report-2026-04-23-1200-test-auth.md`）；若未指定，依下方規則自動決定。
 
 ## 步驟
 
@@ -108,15 +111,16 @@ tests/.env.<name>.md
 
    **原則**：只要能透過修改遠端 `.env` + `docker compose up --force-recreate` 滿足的前置條件，**就規劃成一個批次執行，不得 SKIP**。真正不可自動化的條件（需真實 GitLab OAuth、手機裝置、mTLS 憑證未配置）才列為永久 SKIP。
 
-3. **顯示執行計畫並確認**
+3. **顯示執行計畫後直接執行**
+
+   列印計畫後立即開始，不等確認：
 
    ```
-   準備執行以下 test cases：
+   執行計畫：
    - AL11 [E2E-curl]   — password SPA root 回傳 HTML，API endpoint 無憑證回傳 401
    - AL14 [E2E-curl]   — mtls 自動生成憑證並啟動
    共 X 個（Unit: A, Integration: B, E2E-curl: C, E2E-browser: D, E2E-gitlab: E）
    略過（無法自動化）：E2E-gitlab × N 個
-   繼續？
    ```
 
 4. **依批次執行**
@@ -133,9 +137,9 @@ tests/.env.<name>.md
    - **環境變數類**（`WORKSPACE_GIT_SYNC_ENABLED=true`、`AUTH_METHOD=gitlab` 等）：**不自行修改**，標記 SKIP 並回報所需設定
    - **資料/狀態類**（需要特定檔案、git repo、已存在的 session 等）：先執行必要的 setup 指令建立狀態
    - **外部服務類**（需要真實 GitLab OAuth 完整流程、無法程式觸發的第三方操作）：列為永久 SKIP
-   c. 前置條件全部滿足後，顯示標題：`### 執行 <ID> [<層級>] — <描述>`
+   c. 前置條件全部滿足後，記錄開始時間（`date +%H:%M:%S`），顯示標題：`### 執行 <ID> [<層級>] — <描述>`
    d. 執行測試步驟（用 bash 執行 curl / go test 指令）
-   e. 比對實際結果與預期結果
+   e. 比對實際結果與預期結果；記錄結束時間，計算耗時（秒，保留一位小數）
    f. 標記結果：
    - `✅ PASS` — 符合預期
    - `❌ FAIL` — 不符預期，附上實際輸出
@@ -144,7 +148,7 @@ tests/.env.<name>.md
 
 5. **E2E-browser 測試：優先用 chrome-cdp 自動化**
 
-   若 test case 標記為 `E2E-browser`，**優先使用 chrome-cdp 自動執行**，不要標記為 MANUAL：
+   若 test case 標記為 `E2E-browser`，**必須先嘗試 CDP 自動執行，禁止直接標 MANUAL**。
 
    **啟動 Chrome agent（每次測試前必做）**：
 
@@ -180,30 +184,82 @@ tests/.env.<name>.md
    node .../cdp.mjs snap <target>
    ```
 
+   **Terminal 互動（Claude Code）**：
+
+   browser terminal 的 `<textarea>` 可用 CDP 完全自動化，「Claude Code 需就緒」不是 MANUAL 的理由。標準步驟：
+
+   ```bash
+   # 1. 導航到 perch URL，等 terminal 載入
+   node .../cdp.mjs nav <target> <url>
+
+   # 2. 等待 Claude Code 歡迎訊息出現（poll accessibility tree）
+   node .../cdp.mjs snap <target>   # 確認有 textarea 且 Claude Code 已啟動
+
+   # 3. 輸入指令（nativeInputValueSetter）
+   node .../cdp.mjs eval <target> "
+     const ta = document.querySelector('textarea');
+     const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set;
+     setter.call(ta, '/schedule list');
+     ta.dispatchEvent(new Event('input', { bubbles: true }));
+   "
+
+   # 4. 送出（Enter key）
+   node .../cdp.mjs eval <target> "
+     const ta = document.querySelector('textarea');
+     ta.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', keyCode: 13, bubbles: true }));
+   "
+
+   # 5. 等待輸出（poll snapshot，直到 terminal 出現預期文字）
+   # 重複執行 snap，比對是否有預期關鍵字出現
+   node .../cdp.mjs snap <target>
+
+   # 6. 截圖存證
+   node .../cdp.mjs shot <target> /tmp/test-<name>.png
+   ```
+
+   **多分頁並發測試**（T14 等）：
+
+   ```bash
+   # 開兩個 tab
+   node .../cdp.mjs nav <target1> <url>
+   node .../cdp.mjs eval <target1> "window.open('<url>')"  # 或直接用第二個現有 tab
+   # 各自操作，用 snap/shot 比對輸出
+   ```
+
    **前置條件**：
    - 若測試需要已登入狀態，先確認 `/api/auth/status` 回傳 `authenticated: true`
-   - 若未登入，詢問使用者如何取得 session（手動登入或提供憑證），**不要自行 debug auth 流程**
+   - 若未登入且 AUTH_METHOD=none，直接導航即可；若需 password/gitlab，標記 SKIP 並回報所需設定
 
-   **只有在以下情況才標記為 MANUAL**：
-   - chrome-cdp 連不上（Chrome 未開啟 remote debugging）
-   - 使用者明確要求手動執行
+   **MANUAL 的唯一合法理由**（以下以外一律嘗試 CDP）：
+   - **Discord 類（session 不可用）**：先用 chrome-cdp 確認 Chrome agent 是否有 Discord 登入 session；有的話，直接用 chrome-cdp 開 Discord web UI，以登入用戶身份傳訊並觀察 Bot reaction 與 reply，不得直接標 MANUAL
+   - **手機裝置**：需要手機瀏覽器才能驗證的行為（T08b、T08c）
+   - **chrome-cdp 連不上**：Chrome 未開啟 remote debugging 且無法啟動
 
 6. **彙整報告（console）**
 
    ```
    ## 測試結果
 
-   | Test | 層級 | 名稱 | 結果 | 備註 |
-   |------|------|------|------|------|
-   | AL11 | E2E-curl | password SPA root … | ✅ PASS | |
-   | AL14 | E2E-curl | mtls 自動生成憑證 | ❌ FAIL | 見報告 |
+   | Test | 層級 | 名稱 | 結果 | 開始時間 | 耗時 | 備註 |
+   |------|------|------|------|----------|------|------|
+   | AL11 | E2E-curl | password SPA root … | ✅ PASS | 16:42:01 | 1.2s | |
+   | AL14 | E2E-curl | mtls 自動生成憑證 | ❌ FAIL | 16:42:03 | 0.8s | 見報告 |
 
    統計：X PASS / Y FAIL / Z SKIP / W MANUAL
    ```
 
 7. **輸出原始記錄**
 
-   無論有無 FAIL，將完整執行記錄寫入 `tests/test-report-<YYYY-MM-DD-HHmm>.md`：
+   **重要：在每個 test case 執行完畢後立即將結果 append 到報告檔**，不要等到全部跑完才寫。這樣即使後續因 context 限制中斷，已完成的結果不會遺失。
+
+   **報告路徑決定規則**（按優先序）：
+   1. 呼叫者明確指定路徑 → 直接使用
+   2. 輸入為單一測試檔（e.g. `tests/test-auth.md`）→ `tests/test-report-<YYYY-MM-DD-HHmm>-test-auth.md`（取檔名去掉 `.md`）
+   3. 其他情況 → `tests/test-report-<YYYY-MM-DD-HHmm>.md`
+
+   報告路徑在執行第一個 test case 之前就確定並建立（含 header），之後每跑完一筆就 append 一列到結果表格。
+
+   無論有無 FAIL，最終完整報告寫入上述路徑：
 
    ````markdown
    # 測試報告 — <YYYY-MM-DD HH:mm>
@@ -215,10 +271,10 @@ tests/.env.<name>.md
 
    ## 結果明細
 
-   | Test | 層級     | 名稱 | 結果    | 備註   |
-   | ---- | -------- | ---- | ------- | ------ |
-   | AL11 | E2E-curl | …    | ✅ PASS |        |
-   | AL14 | E2E-curl | …    | ❌ FAIL | 見下方 |
+   | Test | 層級     | 名稱 | 結果    | 開始時間 | 耗時  | 備註   |
+   | ---- | -------- | ---- | ------- | -------- | ----- | ------ |
+   | AL11 | E2E-curl | …    | ✅ PASS | 16:42:01 | 1.2s  |        |
+   | AL14 | E2E-curl | …    | ❌ FAIL | 16:42:03 | 0.8s  | 見下方 |
 
    ---
 
@@ -284,5 +340,5 @@ tests/.env.<name>.md
 - **不修改 source code**：只做測試，不修 bug
 - **保留原始輸出**：FAIL 時附上完整 curl 輸出或錯誤訊息
 - **e2e 優先**：能用 curl 驗證的就用 curl，而非讀 source code 推論
-- **分批執行**：test cases 超過 10 個時，每批暫停確認一次
+- **連續執行**：所有 test cases 不中斷、不暫停，直到全部完成
 - **報告可重入**：輸出的失敗報告設計為可被下一次執行消費，只重跑失敗項目
