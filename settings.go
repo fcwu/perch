@@ -77,7 +77,8 @@ type LogSettings struct {
 type SettingsManager struct {
 	path    string
 	mu      sync.RWMutex
-	current RuntimeSettings // current effective overrides
+	base    RuntimeSettings // env-var seed (set once at startup via SetSeed)
+	current RuntimeSettings // settings.json overrides only
 	dirty   bool            // true if any restart-required field was changed since last start
 }
 
@@ -103,6 +104,181 @@ func (sm *SettingsManager) Get() RuntimeSettings {
 	defer sm.mu.RUnlock()
 	return sm.current
 }
+
+// SetSeed stores the env-var defaults so GetEffective can return the full picture.
+func (sm *SettingsManager) SetSeed(base RuntimeSettings) {
+	sm.mu.Lock()
+	sm.base = base
+	sm.mu.Unlock()
+}
+
+// GetEffective returns env-var base merged with settings.json overrides.
+// Use this for the GET /api/settings response so the UI always sees real values.
+func (sm *SettingsManager) GetEffective() RuntimeSettings {
+	sm.mu.RLock()
+	base := sm.base
+	cur := sm.current
+	sm.mu.RUnlock()
+	return mergeSettings(base, cur)
+}
+
+// mergeSettings returns base with any non-nil fields from override applied.
+func mergeSettings(base, override RuntimeSettings) RuntimeSettings {
+	r := base
+
+	if override.Agent != nil {
+		if r.Agent == nil {
+			r.Agent = &AgentSettings{}
+		}
+		a := *r.Agent
+		if override.Agent.Runtime != nil {
+			a.Runtime = override.Agent.Runtime
+		}
+		if override.Agent.Args != nil {
+			a.Args = override.Agent.Args
+		}
+		r.Agent = &a
+	}
+
+	if override.Auth != nil {
+		if r.Auth == nil {
+			r.Auth = &AuthSettings{}
+		}
+		a := *r.Auth
+		if override.Auth.Method != nil {
+			a.Method = override.Auth.Method
+		}
+		if override.Auth.Password != nil {
+			a.Password = override.Auth.Password
+		}
+		r.Auth = &a
+	}
+
+	if override.RateLimit != nil {
+		if r.RateLimit == nil {
+			r.RateLimit = &RateLimitSettings{}
+		}
+		rl := *r.RateLimit
+		if override.RateLimit.RPM != nil {
+			rl.RPM = override.RateLimit.RPM
+		}
+		r.RateLimit = &rl
+	}
+
+	if override.Network != nil {
+		if r.Network == nil {
+			r.Network = &NetworkSettings{}
+		}
+		n := *r.Network
+		if override.Network.BlockIPs != nil {
+			n.BlockIPs = override.Network.BlockIPs
+		}
+		r.Network = &n
+	}
+
+	if override.Discord != nil {
+		if r.Discord == nil {
+			r.Discord = &DiscordSettings{}
+		}
+		d := *r.Discord
+		if override.Discord.BotToken != nil {
+			d.BotToken = override.Discord.BotToken
+		}
+		if override.Discord.ChannelID != nil {
+			d.ChannelID = override.Discord.ChannelID
+		}
+		if override.Discord.AllowedUserIDs != nil {
+			d.AllowedUserIDs = override.Discord.AllowedUserIDs
+		}
+		if override.Discord.ACPEnabled != nil {
+			d.ACPEnabled = override.Discord.ACPEnabled
+		}
+		if override.Discord.ACPExecutable != nil {
+			d.ACPExecutable = override.Discord.ACPExecutable
+		}
+		r.Discord = &d
+	}
+
+	if override.Telegram != nil {
+		if r.Telegram == nil {
+			r.Telegram = &TelegramSettings{}
+		}
+		t := *r.Telegram
+		if override.Telegram.BotToken != nil {
+			t.BotToken = override.Telegram.BotToken
+		}
+		if override.Telegram.ChatID != nil {
+			t.ChatID = override.Telegram.ChatID
+		}
+		r.Telegram = &t
+	}
+
+	if override.GitLab != nil {
+		if r.GitLab == nil {
+			r.GitLab = &GitLabSettings{}
+		}
+		g := *r.GitLab
+		if override.GitLab.URL != nil {
+			g.URL = override.GitLab.URL
+		}
+		if override.GitLab.ClientID != nil {
+			g.ClientID = override.GitLab.ClientID
+		}
+		if override.GitLab.ClientSecret != nil {
+			g.ClientSecret = override.GitLab.ClientSecret
+		}
+		if override.GitLab.RedirectURI != nil {
+			g.RedirectURI = override.GitLab.RedirectURI
+		}
+		if override.GitLab.AllowedIDs != nil {
+			g.AllowedIDs = override.GitLab.AllowedIDs
+		}
+		if override.GitLab.AdminIDs != nil {
+			g.AdminIDs = override.GitLab.AdminIDs
+		}
+		r.GitLab = &g
+	}
+
+	if override.Workspace != nil {
+		if r.Workspace == nil {
+			r.Workspace = &WorkspaceSettings{}
+		}
+		w := *r.Workspace
+		if override.Workspace.SyncEnabled != nil {
+			w.SyncEnabled = override.Workspace.SyncEnabled
+		}
+		if override.Workspace.SyncInterval != nil {
+			w.SyncInterval = override.Workspace.SyncInterval
+		}
+		if override.Workspace.GitToken != nil {
+			w.GitToken = override.Workspace.GitToken
+		}
+		if override.Workspace.NotifyChannel != nil {
+			w.NotifyChannel = override.Workspace.NotifyChannel
+		}
+		if override.Workspace.SyncSubmodules != nil {
+			w.SyncSubmodules = override.Workspace.SyncSubmodules
+		}
+		r.Workspace = &w
+	}
+
+	if override.Log != nil {
+		if r.Log == nil {
+			r.Log = &LogSettings{}
+		}
+		l := *r.Log
+		if override.Log.Format != nil {
+			l.Format = override.Log.Format
+		}
+		r.Log = &l
+	}
+
+	return r
+}
+
+func strPtr(s string) *string { return &s }
+func intPtr(i int) *int       { return &i }
+func boolPtr(b bool) *bool    { return &b }
 
 // Patch merges delta into current settings, saves atomically, and returns
 // whether any restart-required fields were changed.

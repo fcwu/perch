@@ -57,7 +57,7 @@ func (s *Server) handleGetSettings(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "settings not configured", http.StatusServiceUnavailable)
 		return
 	}
-	current := s.sm.Get()
+	current := s.sm.GetEffective()
 	redacted := redactSettings(current)
 	s.sm.mu.RLock()
 	dirty := s.sm.dirty

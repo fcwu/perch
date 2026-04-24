@@ -192,6 +192,7 @@ func main() {
 	if v := os.Getenv("RATE_LIMIT_RPM"); v != "" {
 		fmt.Sscanf(v, "%d", &rateLimitRPM)
 	}
+	sm.SetSeed(buildEnvSeed())
 	var userRL *UserRateLimiter
 	if gitlabAuth.enabled() {
 		userRL = newUserRateLimiter(rateLimitRPM)
@@ -297,4 +298,118 @@ func main() {
 	if store != nil {
 		store.Close()
 	}
+}
+
+// buildEnvSeed reads environment variables into a RuntimeSettings used as the
+// base layer for GetEffective(). Only non-empty env vars populate the seed.
+func buildEnvSeed() RuntimeSettings {
+	var s RuntimeSettings
+
+	// Auth
+	authMethod := os.Getenv("AUTH_METHOD")
+	if authMethod == "" {
+		authMethod = os.Getenv("AUTH_MODE")
+	}
+	password := os.Getenv("PERCH_PASSWORD")
+	if password == "" {
+		password = os.Getenv("AUTH_PASSWORD")
+	}
+	if authMethod != "" || password != "" {
+		s.Auth = &AuthSettings{}
+		if authMethod != "" {
+			s.Auth.Method = strPtr(authMethod)
+		}
+		if password != "" {
+			s.Auth.Password = strPtr(password)
+		}
+	}
+
+	// Rate limit
+	if v := os.Getenv("RATE_LIMIT_RPM"); v != "" {
+		var rpm int
+		if _, err := fmt.Sscanf(v, "%d", &rpm); err == nil {
+			s.RateLimit = &RateLimitSettings{RPM: intPtr(rpm)}
+		}
+	}
+
+	// Network
+	if v := os.Getenv("BLOCK_IPS"); v != "" {
+		var ips []string
+		for _, ip := range strings.Fields(v) {
+			if ip != "" {
+				ips = append(ips, ip)
+			}
+		}
+		if len(ips) > 0 {
+			s.Network = &NetworkSettings{BlockIPs: ips}
+		}
+	}
+
+	// Discord
+	discordToken := os.Getenv("DISCORD_BOT_TOKEN")
+	discordChannel := os.Getenv("DISCORD_CHANNEL_ID")
+	discordAllowedRaw := os.Getenv("DISCORD_ALLOWED_USER_IDS")
+	discordACP := os.Getenv("DISCORD_ACP_ENABLED")
+	acpExe := os.Getenv("ACP_EXECUTABLE")
+	if discordToken != "" || discordChannel != "" || discordAllowedRaw != "" || discordACP != "" || acpExe != "" {
+		s.Discord = &DiscordSettings{}
+		if discordToken != "" {
+			s.Discord.BotToken = strPtr(discordToken)
+		}
+		if discordChannel != "" {
+			s.Discord.ChannelID = strPtr(discordChannel)
+		}
+		if discordAllowedRaw != "" {
+			var ids []string
+			for _, id := range strings.Split(discordAllowedRaw, ",") {
+				if id := strings.TrimSpace(id); id != "" {
+					ids = append(ids, id)
+				}
+			}
+			s.Discord.AllowedUserIDs = ids
+		}
+		if discordACP != "" {
+			b := discordACP == "true"
+			s.Discord.ACPEnabled = boolPtr(b)
+		}
+		if acpExe != "" {
+			s.Discord.ACPExecutable = strPtr(acpExe)
+		}
+	}
+
+	// Telegram
+	telegramToken := os.Getenv("TELEGRAM_BOT_TOKEN")
+	telegramChat := os.Getenv("TELEGRAM_CHAT_ID")
+	if telegramToken != "" || telegramChat != "" {
+		s.Telegram = &TelegramSettings{}
+		if telegramToken != "" {
+			s.Telegram.BotToken = strPtr(telegramToken)
+		}
+		if telegramChat != "" {
+			s.Telegram.ChatID = strPtr(telegramChat)
+		}
+	}
+
+	// GitLab
+	gitlabURL := os.Getenv("GITLAB_URL")
+	gitlabClientID := os.Getenv("GITLAB_CLIENT_ID")
+	gitlabClientSecret := os.Getenv("GITLAB_CLIENT_SECRET")
+	gitlabRedirect := os.Getenv("GITLAB_REDIRECT_URI")
+	if gitlabURL != "" || gitlabClientID != "" || gitlabClientSecret != "" || gitlabRedirect != "" {
+		s.GitLab = &GitLabSettings{}
+		if gitlabURL != "" {
+			s.GitLab.URL = strPtr(gitlabURL)
+		}
+		if gitlabClientID != "" {
+			s.GitLab.ClientID = strPtr(gitlabClientID)
+		}
+		if gitlabClientSecret != "" {
+			s.GitLab.ClientSecret = strPtr(gitlabClientSecret)
+		}
+		if gitlabRedirect != "" {
+			s.GitLab.RedirectURI = strPtr(gitlabRedirect)
+		}
+	}
+
+	return s
 }
