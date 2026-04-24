@@ -18,7 +18,7 @@ go build -o perch .
 AUTH_MODE=none LISTEN_ADDR=:8080 ./perch
 ```
 
-瀏覽器開啟 **`http://localhost:8080`**，即可進入 terminal。
+瀏覽器開啟 **`http://localhost:8080`**，會自動重導向至 `/chat`（Chat UI）；terminal 在 `http://localhost:8080/terminal`。
 
 > `AUTH_MODE=none` 和 `AUTH_MODE=password` 使用 plain HTTP；只有 `AUTH_MODE=mtls` 才使用 HTTPS。
 
@@ -67,6 +67,39 @@ go test ./...
 - 所有瀏覽器連線共用同一個 PTY session（多人同時看到同樣畫面）
 - Claude Code 崩潰後自動重啟
 - IP 封鎖在 TLS handshake 之前就丟棄連線
+
+---
+
+## Routes
+
+| Route | Description |
+|---|---|
+| `/` | Redirects to `/chat` |
+| `/chat` | Main Chat UI (Open Web UI style) |
+| `/chat?id=<uuid>` | Opens specific conversation |
+| `/terminal` | xterm.js terminal (admin only) |
+| `/admin` | Admin panel (realtime/history/analytics) |
+
+---
+
+## Runtime Settings
+
+Runtime configuration is stored in `/data/settings.json` (created automatically on first run).
+Settings take precedence over environment variables. To reset a setting to its env var default,
+remove it from `settings.json`.
+
+Three hot-reload tiers:
+- **Immediate**: rate_limit_rpm, block_ips, auth.password, agent.args, workspace.*
+- **Next session**: agent.runtime, log.format
+- **Restart required**: auth.method, perch_mode, discord/telegram tokens, gitlab.*
+
+## Volume Requirements
+
+`/data` must be a persistent volume (conversation history + settings stored there):
+```yaml
+volumes:
+  - /path/to/data:/data
+```
 
 ---
 

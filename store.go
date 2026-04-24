@@ -60,11 +60,60 @@ CREATE TABLE IF NOT EXISTS tool_events (
 	started_at  INTEGER NOT NULL,
 	ended_at    INTEGER
 );
+CREATE TABLE IF NOT EXISTS conversations (
+	id         TEXT PRIMARY KEY,
+	user_id    TEXT NOT NULL,
+	title      TEXT NOT NULL,
+	created_at INTEGER NOT NULL,
+	updated_at INTEGER NOT NULL
+);
 CREATE INDEX IF NOT EXISTS idx_qs_user_id    ON query_sessions(user_id);
 CREATE INDEX IF NOT EXISTS idx_qs_started_at ON query_sessions(started_at);
 CREATE INDEX IF NOT EXISTS idx_te_session_id ON tool_events(session_id);
+CREATE INDEX IF NOT EXISTS idx_conv_user_id    ON conversations(user_id);
+CREATE INDEX IF NOT EXISTS idx_conv_updated_at ON conversations(updated_at);
 `)
-	return err
+	if err != nil {
+		return err
+	}
+	return migrateQuerySessionsColumns(db)
+}
+
+// migrateQuerySessionsColumns adds columns to query_sessions that were added after the
+// initial schema. SQLite does not support IF NOT EXISTS on ALTER TABLE, so we inspect
+// PRAGMA table_info first.
+func migrateQuerySessionsColumns(db *sql.DB) error {
+	rows, err := db.Query("PRAGMA table_info(query_sessions)")
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	hasConvID := false
+	for rows.Next() {
+		var cid int
+		var name, typ string
+		var notNull int
+		var dflt interface{}
+		var pk int
+		if err := rows.Scan(&cid, &name, &typ, &notNull, &dflt, &pk); err != nil {
+			return err
+		}
+		if name == "conversation_id" {
+			hasConvID = true
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	if !hasConvID {
+		if _, err := db.Exec(`ALTER TABLE query_sessions ADD COLUMN conversation_id TEXT`); err != nil {
+			return err
+		}
+		if _, err := db.Exec(`CREATE INDEX IF NOT EXISTS idx_qs_conv_id ON query_sessions(conversation_id)`); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func nowMs() int64 { return time.Now().UnixMilli() }

@@ -15,9 +15,9 @@
 
 **Given** GitLab OAuth 已設定，使用者尚未登入（沒有 session cookie）
 **When** 使用者在瀏覽器開啟 `/chat`
-**Then** 頁面自動導向 GitLab 授權頁面，使用者可從那裡完成登入
+**Then** 頁面顯示 Chat UI 版面（左側 sidebar + 中央 chat 輸入區），sidebar 內嵌顯示「Login with GitLab」登入按鈕（不強制跳轉），使用者可點擊按鈕進入 GitLab 授權流程
 
-**反向驗證（竄改 cookie）**：若使用者持有非法的 session cookie，存取 `/chat` 收到「未授權」回應而非跳轉。
+**反向驗證（竄改 cookie）**：若使用者持有非法的 session cookie，存取 `/chat` 的 API 呼叫（`/api/chat`）收到「未授權」回應而非跳轉。
 
 **反向驗證（state mismatch）**：OAuth callback 的 state 不一致時，使用者看到「請求無效」的錯誤，而非被允許登入。
 

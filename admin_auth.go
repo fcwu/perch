@@ -65,6 +65,19 @@ func (a *adminAuth) handleLogin(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
+// isAdmin returns true if the request carries a valid admin cookie.
+func (a *adminAuth) isAdmin(r *http.Request) bool {
+	if !a.enabled() {
+		return false
+	}
+	cookie, err := r.Cookie("perch_admin")
+	if err != nil {
+		return false
+	}
+	_, err = parseCookie(cookie.Value, a.cookieSecret)
+	return err == nil
+}
+
 type contextAdminKey struct{}
 
 // middleware protects /admin/* routes (except /admin/login).

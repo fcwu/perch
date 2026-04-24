@@ -39,20 +39,21 @@ type Server struct {
 	adminHub        *AdminHub
 	store           *Store
 	userRateLimiter *UserRateLimiter
+	sm              *SettingsManager
 	mode            OperatingMode
 	logger          *slog.Logger
 	mux             *http.ServeMux
 }
 
 func newServer(pm *PTYManager, auth *AuthMiddleware, im *IMManager, sessions SessionProvider, userSessions *UserSessionManager, gitlabAuth *gitLabAuth, adminAuth *adminAuth, adminHub *AdminHub, store *Store, userRL *UserRateLimiter, logger *slog.Logger) *Server {
-	return newServerWithMode(pm, auth, im, sessions, userSessions, gitlabAuth, adminAuth, adminHub, store, userRL, ModeSingle, logger)
+	return newServerWithMode(pm, auth, im, sessions, userSessions, gitlabAuth, adminAuth, adminHub, store, userRL, nil, ModeSingle, logger)
 }
 
-func newServerWithMode(pm *PTYManager, auth *AuthMiddleware, im *IMManager, sessions SessionProvider, userSessions *UserSessionManager, gitlabAuth *gitLabAuth, adminAuth *adminAuth, adminHub *AdminHub, store *Store, userRL *UserRateLimiter, mode OperatingMode, logger *slog.Logger) *Server {
+func newServerWithMode(pm *PTYManager, auth *AuthMiddleware, im *IMManager, sessions SessionProvider, userSessions *UserSessionManager, gitlabAuth *gitLabAuth, adminAuth *adminAuth, adminHub *AdminHub, store *Store, userRL *UserRateLimiter, sm *SettingsManager, mode OperatingMode, logger *slog.Logger) *Server {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	s := &Server{pty: pm, auth: auth, im: im, sessions: sessions, userSessions: userSessions, gitlabAuth: gitlabAuth, adminAuth: adminAuth, adminHub: adminHub, store: store, userRateLimiter: userRL, mode: mode, logger: logger, mux: http.NewServeMux()}
+	s := &Server{pty: pm, auth: auth, im: im, sessions: sessions, userSessions: userSessions, gitlabAuth: gitlabAuth, adminAuth: adminAuth, adminHub: adminHub, store: store, userRateLimiter: userRL, sm: sm, mode: mode, logger: logger, mux: http.NewServeMux()}
 	s.mux.HandleFunc("/ws", s.handleWS)
 	s.mux.HandleFunc("/input", s.handleInput)
 	s.mux.HandleFunc("/sessions", s.handleSessions)
@@ -73,13 +74,15 @@ func newServerWithMode(pm *PTYManager, auth *AuthMiddleware, im *IMManager, sess
 		s.mux.HandleFunc("/api/logout", gitlabAuth.handleLogout)
 	}
 	// Admin endpoints — POST handled by adminAuth, GET falls through to SPA below.
-	adminLoginHandler := adminAuth.handleLogin
 	if adminAuth != nil {
 		adminMW := adminAuth.middleware
 		s.mux.Handle("/api/admin/history/", adminMW(http.HandlerFunc(s.handleAdminHistoryDetail)))
 		s.mux.Handle("/api/admin/history", adminMW(http.HandlerFunc(s.handleAdminHistory)))
 		s.mux.Handle("/api/admin/analytics", adminMW(http.HandlerFunc(s.handleAdminAnalytics)))
 		s.mux.Handle("/ws/admin", adminMW(http.HandlerFunc(s.handleAdminWS)))
+		s.mux.Handle("GET /api/settings", adminMW(http.HandlerFunc(s.handleGetSettings)))
+		s.mux.Handle("PATCH /api/settings", adminMW(http.HandlerFunc(s.handlePatchSettings)))
+		s.mux.Handle("POST /api/admin/restart", adminMW(http.HandlerFunc(s.handleAdminRestart)))
 	}
 	// GitLab OAuth endpoints (no auth required).
 	// Chat routes use GitLab middleware only when GitLab auth is active AND
@@ -101,6 +104,9 @@ func newServerWithMode(pm *PTYManager, auth *AuthMiddleware, im *IMManager, sess
 		s.mux.Handle("/api/chat/stream", chatSSEHandler)
 		chatWSHandler := gitlabAuth.middleware(http.HandlerFunc(s.handleChatWS))
 		s.mux.Handle("/ws/chat", chatWSHandler)
+		// Conversation routes: protected by GitLab session cookie.
+		s.mux.Handle("GET /api/conversations", gitlabAuth.middleware(http.HandlerFunc(s.handleListConversations)))
+		s.mux.Handle("DELETE /api/conversations/{id}", gitlabAuth.middleware(http.HandlerFunc(s.handleDeleteConversation)))
 	} else {
 		// Register chat routes even when GitLab auth is disabled so unauthenticated
 		// requests get a proper error response instead of falling through to the SPA
@@ -109,17 +115,21 @@ func newServerWithMode(pm *PTYManager, auth *AuthMiddleware, im *IMManager, sess
 		s.mux.Handle("/api/chat", http.HandlerFunc(s.handleChatAPI))
 		s.mux.Handle("/api/chat/stream", http.HandlerFunc(s.handleChatSSE))
 		s.mux.Handle("/ws/chat", http.HandlerFunc(s.handleChatWS))
+		// Conversation routes (no extra middleware; ServeHTTP applies primary auth in password mode).
+		s.mux.HandleFunc("GET /api/conversations", s.handleListConversations)
+		s.mux.HandleFunc("DELETE /api/conversations/{id}", s.handleDeleteConversation)
 	}
 	distFS, err := fs.Sub(frontendFS, "frontend/dist")
 	if err == nil {
 		fileServer := http.FileServer(http.FS(distFS))
 		// Serve index.html for SPA routes that don't correspond to static files.
-		spaHandler := &spaFileServer{fs: distFS, fileServer: fileServer}
+		// / redirects to /chat; other paths fall through to SPA.
+		spaHandler := &spaFileServer{fs: distFS, fileServer: fileServer, redirectRoot: true}
 		s.mux.Handle("/", spaHandler)
 		// /admin/login GET → SPA, POST → login handler.
 		s.mux.HandleFunc("/admin/login", func(w http.ResponseWriter, r *http.Request) {
-			if r.Method == http.MethodPost {
-				adminLoginHandler(w, r)
+			if r.Method == http.MethodPost && adminAuth != nil {
+				adminAuth.handleLogin(w, r)
 				return
 			}
 			serveIndexHTML(w, r, distFS)
@@ -138,6 +148,36 @@ func newServerWithMode(pm *PTYManager, auth *AuthMiddleware, im *IMManager, sess
 				serveIndexHTML(w, r, distFS)
 			})
 		}
+		// /terminal: admin-only route serving the SPA.
+		// Admin check: cookie-based admin (adminAuth.middleware) in single-user mode,
+		// or GitLab role-based in multi-user mode.
+		terminalHandler := func(w http.ResponseWriter, r *http.Request) {
+			serveIndexHTML(w, r, distFS)
+		}
+		if mode == ModeMulti && gitlabAuth != nil && gitlabAuth.enabled() {
+			// Multi-user GitLab: wrap with role check; redirect non-admin to /chat.
+			s.mux.Handle("/terminal", gitlabAuth.middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				// Check if user has admin role.
+				role, _ := r.Context().Value(ctxRole).(string)
+				if role != "admin" {
+					http.Redirect(w, r, "/chat", http.StatusFound)
+					return
+				}
+				terminalHandler(w, r)
+			})))
+		} else if adminAuth != nil {
+			// Single-user: check admin cookie; redirect to /chat if missing.
+			s.mux.HandleFunc("/terminal", func(w http.ResponseWriter, r *http.Request) {
+				if !adminAuth.isAdmin(r) {
+					http.Redirect(w, r, "/chat", http.StatusFound)
+					return
+				}
+				terminalHandler(w, r)
+			})
+		} else {
+			// No admin auth configured: allow everyone (shouldn't happen in production).
+			s.mux.HandleFunc("/terminal", terminalHandler)
+		}
 	}
 	return s
 }
@@ -153,6 +193,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Admin paths use their own cookie auth or are public (login page, SPA).
 	if r.URL.Path == "/ws/admin" ||
 		strings.HasPrefix(r.URL.Path, "/api/admin/") ||
+		r.URL.Path == "/api/settings" ||
 		r.URL.Path == "/admin/login" ||
 		r.URL.Path == "/admin" || strings.HasPrefix(r.URL.Path, "/admin/") {
 		s.mux.ServeHTTP(w, r)
@@ -165,7 +206,8 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Chat/API paths: auth enforced at handler registration, skip primary auth.
 	// Exception: in password mode the chat API routes must go through primary auth
 	// because they are registered without a middleware wrapper (GitLab auth disabled).
-	if r.URL.Path == "/chat" || r.URL.Path == "/api/chat" || r.URL.Path == "/api/chat/stream" || r.URL.Path == "/ws/chat" {
+	isConvPath := r.URL.Path == "/api/conversations" || strings.HasPrefix(r.URL.Path, "/api/conversations/")
+	if r.URL.Path == "/chat" || r.URL.Path == "/api/chat" || r.URL.Path == "/api/chat/stream" || r.URL.Path == "/ws/chat" || isConvPath {
 		if s.auth != nil && s.auth.mode == "password" && r.URL.Path != "/chat" {
 			s.auth.wrap(s.mux).ServeHTTP(w, r)
 			return
@@ -337,13 +379,19 @@ func serveIndexHTML(w http.ResponseWriter, _ *http.Request, distFS fs.FS) {
 
 // spaFileServer wraps a standard file server and falls back to index.html for unknown paths.
 type spaFileServer struct {
-	fs         fs.FS
-	fileServer http.Handler
+	fs            fs.FS
+	fileServer    http.Handler
+	redirectRoot  bool // if true, GET / redirects to /chat
 }
 
 func (s *spaFileServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	path := r.URL.Path
 	if path == "" || path == "/" {
+		// Redirect GET / to /chat if redirectRoot is enabled.
+		if s.redirectRoot && r.Method == http.MethodGet {
+			http.Redirect(w, r, "/chat", http.StatusFound)
+			return
+		}
 		s.fileServer.ServeHTTP(w, r)
 		return
 	}
@@ -365,7 +413,7 @@ func (s *Server) handleChatAPI(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "chat not configured", http.StatusServiceUnavailable)
 		return
 	}
-	userID, _ := r.Context().Value(ctxUserID).(string)
+	userID := s.resolveUserID(r)
 	username, _ := r.Context().Value(ctxUsername).(string)
 	if userID == "" {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
@@ -374,11 +422,23 @@ func (s *Server) handleChatAPI(w http.ResponseWriter, r *http.Request) {
 
 	var req struct {
 		Query           string `json:"query"`
+		ConversationID  string `json:"conversation_id,omitempty"`
 		NewConversation bool   `json:"new_conversation,omitempty"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Query == "" {
 		http.Error(w, "bad request: missing query", http.StatusBadRequest)
 		return
+	}
+
+	// Create a new conversation if no conversation_id was supplied.
+	conversationID := req.ConversationID
+	if conversationID == "" && s.store != nil {
+		conversationID = newUUID()
+		title := req.Query
+		if err := s.store.InsertConversation(conversationID, userID, title); err != nil {
+			s.logger.Error("store: insert conversation", "err", err)
+			conversationID = "" // non-fatal: proceed without conversation tracking
+		}
 	}
 
 	// Per-user rate limit check
@@ -394,7 +454,7 @@ func (s *Server) handleChatAPI(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if err := s.userSessions.StartSession(userID, username, req.Query, req.NewConversation); err != nil {
+	if err := s.userSessions.StartSession(userID, username, req.Query, req.NewConversation, conversationID); err != nil {
 		if ce, ok := err.(interface{ IsConflict() bool }); ok && ce.IsConflict() {
 			http.Error(w, "session already in progress", http.StatusConflict)
 			return
@@ -403,7 +463,7 @@ func (s *Server) handleChatAPI(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"user_id": userID})
+	json.NewEncoder(w).Encode(map[string]string{"user_id": userID, "conversation_id": conversationID})
 }
 
 // handleChatSSE handles GET /api/chat/stream — streams PTY output and JSON tool events via
@@ -414,7 +474,7 @@ func (s *Server) handleChatSSE(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "chat not configured", http.StatusServiceUnavailable)
 		return
 	}
-	userID, _ := r.Context().Value(ctxUserID).(string)
+	userID := s.resolveUserID(r)
 	if userID == "" {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
@@ -492,7 +552,7 @@ func (s *Server) handleChatWS(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "chat not configured", http.StatusServiceUnavailable)
 		return
 	}
-	userID, _ := r.Context().Value(ctxUserID).(string)
+	userID := s.resolveUserID(r)
 	if userID == "" {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
@@ -635,6 +695,58 @@ func (s *Server) handleAdminHistoryDetail(w http.ResponseWriter, r *http.Request
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(detail)
+}
+
+// resolveUserID returns the authenticated user ID from context, or "default" in single-user mode.
+func (s *Server) resolveUserID(r *http.Request) string {
+	if uid, _ := r.Context().Value(ctxUserID).(string); uid != "" {
+		return uid
+	}
+	return "default"
+}
+
+// handleListConversations handles GET /api/conversations.
+func (s *Server) handleListConversations(w http.ResponseWriter, r *http.Request) {
+	if s.store == nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte("[]"))
+		return
+	}
+	userID := s.resolveUserID(r)
+	convs, err := s.store.ListConversations(userID)
+	if err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	if convs == nil {
+		convs = []ConversationRow{}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(convs)
+}
+
+// handleDeleteConversation handles DELETE /api/conversations/{id}.
+func (s *Server) handleDeleteConversation(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if id == "" {
+		http.Error(w, "missing id", http.StatusBadRequest)
+		return
+	}
+	if s.store == nil {
+		http.Error(w, "not found", http.StatusNotFound)
+		return
+	}
+	userID := s.resolveUserID(r)
+	found, err := s.store.DeleteConversation(id, userID)
+	if err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	if !found {
+		http.Error(w, "not found", http.StatusNotFound)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // handleAdminAnalytics handles GET /admin/analytics
