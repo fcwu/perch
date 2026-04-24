@@ -70,7 +70,7 @@ type WorkspaceSettings struct {
 }
 
 type LogSettings struct {
-	Format *string `json:"log_format,omitempty"` // next-session
+	Format *string `json:"format,omitempty"` // next-session
 }
 
 // SettingsManager loads, stores, and applies runtime settings.

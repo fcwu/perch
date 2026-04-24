@@ -59,10 +59,13 @@ func (s *Server) handleGetSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	current := s.sm.Get()
 	redacted := redactSettings(current)
+	s.sm.mu.RLock()
+	dirty := s.sm.dirty
+	s.sm.mu.RUnlock()
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]any{
 		"settings":         redacted,
-		"restart_required": s.sm.dirty,
+		"restart_required": dirty,
 	})
 }
 
