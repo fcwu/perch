@@ -113,35 +113,37 @@ export default function SettingsPanel() {
       {/* Backdrop */}
       <div
         onClick={() => setOpen(false)}
-        style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', zIndex: 200 }}
+        style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.65)', zIndex: 200 }}
       />
-      {/* Panel */}
+      {/* Centered dialog */}
       <div style={{
-        position: 'fixed', left: 0, top: 0, bottom: 0, width: 380,
-        background: '#111', borderRight: '1px solid #252525', zIndex: 201,
-        display: 'flex', flexDirection: 'column', fontFamily: FONT,
+        position: 'fixed', left: '50%', top: '50%', transform: 'translate(-50%, -50%)',
+        width: 'min(640px, 92vw)', maxHeight: '82vh',
+        background: '#161616', border: '1px solid #2a2a2a', borderRadius: 14,
+        zIndex: 201, display: 'flex', flexDirection: 'column', fontFamily: FONT,
+        boxShadow: '0 24px 60px rgba(0,0,0,0.7)',
       }}>
         {/* Header */}
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '16px 18px', borderBottom: '1px solid #222' }}>
-          <span style={{ color: '#e0e0e0', fontSize: 15, fontWeight: 600, letterSpacing: '-0.01em' }}>Settings</span>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '18px 22px 0' }}>
+          <span style={{ color: '#e8e8e8', fontSize: 16, fontWeight: 600, letterSpacing: '-0.02em' }}>Settings</span>
           <button onClick={() => setOpen(false)}
-            style={{ background: 'none', border: 'none', color: '#555', cursor: 'pointer', fontSize: 20, lineHeight: 1, padding: '4px 6px', borderRadius: 6 }}
-            onMouseEnter={e => (e.currentTarget.style.background = 'rgba(255,255,255,0.06)')}
-            onMouseLeave={e => (e.currentTarget.style.background = 'none')}
+            style={{ background: 'none', border: 'none', color: '#606060', cursor: 'pointer', fontSize: 20, lineHeight: 1, padding: '4px 6px', borderRadius: 6 }}
+            onMouseEnter={e => (e.currentTarget.style.color = '#c0c0c0')}
+            onMouseLeave={e => (e.currentTarget.style.color = '#606060')}
           >×</button>
         </div>
 
         {/* Tabs */}
-        <div style={{ display: 'flex', borderBottom: '1px solid #222', overflowX: 'auto', padding: '0 4px' }}>
+        <div style={{ display: 'flex', borderBottom: '1px solid #252525', overflowX: 'auto', padding: '4px 18px 0', marginTop: 4 }}>
           {TABS.map(t => (
             <button
               key={t.id}
               onClick={() => setTab(t.id)}
               style={{
-                padding: '10px 12px', border: 'none', background: 'none',
-                color: tab === t.id ? '#e0e0e0' : '#5a5a5a',
+                padding: '8px 14px', border: 'none', background: 'none',
+                color: tab === t.id ? '#e0e0e0' : '#666',
                 borderBottom: tab === t.id ? '2px solid #4a9eff' : '2px solid transparent',
-                cursor: 'pointer', fontSize: 12, fontFamily: FONT, whiteSpace: 'nowrap',
+                cursor: 'pointer', fontSize: 13, fontFamily: FONT, whiteSpace: 'nowrap',
                 fontWeight: tab === t.id ? 500 : 400,
                 transition: 'color 0.12s',
               }}
@@ -150,31 +152,31 @@ export default function SettingsPanel() {
         </div>
 
         {/* Tab content */}
-        <div style={{ flex: 1, overflowY: 'auto', padding: '20px 18px' }}>
+        <div style={{ flex: 1, overflowY: 'auto', padding: '22px 22px 8px' }}>
           {renderTabContent()}
         </div>
 
         {/* Footer */}
-        <div style={{ borderTop: '1px solid #222', padding: '12px 18px', display: 'flex', flexDirection: 'column', gap: 8 }}>
-          {toast && (
-            <div style={{ fontSize: 12, color: toast.ok ? '#4a9eff' : '#e05555', textAlign: 'center' }}>
-              {toast.msg}
-            </div>
-          )}
+        <div style={{ borderTop: '1px solid #222', padding: '14px 22px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
           <button
             onClick={handleRestart}
             style={{
-              background: restartRequired ? 'rgba(255,107,0,0.1)' : 'rgba(255,255,255,0.04)',
-              border: `1px solid ${restartRequired ? '#ff6b00' : '#2e2e2e'}`,
-              color: restartRequired ? '#ff6b00' : '#5a5a5a',
-              borderRadius: 7, padding: '8px 14px', cursor: 'pointer',
+              background: restartRequired ? 'rgba(255,107,0,0.12)' : 'transparent',
+              border: `1px solid ${restartRequired ? '#c85000' : '#303030'}`,
+              color: restartRequired ? '#e07030' : '#666',
+              borderRadius: 7, padding: '7px 14px', cursor: 'pointer',
               fontSize: 12, fontFamily: FONT, fontWeight: 500,
             }}
-            onMouseEnter={e => (e.currentTarget.style.background = restartRequired ? 'rgba(255,107,0,0.18)' : 'rgba(255,255,255,0.07)')}
-            onMouseLeave={e => (e.currentTarget.style.background = restartRequired ? 'rgba(255,107,0,0.1)' : 'rgba(255,255,255,0.04)')}
+            onMouseEnter={e => (e.currentTarget.style.background = restartRequired ? 'rgba(255,107,0,0.2)' : 'rgba(255,255,255,0.06)')}
+            onMouseLeave={e => (e.currentTarget.style.background = restartRequired ? 'rgba(255,107,0,0.12)' : 'transparent')}
           >
             {restartRequired ? '⚠ Restart Container' : 'Restart Container'}
           </button>
+          {toast && (
+            <div style={{ fontSize: 12, color: toast.ok ? '#4a9eff' : '#e05555' }}>
+              {toast.msg}
+            </div>
+          )}
         </div>
       </div>
     </>

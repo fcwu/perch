@@ -229,7 +229,19 @@ export default function TerminalApp({ showLogout }: { showLogout: boolean }) {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100dvh', background: '#000' }}>
-      <div style={{ display: 'flex', background: '#111', flexShrink: 0, overflowX: 'auto', alignItems: 'center' }}>
+      <div style={{ display: 'flex', background: '#111', borderBottom: '1px solid #1e1e1e', flexShrink: 0, overflowX: 'auto', alignItems: 'center' }}>
+        <a
+          href="/chat"
+          style={{
+            display: 'flex', alignItems: 'center', gap: 6, padding: '0 14px',
+            color: '#888', textDecoration: 'none', fontSize: 12, fontFamily: 'monospace',
+            height: 36, flexShrink: 0, borderRight: '1px solid #222',
+          }}
+          onMouseEnter={e => (e.currentTarget.style.color = '#ccc')}
+          onMouseLeave={e => (e.currentTarget.style.color = '#888')}
+        >
+          ← Chat
+        </a>
         {sessions.length > 0 && (
           <>
             <button style={tabStyle(activeTab === null)} onClick={() => setActiveTab(null)}>

@@ -175,6 +175,8 @@ function AdminLoginPage() {
 
 type AdminTab = 'realtime' | 'history' | 'analytics'
 
+const ADMIN_FONT = "-apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif"
+
 function AdminApp({ showLogout }: { showLogout: boolean }) {
   const initTab = (): AdminTab => {
     const p = window.location.pathname
@@ -189,24 +191,34 @@ function AdminApp({ showLogout }: { showLogout: boolean }) {
   }
 
   const tabStyle = (active: boolean): React.CSSProperties => ({
-    padding: '8px 16px', cursor: 'pointer',
-    background: active ? '#222' : 'none',
-    color: active ? '#4af' : '#888',
+    padding: '0 16px', height: 44, cursor: 'pointer',
+    background: 'none',
+    color: active ? '#e0e0e0' : '#707070',
     border: 'none',
-    borderBottom: active ? '2px solid #4af' : '2px solid transparent',
-    fontSize: 13, fontFamily: 'sans-serif',
+    borderBottom: active ? '2px solid #4a9eff' : '2px solid transparent',
+    fontSize: 13, fontFamily: ADMIN_FONT, fontWeight: active ? 500 : 400,
+    transition: 'color 0.12s',
+    flexShrink: 0,
   })
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100dvh', background: '#0a0a0a', color: '#e0e0e0' }}>
-      <div style={{ display: 'flex', background: '#111', borderBottom: '1px solid #222', flexShrink: 0, alignItems: 'center', padding: '0 8px' }}>
-        <span style={{ color: '#4af', fontFamily: 'monospace', fontSize: 14, padding: '8px 12px', marginRight: 8 }}>Perch Admin</span>
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100dvh', background: '#111', color: '#e0e0e0', fontFamily: ADMIN_FONT }}>
+      <div style={{ display: 'flex', background: '#0e0e0e', borderBottom: '1px solid #222', flexShrink: 0, alignItems: 'center', padding: '0 0 0 4px', height: 44 }}>
+        <a href="/chat" style={{
+          display: 'flex', alignItems: 'center',
+          color: '#888', fontSize: 12, fontFamily: ADMIN_FONT, textDecoration: 'none',
+          padding: '0 14px', height: '100%', borderRight: '1px solid #222', marginRight: 8,
+          whiteSpace: 'nowrap',
+        }}
+          onMouseEnter={e => (e.currentTarget.style.color = '#ccc')}
+          onMouseLeave={e => (e.currentTarget.style.color = '#888')}
+        >← Chat</a>
+        <span style={{ color: '#4a4a4a', fontSize: 12, fontWeight: 600, paddingRight: 4, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Admin</span>
         <button style={tabStyle(tab === 'realtime')} onClick={() => navigate('realtime')}>Live</button>
         <button style={tabStyle(tab === 'history')} onClick={() => navigate('history')}>History</button>
         <button style={tabStyle(tab === 'analytics')} onClick={() => navigate('analytics')}>Analytics</button>
-        <a href="/chat" style={{ marginLeft: 8, color: '#888', fontSize: 12, fontFamily: 'sans-serif', textDecoration: 'none' }}>→ Chat</a>
         {showLogout && (
-          <div style={{ marginLeft: 'auto' }}>
+          <div style={{ marginLeft: 'auto', paddingRight: 8 }}>
             <LogoutButton />
           </div>
         )}

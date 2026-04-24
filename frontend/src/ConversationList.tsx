@@ -70,7 +70,7 @@ export default function ConversationList({ activeId }: ConversationListProps) {
     <div>
       {groups.map(group => (
         <div key={group.label}>
-          <div style={{ padding: '10px 12px 3px', fontSize: 11, color: '#4a4a4a', fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif", letterSpacing: '0.04em', fontWeight: 600 }}>
+          <div style={{ padding: '10px 12px 3px', fontSize: 11, color: '#5e5e5e', fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif", letterSpacing: '0.04em', fontWeight: 600 }}>
             {group.label}
           </div>
           {group.items.map(conv => (
@@ -85,7 +85,7 @@ export default function ConversationList({ activeId }: ConversationListProps) {
                 style={{
                   display: 'block', padding: '7px 10px',
                   fontSize: 13, fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif",
-                  color: activeId === conv.id ? '#e0e0e0' : '#8a8a8a',
+                  color: activeId === conv.id ? '#e0e0e0' : '#aaaaaa',
                   background: activeId === conv.id ? 'rgba(255,255,255,0.08)' : hoveredId === conv.id ? 'rgba(255,255,255,0.05)' : 'transparent',
                   textDecoration: 'none',
                   whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
@@ -112,7 +112,7 @@ export default function ConversationList({ activeId }: ConversationListProps) {
         </div>
       ))}
       {conversations.length === 0 && (
-        <div style={{ padding: '16px 12px', color: '#3a3a3a', fontSize: 12, fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif" }}>
+        <div style={{ padding: '16px 12px', color: '#5e5e5e', fontSize: 12, fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif" }}>
           No conversations yet
         </div>
       )}

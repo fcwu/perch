@@ -94,7 +94,7 @@ function NavItem({ href, icon, label, onClick }: { href: string; icon: React.Rea
       onMouseLeave={() => setHovered(false)}
       style={{
         display: 'flex', alignItems: 'center', gap: 10,
-        padding: '8px 10px', color: hovered ? '#c8c8c8' : '#777',
+        padding: '8px 10px', color: hovered ? '#e0e0e0' : '#a8a8a8',
         textDecoration: 'none', fontSize: 13, fontFamily: FONT,
         borderRadius: 7, cursor: 'pointer',
         background: hovered ? 'rgba(255,255,255,0.06)' : 'transparent',
@@ -102,7 +102,7 @@ function NavItem({ href, icon, label, onClick }: { href: string; icon: React.Rea
         marginBottom: 1,
       }}
     >
-      <span style={{ flexShrink: 0, display: 'flex', alignItems: 'center', color: hovered ? '#a0a0a0' : '#555' }}>
+      <span style={{ flexShrink: 0, display: 'flex', alignItems: 'center', color: hovered ? '#c0c0c0' : '#707070' }}>
         {icon}
       </span>
       {label}
