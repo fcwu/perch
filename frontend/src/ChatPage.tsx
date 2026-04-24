@@ -17,6 +17,9 @@ interface Message {
 
 interface ChatPageProps {
   userID: string
+  conversationId?: string
+  onSidebarToggle?: () => void
+  sidebarOpen?: boolean
 }
 
 export default function ChatPage(_: ChatPageProps) {
