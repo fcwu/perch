@@ -46,12 +46,13 @@ func buildPrompt(history []ConversationTurn, query string) string {
 
 // userSession is one per authenticated user: an independent OpenCode PTY session.
 type userSession struct {
-	userID      string
-	username    string
-	sessionUUID string
-	query       string  // original user query (stored in DB, shown in admin)
-	prompt      string  // final injected prompt sent to the agent (may include history)
-	startedAt   int64
+	userID         string
+	username       string
+	sessionUUID    string
+	conversationID string // conversation this session belongs to (empty if none)
+	query          string // original user query (stored in DB, shown in admin)
+	prompt         string // final injected prompt sent to the agent (may include history)
+	startedAt      int64
 
 	pty    *PTYManager
 	status userSessionStatus
@@ -60,8 +61,8 @@ type userSession struct {
 	jsonSubs  map[int]chan string
 	nextSubID int
 
-	toolStartTimes  map[string]time.Time  // toolName → PreToolUse time
-	toolEventIDs    map[string]int64      // toolName → store event ID
+	toolStartTimes map[string]time.Time // toolName → PreToolUse time
+	toolEventIDs   map[string]int64     // toolName → store event ID
 
 	cancel      context.CancelFunc
 	completedAt time.Time
@@ -146,8 +147,9 @@ func newUserSessionManager(runtime AgentRuntime, workdir string, logger *slog.Lo
 
 // StartSession creates a new OpenCode session for the user.
 // When newConversation is false, recent history is prepended to the query.
+// conversationID links the session to an existing conversation (may be empty).
 // Returns error with HTTP 409 status hint if a session is already running.
-func (m *UserSessionManager) StartSession(userID, username, query string, newConversation bool) error {
+func (m *UserSessionManager) StartSession(userID, username, query string, newConversation bool, conversationID string) error {
 	m.mu.Lock()
 	existing, ok := m.sessions[userID]
 	if ok {
@@ -177,6 +179,7 @@ func (m *UserSessionManager) StartSession(userID, username, query string, newCon
 
 	sess := newUserSession(userID, username, query)
 	sess.prompt = prompt
+	sess.conversationID = conversationID
 	m.sessions[userID] = sess
 	m.mu.Unlock()
 
@@ -260,8 +263,14 @@ func (m *UserSessionManager) ClaimUUID(uuid string) (*userSession, bool) {
 				m.uuidMap[uuid] = sess.userID
 				// Persist session start now that we have the UUID.
 				if m.store != nil {
-					if err := m.store.InsertSession(uuid, sess.userID, sess.username, sess.query); err != nil {
-						m.logger.Error("store: insert session", "err", err)
+					if sess.conversationID != "" {
+						if err := m.store.InsertSessionWithConversation(uuid, sess.userID, sess.username, sess.query, sess.conversationID); err != nil {
+							m.logger.Error("store: insert session with conversation", "err", err)
+						}
+					} else {
+						if err := m.store.InsertSession(uuid, sess.userID, sess.username, sess.query); err != nil {
+							m.logger.Error("store: insert session", "err", err)
+						}
 					}
 				}
 				if m.adminHub != nil {
@@ -389,7 +398,7 @@ func (m *UserSessionManager) NotifyHook(event HookEvent) {
 		toolCount := len(sess.toolStartTimes)
 		sess.mu.Unlock()
 		if m.store != nil && sess.sessionUUID != "" {
-			if err := m.store.UpdateSessionDone(sess.sessionUUID, event.LastAssistantMessage); err != nil {
+			if err := m.store.UpdateSessionDoneAndTouch(sess.sessionUUID, event.LastAssistantMessage, sess.conversationID); err != nil {
 				m.logger.Error("store: update session done", "err", err)
 			}
 		}

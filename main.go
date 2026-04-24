@@ -166,10 +166,10 @@ func main() {
 	adminAuth := newAdminAuth()
 	adminHub := newAdminHub()
 
-	// Open SQLite store if DB_PATH is set (or default to /data/perch.db when GitLab auth enabled)
+	// Open SQLite store if DB_PATH is set (or default to /data/perch.db)
 	var store *Store
 	dbPath := os.Getenv("DB_PATH")
-	if dbPath == "" && gitlabAuth.enabled() {
+	if dbPath == "" {
 		dbPath = "/data/perch.db"
 	}
 	if dbPath != "" {

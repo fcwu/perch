@@ -101,6 +101,9 @@ func newServerWithMode(pm *PTYManager, auth *AuthMiddleware, im *IMManager, sess
 		s.mux.Handle("/api/chat/stream", chatSSEHandler)
 		chatWSHandler := gitlabAuth.middleware(http.HandlerFunc(s.handleChatWS))
 		s.mux.Handle("/ws/chat", chatWSHandler)
+		// Conversation routes: protected by GitLab session cookie.
+		s.mux.Handle("GET /api/conversations", gitlabAuth.middleware(http.HandlerFunc(s.handleListConversations)))
+		s.mux.Handle("DELETE /api/conversations/{id}", gitlabAuth.middleware(http.HandlerFunc(s.handleDeleteConversation)))
 	} else {
 		// Register chat routes even when GitLab auth is disabled so unauthenticated
 		// requests get a proper error response instead of falling through to the SPA
@@ -109,6 +112,9 @@ func newServerWithMode(pm *PTYManager, auth *AuthMiddleware, im *IMManager, sess
 		s.mux.Handle("/api/chat", http.HandlerFunc(s.handleChatAPI))
 		s.mux.Handle("/api/chat/stream", http.HandlerFunc(s.handleChatSSE))
 		s.mux.Handle("/ws/chat", http.HandlerFunc(s.handleChatWS))
+		// Conversation routes (no extra middleware; ServeHTTP applies primary auth in password mode).
+		s.mux.HandleFunc("GET /api/conversations", s.handleListConversations)
+		s.mux.HandleFunc("DELETE /api/conversations/{id}", s.handleDeleteConversation)
 	}
 	distFS, err := fs.Sub(frontendFS, "frontend/dist")
 	if err == nil {
@@ -165,7 +171,8 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Chat/API paths: auth enforced at handler registration, skip primary auth.
 	// Exception: in password mode the chat API routes must go through primary auth
 	// because they are registered without a middleware wrapper (GitLab auth disabled).
-	if r.URL.Path == "/chat" || r.URL.Path == "/api/chat" || r.URL.Path == "/api/chat/stream" || r.URL.Path == "/ws/chat" {
+	isConvPath := r.URL.Path == "/api/conversations" || strings.HasPrefix(r.URL.Path, "/api/conversations/")
+	if r.URL.Path == "/chat" || r.URL.Path == "/api/chat" || r.URL.Path == "/api/chat/stream" || r.URL.Path == "/ws/chat" || isConvPath {
 		if s.auth != nil && s.auth.mode == "password" && r.URL.Path != "/chat" {
 			s.auth.wrap(s.mux).ServeHTTP(w, r)
 			return
@@ -374,11 +381,23 @@ func (s *Server) handleChatAPI(w http.ResponseWriter, r *http.Request) {
 
 	var req struct {
 		Query           string `json:"query"`
+		ConversationID  string `json:"conversation_id,omitempty"`
 		NewConversation bool   `json:"new_conversation,omitempty"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Query == "" {
 		http.Error(w, "bad request: missing query", http.StatusBadRequest)
 		return
+	}
+
+	// Create a new conversation if no conversation_id was supplied.
+	conversationID := req.ConversationID
+	if conversationID == "" && s.store != nil {
+		conversationID = newUUID()
+		title := req.Query
+		if err := s.store.InsertConversation(conversationID, userID, title); err != nil {
+			s.logger.Error("store: insert conversation", "err", err)
+			conversationID = "" // non-fatal: proceed without conversation tracking
+		}
 	}
 
 	// Per-user rate limit check
@@ -394,7 +413,7 @@ func (s *Server) handleChatAPI(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if err := s.userSessions.StartSession(userID, username, req.Query, req.NewConversation); err != nil {
+	if err := s.userSessions.StartSession(userID, username, req.Query, req.NewConversation, conversationID); err != nil {
 		if ce, ok := err.(interface{ IsConflict() bool }); ok && ce.IsConflict() {
 			http.Error(w, "session already in progress", http.StatusConflict)
 			return
@@ -403,7 +422,7 @@ func (s *Server) handleChatAPI(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"user_id": userID})
+	json.NewEncoder(w).Encode(map[string]string{"user_id": userID, "conversation_id": conversationID})
 }
 
 // handleChatSSE handles GET /api/chat/stream — streams PTY output and JSON tool events via
@@ -635,6 +654,66 @@ func (s *Server) handleAdminHistoryDetail(w http.ResponseWriter, r *http.Request
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(detail)
+}
+
+// resolveUserID returns the authenticated user ID from context, or "default" in single-user mode.
+func (s *Server) resolveUserID(r *http.Request) string {
+	if uid, _ := r.Context().Value(ctxUserID).(string); uid != "" {
+		return uid
+	}
+	return "default"
+}
+
+// handleListConversations handles GET /api/conversations.
+func (s *Server) handleListConversations(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if s.store == nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte("[]"))
+		return
+	}
+	userID := s.resolveUserID(r)
+	convs, err := s.store.ListConversations(userID)
+	if err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	if convs == nil {
+		convs = []ConversationRow{}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(convs)
+}
+
+// handleDeleteConversation handles DELETE /api/conversations/{id}.
+func (s *Server) handleDeleteConversation(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodDelete {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	id := r.PathValue("id")
+	if id == "" {
+		http.Error(w, "missing id", http.StatusBadRequest)
+		return
+	}
+	if s.store == nil {
+		http.Error(w, "not found", http.StatusNotFound)
+		return
+	}
+	userID := s.resolveUserID(r)
+	found, err := s.store.DeleteConversation(id, userID)
+	if err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	if !found {
+		http.Error(w, "not found", http.StatusNotFound)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // handleAdminAnalytics handles GET /admin/analytics
