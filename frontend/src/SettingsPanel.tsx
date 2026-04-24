@@ -1,5 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 
+const FONT = "-apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif"
+
 // Settings shape from API
 interface Settings {
   agent?: { runtime?: string; args?: string }
@@ -115,53 +117,61 @@ export default function SettingsPanel() {
       />
       {/* Panel */}
       <div style={{
-        position: 'fixed', left: 0, top: 0, bottom: 0, width: 360,
-        background: '#111', borderRight: '1px solid #222', zIndex: 201,
-        display: 'flex', flexDirection: 'column',
+        position: 'fixed', left: 0, top: 0, bottom: 0, width: 380,
+        background: '#111', borderRight: '1px solid #252525', zIndex: 201,
+        display: 'flex', flexDirection: 'column', fontFamily: FONT,
       }}>
         {/* Header */}
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '16px', borderBottom: '1px solid #222' }}>
-          <span style={{ color: '#e0e0e0', fontFamily: 'sans-serif', fontSize: 15, fontWeight: 600 }}>Settings</span>
-          <button onClick={() => setOpen(false)} style={{ background: 'none', border: 'none', color: '#666', cursor: 'pointer', fontSize: 18 }}>×</button>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '16px 18px', borderBottom: '1px solid #222' }}>
+          <span style={{ color: '#e0e0e0', fontSize: 15, fontWeight: 600, letterSpacing: '-0.01em' }}>Settings</span>
+          <button onClick={() => setOpen(false)}
+            style={{ background: 'none', border: 'none', color: '#555', cursor: 'pointer', fontSize: 20, lineHeight: 1, padding: '4px 6px', borderRadius: 6 }}
+            onMouseEnter={e => (e.currentTarget.style.background = 'rgba(255,255,255,0.06)')}
+            onMouseLeave={e => (e.currentTarget.style.background = 'none')}
+          >×</button>
         </div>
 
         {/* Tabs */}
-        <div style={{ display: 'flex', borderBottom: '1px solid #222', overflowX: 'auto' }}>
+        <div style={{ display: 'flex', borderBottom: '1px solid #222', overflowX: 'auto', padding: '0 4px' }}>
           {TABS.map(t => (
             <button
               key={t.id}
               onClick={() => setTab(t.id)}
               style={{
-                padding: '8px 12px', border: 'none', background: 'none',
-                color: tab === t.id ? '#4a9eff' : '#666',
+                padding: '10px 12px', border: 'none', background: 'none',
+                color: tab === t.id ? '#e0e0e0' : '#5a5a5a',
                 borderBottom: tab === t.id ? '2px solid #4a9eff' : '2px solid transparent',
-                cursor: 'pointer', fontSize: 12, fontFamily: 'sans-serif', whiteSpace: 'nowrap',
+                cursor: 'pointer', fontSize: 12, fontFamily: FONT, whiteSpace: 'nowrap',
+                fontWeight: tab === t.id ? 500 : 400,
+                transition: 'color 0.12s',
               }}
             >{t.label}</button>
           ))}
         </div>
 
         {/* Tab content */}
-        <div style={{ flex: 1, overflowY: 'auto', padding: 16 }}>
+        <div style={{ flex: 1, overflowY: 'auto', padding: '20px 18px' }}>
           {renderTabContent()}
         </div>
 
         {/* Footer */}
-        <div style={{ borderTop: '1px solid #222', padding: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
+        <div style={{ borderTop: '1px solid #222', padding: '12px 18px', display: 'flex', flexDirection: 'column', gap: 8 }}>
           {toast && (
-            <div style={{ fontSize: 12, color: toast.ok ? '#4af' : '#f66', fontFamily: 'sans-serif', textAlign: 'center' }}>
+            <div style={{ fontSize: 12, color: toast.ok ? '#4a9eff' : '#e05555', textAlign: 'center' }}>
               {toast.msg}
             </div>
           )}
           <button
             onClick={handleRestart}
             style={{
-              background: restartRequired ? '#ff6b0020' : 'none',
-              border: `1px solid ${restartRequired ? '#ff6b00' : '#444'}`,
-              color: restartRequired ? '#ff6b00' : '#666',
-              borderRadius: 4, padding: '6px 12px', cursor: 'pointer',
-              fontSize: 12, fontFamily: 'sans-serif',
+              background: restartRequired ? 'rgba(255,107,0,0.1)' : 'rgba(255,255,255,0.04)',
+              border: `1px solid ${restartRequired ? '#ff6b00' : '#2e2e2e'}`,
+              color: restartRequired ? '#ff6b00' : '#5a5a5a',
+              borderRadius: 7, padding: '8px 14px', cursor: 'pointer',
+              fontSize: 12, fontFamily: FONT, fontWeight: 500,
             }}
+            onMouseEnter={e => (e.currentTarget.style.background = restartRequired ? 'rgba(255,107,0,0.18)' : 'rgba(255,255,255,0.07)')}
+            onMouseLeave={e => (e.currentTarget.style.background = restartRequired ? 'rgba(255,107,0,0.1)' : 'rgba(255,255,255,0.04)')}
           >
             {restartRequired ? '⚠ Restart Container' : 'Restart Container'}
           </button>
@@ -174,9 +184,9 @@ export default function SettingsPanel() {
 // Reusable field wrapper
 function Field({ label, children, restartRequired }: { label: string; children: React.ReactNode; restartRequired?: boolean }) {
   return (
-    <div style={{ marginBottom: 16 }}>
-      <label style={{ display: 'block', fontSize: 11, color: '#666', fontFamily: 'sans-serif', marginBottom: 4 }}>
-        {label} {restartRequired && <span style={{ color: '#ff6b00' }}>⚠ restart required</span>}
+    <div style={{ marginBottom: 18 }}>
+      <label style={{ display: 'block', fontSize: 12, color: '#7a7a7a', fontFamily: FONT, marginBottom: 6, fontWeight: 500 }}>
+        {label} {restartRequired && <span style={{ color: '#c06000', fontSize: 11 }}>⚠ restart</span>}
       </label>
       {children}
     </div>
@@ -193,8 +203,9 @@ function TextInput({ value, onChange, placeholder, sensitive }: { value: string;
       placeholder={placeholder}
       style={{
         width: '100%', background: '#1a1a1a', color: '#e0e0e0',
-        border: '1px solid #333', borderRadius: 4, padding: '6px 8px',
-        fontSize: 13, fontFamily: 'monospace', boxSizing: 'border-box',
+        border: '1px solid #2e2e2e', borderRadius: 7, padding: '8px 10px',
+        fontSize: 13, fontFamily: FONT, boxSizing: 'border-box',
+        outline: 'none',
       }}
     />
   )
@@ -207,9 +218,9 @@ function SaveButton({ onClick, saving }: { onClick: () => void; saving: boolean 
       onClick={onClick}
       disabled={saving}
       style={{
-        background: '#4a9eff', border: 'none', color: '#000',
-        borderRadius: 4, padding: '6px 16px', cursor: saving ? 'not-allowed' : 'pointer',
-        fontSize: 13, fontFamily: 'sans-serif',
+        background: saving ? '#2a3a4a' : '#4a9eff', border: 'none', color: '#fff',
+        borderRadius: 7, padding: '8px 20px', cursor: saving ? 'not-allowed' : 'pointer',
+        fontSize: 13, fontFamily: FONT, fontWeight: 500,
       }}
     >{saving ? 'Saving…' : 'Save'}</button>
   )
@@ -235,7 +246,7 @@ function GeneralTab({ settings, onSave, saving }: TabProps) {
       <Field label="Agent Runtime" restartRequired>
         <div style={{ display: 'flex', gap: 8 }}>
           {['claude', 'opencode'].map(r => (
-            <label key={r} style={{ display: 'flex', alignItems: 'center', gap: 4, color: '#aaa', fontSize: 13, fontFamily: 'sans-serif', cursor: 'pointer' }}>
+            <label key={r} style={{ display: 'flex', alignItems: 'center', gap: 4, color: '#aaa', fontSize: 13, fontFamily: FONT, cursor: 'pointer' }}>
               <input type="radio" checked={runtime === r} onChange={() => setRuntime(r)} /> {r}
             </label>
           ))}
@@ -252,7 +263,7 @@ function GeneralTab({ settings, onSave, saving }: TabProps) {
           value={blockIPs}
           onChange={e => setBlockIPs(e.target.value)}
           rows={3}
-          style={{ width: '100%', background: '#1a1a1a', color: '#e0e0e0', border: '1px solid #333', borderRadius: 4, padding: '6px 8px', fontSize: 13, fontFamily: 'monospace', boxSizing: 'border-box', resize: 'vertical' }}
+          style={{ width: '100%', background: '#1a1a1a', color: '#e0e0e0', border: '1px solid #2e2e2e', borderRadius: 7, padding: '8px 10px', fontSize: 13, fontFamily: FONT, boxSizing: 'border-box', resize: 'vertical', outline: 'none' }}
         />
       </Field>
       <SaveButton saving={saving} onClick={() => onSave({
@@ -278,7 +289,7 @@ function AuthTab({ settings, onSave, saving }: TabProps) {
       <Field label="Auth Method" restartRequired>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           {['none', 'password', 'gitlab'].map(m => (
-            <label key={m} style={{ display: 'flex', alignItems: 'center', gap: 4, color: '#aaa', fontSize: 13, fontFamily: 'sans-serif', cursor: 'pointer' }}>
+            <label key={m} style={{ display: 'flex', alignItems: 'center', gap: 4, color: '#aaa', fontSize: 13, fontFamily: FONT, cursor: 'pointer' }}>
               <input type="radio" checked={method === m} onChange={() => setMethod(m)} /> {m}
             </label>
           ))}
@@ -313,13 +324,13 @@ function IntegrationsTab({ settings, onSave, saving }: TabProps) {
 
   return (
     <>
-      <div style={{ color: '#4a9eff', fontSize: 12, fontFamily: 'sans-serif', marginBottom: 12, fontWeight: 600 }}>Discord</div>
+      <div style={{ color: '#8a8a8a', fontSize: 11, fontFamily: FONT, marginBottom: 14, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Discord</div>
       <Field label="Bot Token" restartRequired><TextInput value={discordToken} onChange={setDiscordToken} sensitive /></Field>
       <Field label="Channel ID" restartRequired><TextInput value={channelID} onChange={setChannelID} /></Field>
       <Field label="Allowed DM User IDs (comma-separated)">
         <TextInput value={allowedUsers} onChange={setAllowedUsers} placeholder="123,456" />
       </Field>
-      <div style={{ color: '#4a9eff', fontSize: 12, fontFamily: 'sans-serif', margin: '16px 0 12px', fontWeight: 600 }}>Telegram</div>
+      <div style={{ color: '#8a8a8a', fontSize: 11, fontFamily: FONT, margin: '20px 0 14px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em', borderTop: '1px solid #1e1e1e', paddingTop: 16 }}>Telegram</div>
       <Field label="Bot Token" restartRequired><TextInput value={telegramToken} onChange={setTelegramToken} sensitive /></Field>
       <Field label="Chat ID" restartRequired><TextInput value={telegramChat} onChange={setTelegramChat} /></Field>
       <SaveButton saving={saving} onClick={() => onSave({
@@ -350,7 +361,7 @@ function WorkspaceTab({ settings, onSave, saving }: TabProps) {
   return (
     <>
       <Field label="Git Sync Enabled">
-        <label style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#aaa', fontSize: 13, fontFamily: 'sans-serif', cursor: 'pointer' }}>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#aaa', fontSize: 13, fontFamily: FONT, cursor: 'pointer' }}>
           <input type="checkbox" checked={enabled} onChange={e => setEnabled(e.target.checked)} /> Enable workspace git sync
         </label>
       </Field>
@@ -358,7 +369,7 @@ function WorkspaceTab({ settings, onSave, saving }: TabProps) {
       <Field label="Git Token"><TextInput value={token} onChange={setToken} sensitive /></Field>
       <Field label="Notify Discord Channel"><TextInput value={notify} onChange={setNotify} /></Field>
       <Field label="Sync Submodules">
-        <label style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#aaa', fontSize: 13, fontFamily: 'sans-serif', cursor: 'pointer' }}>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#aaa', fontSize: 13, fontFamily: FONT, cursor: 'pointer' }}>
           <input type="checkbox" checked={submodules} onChange={e => setSubmodules(e.target.checked)} /> Include submodules
         </label>
       </Field>
@@ -379,7 +390,7 @@ function AdvancedTab({ settings, onSave, saving }: TabProps) {
       <Field label="Log Format">
         <div style={{ display: 'flex', gap: 8 }}>
           {['text', 'json'].map(f => (
-            <label key={f} style={{ display: 'flex', alignItems: 'center', gap: 4, color: '#aaa', fontSize: 13, fontFamily: 'sans-serif', cursor: 'pointer' }}>
+            <label key={f} style={{ display: 'flex', alignItems: 'center', gap: 4, color: '#aaa', fontSize: 13, fontFamily: FONT, cursor: 'pointer' }}>
               <input type="radio" checked={logFormat === f} onChange={() => setLogFormat(f)} /> {f}
             </label>
           ))}

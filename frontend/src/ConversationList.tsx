@@ -70,27 +70,28 @@ export default function ConversationList({ activeId }: ConversationListProps) {
     <div>
       {groups.map(group => (
         <div key={group.label}>
-          <div style={{ padding: '8px 12px 4px', fontSize: 11, color: '#555', fontFamily: 'sans-serif', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+          <div style={{ padding: '10px 12px 3px', fontSize: 11, color: '#4a4a4a', fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif", letterSpacing: '0.04em', fontWeight: 600 }}>
             {group.label}
           </div>
           {group.items.map(conv => (
             <div
               key={conv.id}
-              style={{ position: 'relative' }}
+              style={{ position: 'relative', padding: '0 6px' }}
               onMouseEnter={() => setHoveredId(conv.id)}
               onMouseLeave={() => setHoveredId(null)}
             >
               <a
                 href={`/chat?id=${conv.id}`}
                 style={{
-                  display: 'block', padding: '6px 12px',
-                  fontSize: 13, fontFamily: 'sans-serif',
-                  color: activeId === conv.id ? '#e0e0e0' : '#aaa',
-                  background: activeId === conv.id ? '#1e1e1e' : 'transparent',
+                  display: 'block', padding: '7px 10px',
+                  fontSize: 13, fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif",
+                  color: activeId === conv.id ? '#e0e0e0' : '#8a8a8a',
+                  background: activeId === conv.id ? 'rgba(255,255,255,0.08)' : hoveredId === conv.id ? 'rgba(255,255,255,0.05)' : 'transparent',
                   textDecoration: 'none',
                   whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
-                  paddingRight: hoveredId === conv.id ? 32 : 12,
-                  borderRadius: 4, margin: '0 4px',
+                  paddingRight: hoveredId === conv.id ? 32 : 10,
+                  borderRadius: 7,
+                  transition: 'background 0.1s, color 0.1s',
                 }}
               >
                 {conv.title}
@@ -99,9 +100,9 @@ export default function ConversationList({ activeId }: ConversationListProps) {
                 <button
                   onClick={(e) => handleDelete(e, conv.id)}
                   style={{
-                    position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)',
-                    background: 'none', border: 'none', color: '#666', cursor: 'pointer',
-                    fontSize: 14, padding: '2px 4px',
+                    position: 'absolute', right: 12, top: '50%', transform: 'translateY(-50%)',
+                    background: 'none', border: 'none', color: '#555', cursor: 'pointer',
+                    fontSize: 13, padding: '2px 4px', display: 'flex', alignItems: 'center',
                   }}
                   title="Delete conversation"
                 >✕</button>
@@ -111,7 +112,7 @@ export default function ConversationList({ activeId }: ConversationListProps) {
         </div>
       ))}
       {conversations.length === 0 && (
-        <div style={{ padding: '16px 12px', color: '#444', fontSize: 12, fontFamily: 'sans-serif' }}>
+        <div style={{ padding: '16px 12px', color: '#3a3a3a', fontSize: 12, fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif" }}>
           No conversations yet
         </div>
       )}

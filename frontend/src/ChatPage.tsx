@@ -1,6 +1,15 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
 import { ToolPanel, ToolEntry } from './ToolPanel'
 
+function SendIcon() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+      <line x1="22" y1="2" x2="11" y2="13"/>
+      <polygon points="22 2 15 22 11 13 2 9 22 2"/>
+    </svg>
+  )
+}
+
 // Strip ANSI/VT100 escape sequences applied to the FULL accumulated buffer.
 // OSC/DCS are tried before standalone Fe so \x1b] is not greedily consumed as a 2-char sequence.
 // Standalone Fe excludes ], ^, _, P which are string-sequence introducers (OSC/DCS/PM/APC).
@@ -25,7 +34,6 @@ interface ChatPageProps {
 export default function ChatPage({ conversationId }: ChatPageProps) {
   const [query, setQuery] = useState('')
   const [messages, setMessages] = useState<Message[]>([])
-  const [newConversation, setNewConversation] = useState(false)
   const [loading, setLoading] = useState(false)
   const [toolEntries, setToolEntries] = useState<ToolEntry[]>([])
   const esRef = useRef<EventSource | null>(null)
@@ -50,18 +58,13 @@ export default function ChatPage({ conversationId }: ChatPageProps) {
     rawBufRef.current = ''
 
     // Append user message and a pending assistant slot
-    const sendNewConversation = newConversation
-    setMessages(prev => {
-      const base = sendNewConversation ? [] : prev
-      return [...base, { role: 'user', content: q, done: true }, { role: 'assistant', content: '', done: false }]
-    })
-    setNewConversation(false)
+    setMessages(prev => [...prev, { role: 'user', content: q, done: true }, { role: 'assistant', content: '', done: false }])
 
     try {
       const resp = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query: q, new_conversation: sendNewConversation, conversation_id: conversationId }),
+        body: JSON.stringify({ query: q, conversation_id: conversationId }),
       })
       if (resp.status === 409) {
         alert('A session is already in progress. Please wait.')
@@ -143,7 +146,7 @@ export default function ChatPage({ conversationId }: ChatPageProps) {
       setLoading(false)
       es.close()
     }
-  }, [query, loading, newConversation, conversationId])
+  }, [query, loading, conversationId])
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -152,31 +155,28 @@ export default function ChatPage({ conversationId }: ChatPageProps) {
     }
   }
 
-  const handleNewConversation = () => {
-    setMessages([])
-    setNewConversation(true)
-    setToolEntries([])
-  }
+  const FONT = "-apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif"
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100dvh', background: '#1a1a1a', color: '#e0e0e0', fontFamily: 'sans-serif' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100dvh', background: '#171717', color: '#e0e0e0', fontFamily: FONT }}>
       {/* Thread area */}
-      <div ref={threadRef} style={{ flex: 1, overflowY: 'auto', padding: '20px 24px' }}>
+      <div ref={threadRef} style={{ flex: 1, overflowY: 'auto', padding: '24px 24px 8px' }}>
         {messages.length === 0 && !loading && (
-          <div style={{ color: '#555', textAlign: 'center', marginTop: 80, fontSize: 18 }}>
-            Ask anything about the knowledge base
+          <div style={{ color: '#3a3a3a', textAlign: 'center', marginTop: '20vh', fontSize: 22, fontWeight: 500, letterSpacing: '-0.02em' }}>
+            Ask anything
           </div>
         )}
 
-        <div style={{ maxWidth: 800, margin: '0 auto' }}>
+        <div style={{ maxWidth: 740, margin: '0 auto' }}>
           {messages.map((msg, i) => (
-            <div key={i} style={{ marginBottom: 16 }}>
+            <div key={i} style={{ marginBottom: 20 }}>
               {msg.role === 'user' ? (
                 <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
                   <div style={{
-                    background: '#2c4a7a', color: '#e0e0e0', borderRadius: '12px 12px 2px 12px',
-                    padding: '10px 16px', maxWidth: '75%', fontSize: 14, lineHeight: 1.5,
+                    background: '#2a2a2a', color: '#e0e0e0', borderRadius: '16px 16px 4px 16px',
+                    padding: '10px 16px', maxWidth: '72%', fontSize: 14, lineHeight: 1.6,
                     whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+                    border: '1px solid #333',
                   }}>
                     {msg.content}
                   </div>
@@ -186,16 +186,15 @@ export default function ChatPage({ conversationId }: ChatPageProps) {
                   <div style={{ maxWidth: '100%', width: '100%' }}>
                     {msg.content ? (
                       <pre style={{
-                        margin: 0, lineHeight: 1.6,
+                        margin: 0, lineHeight: 1.65,
                         whiteSpace: 'pre-wrap', wordBreak: 'break-word',
-                        fontFamily: 'monospace', fontSize: 13, color: '#e0e0e0',
+                        fontFamily: "'Menlo', 'Consolas', 'Monaco', monospace", fontSize: 13, color: '#d4d4d4',
                       }}>
                         {msg.content}
                       </pre>
                     ) : (
-                      // Show "Thinking…" spinner only in the last pending assistant slot
                       i === messages.length - 1 && !msg.done && (
-                        <span style={{ color: '#888', fontSize: 13 }}>⟳ Thinking…</span>
+                        <span style={{ color: '#555', fontSize: 13 }}>Thinking…</span>
                       )
                     )}
                   </div>
@@ -210,66 +209,58 @@ export default function ChatPage({ conversationId }: ChatPageProps) {
       <ToolPanel entries={toolEntries} loading={loading} />
 
       {/* Input area */}
-      <div style={{ padding: '12px 16px', background: '#111', borderTop: '1px solid #333', display: 'flex', gap: 8, alignItems: 'flex-end' }}>
-        <button
-          onClick={handleNewConversation}
-          disabled={loading}
-          title="Start a new conversation"
-          style={{
-            background: '#333',
-            border: '1px solid #555',
-            borderRadius: 6,
-            color: '#aaa',
-            padding: '8px 12px',
-            cursor: loading ? 'not-allowed' : 'pointer',
-            opacity: loading ? 0.5 : 1,
-            fontSize: 13,
-            whiteSpace: 'nowrap',
-            height: 'fit-content',
-          }}
-        >
-          New conversation
-        </button>
-        <textarea
-          value={query}
-          onChange={e => setQuery(e.target.value)}
-          onKeyDown={handleKeyDown}
-          disabled={loading}
-          placeholder="Type your question and press Enter…"
-          rows={2}
-          style={{
-            flex: 1,
-            background: '#222',
-            border: '1px solid #444',
-            color: '#e0e0e0',
-            borderRadius: 6,
-            padding: '8px 12px',
-            fontSize: 14,
-            resize: 'none',
-            fontFamily: 'sans-serif',
-            opacity: loading ? 0.5 : 1,
-          }}
-        />
-        <button
-          onClick={handleSubmit}
-          disabled={loading || !query.trim()}
-          style={{
-            background: '#4a9eff',
-            border: 'none',
-            borderRadius: 6,
-            color: '#fff',
-            padding: '0 16px',
-            cursor: loading || !query.trim() ? 'not-allowed' : 'pointer',
-            opacity: loading || !query.trim() ? 0.5 : 1,
-            fontSize: 14,
-            height: 'fit-content',
-            alignSelf: 'flex-end',
-            paddingTop: 10,
-            paddingBottom: 10,
-          }}
-        >
-          Send
-        </button>
+      <div style={{ padding: '12px 24px 20px' }}>
+        <div style={{ maxWidth: 740, margin: '0 auto' }}>
+          <div style={{
+            display: 'flex', alignItems: 'flex-end', gap: 0,
+            background: '#1e1e1e', border: '1px solid #2e2e2e',
+            borderRadius: 12, overflow: 'hidden',
+            boxShadow: '0 0 0 1px rgba(0,0,0,0.3)',
+          }}>
+            <textarea
+              value={query}
+              onChange={e => setQuery(e.target.value)}
+              onKeyDown={handleKeyDown}
+              disabled={loading}
+              placeholder="Message…"
+              rows={1}
+              style={{
+                flex: 1,
+                background: 'transparent',
+                border: 'none',
+                outline: 'none',
+                color: '#e0e0e0',
+                padding: '12px 14px',
+                fontSize: 14,
+                resize: 'none',
+                fontFamily: FONT,
+                lineHeight: 1.5,
+                minHeight: 44,
+                maxHeight: 180,
+                opacity: loading ? 0.5 : 1,
+              }}
+            />
+            <button
+              onClick={handleSubmit}
+              disabled={loading || !query.trim()}
+              style={{
+                background: query.trim() && !loading ? '#4a9eff' : 'transparent',
+                border: 'none',
+                borderRadius: 8,
+                margin: 6,
+                color: query.trim() && !loading ? '#fff' : '#3a3a3a',
+                width: 32, height: 32,
+                cursor: loading || !query.trim() ? 'not-allowed' : 'pointer',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                flexShrink: 0,
+                transition: 'background 0.15s, color 0.15s',
+              }}
+              title="Send"
+            >
+              <SendIcon />
+            </button>
+          </div>
+        </div>
       </div>
     </div>
   )
