@@ -666,10 +666,6 @@ func (s *Server) resolveUserID(r *http.Request) string {
 
 // handleListConversations handles GET /api/conversations.
 func (s *Server) handleListConversations(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
 	if s.store == nil {
 		w.Header().Set("Content-Type", "application/json")
 		w.Write([]byte("[]"))
@@ -690,10 +686,6 @@ func (s *Server) handleListConversations(w http.ResponseWriter, r *http.Request)
 
 // handleDeleteConversation handles DELETE /api/conversations/{id}.
 func (s *Server) handleDeleteConversation(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodDelete {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
 	id := r.PathValue("id")
 	if id == "" {
 		http.Error(w, "missing id", http.StatusBadRequest)

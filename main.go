@@ -166,18 +166,17 @@ func main() {
 	adminAuth := newAdminAuth()
 	adminHub := newAdminHub()
 
-	// Open SQLite store if DB_PATH is set (or default to /data/perch.db)
+	// Open SQLite store if DB_PATH is set (or default to /data/perch.db).
+	// Set DB_PATH= (empty) to disable history.
 	var store *Store
 	dbPath := os.Getenv("DB_PATH")
 	if dbPath == "" {
 		dbPath = "/data/perch.db"
 	}
-	if dbPath != "" {
-		var storeErr error
-		store, storeErr = OpenStore(dbPath)
-		if storeErr != nil {
-			logger.Warn("failed to open store, history disabled", "path", dbPath, "err", storeErr)
-		}
+	var storeErr error
+	store, storeErr = OpenStore(dbPath)
+	if storeErr != nil {
+		logger.Warn("failed to open store, history disabled", "path", dbPath, "err", storeErr)
 	}
 
 	userSessions := newUserSessionManager(runtime, workdir, logger.Logger, store, adminHub)

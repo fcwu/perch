@@ -10,10 +10,13 @@ import (
 // newUUID returns a random UUID (version 4, RFC 4122).
 func newUUID() string {
 	b := make([]byte, 16)
-	rand.Read(b)
+	if _, err := rand.Read(b); err != nil {
+		panic("crypto/rand failed: " + err.Error())
+	}
 	b[6] = (b[6] & 0x0f) | 0x40 // version 4
 	b[8] = (b[8] & 0x3f) | 0x80 // RFC 4122 variant
-	return fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:16])
+	return fmt.Sprintf("%08x-%04x-%04x-%04x-%012x",
+		b[0:4], b[4:6], b[6:8], b[8:10], b[10:16])
 }
 
 // ConversationRow is a row returned by ListConversations.
@@ -79,13 +82,15 @@ func (s *Store) ListConversations(userID string) ([]ConversationRow, error) {
 // DeleteConversation deletes the conversation and all its query_sessions turns.
 // Returns (false, nil) if not found.
 func (s *Store) DeleteConversation(id, userID string) (bool, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	tx, err := s.db.Begin()
+	if err != nil {
+		return false, err
+	}
+	defer tx.Rollback()
 
 	// Check existence first.
 	var count int
-	err := s.db.QueryRow(`SELECT COUNT(*) FROM conversations WHERE id=? AND user_id=?`, id, userID).Scan(&count)
-	if err != nil {
+	if err := tx.QueryRow(`SELECT COUNT(*) FROM conversations WHERE id=? AND user_id=?`, id, userID).Scan(&count); err != nil {
 		return false, err
 	}
 	if count == 0 {
@@ -93,19 +98,14 @@ func (s *Store) DeleteConversation(id, userID string) (bool, error) {
 	}
 
 	// Delete associated sessions.
-	if _, err := s.db.Exec(`DELETE FROM query_sessions WHERE conversation_id=?`, id); err != nil {
+	if _, err := tx.Exec(`DELETE FROM query_sessions WHERE conversation_id=?`, id); err != nil {
 		return false, err
 	}
 	// Delete the conversation row.
-	res, err := s.db.Exec(`DELETE FROM conversations WHERE id=? AND user_id=?`, id, userID)
-	if err != nil {
+	if _, err := tx.Exec(`DELETE FROM conversations WHERE id=? AND user_id=?`, id, userID); err != nil {
 		return false, err
 	}
-	n, err := res.RowsAffected()
-	if err != nil {
-		return false, err
-	}
-	return n > 0, nil
+	return true, tx.Commit()
 }
 
 // TouchConversation updates updated_at to now for the given conversation.
