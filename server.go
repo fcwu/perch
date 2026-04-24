@@ -413,7 +413,7 @@ func (s *Server) handleChatAPI(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "chat not configured", http.StatusServiceUnavailable)
 		return
 	}
-	userID, _ := r.Context().Value(ctxUserID).(string)
+	userID := s.resolveUserID(r)
 	username, _ := r.Context().Value(ctxUsername).(string)
 	if userID == "" {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
@@ -474,7 +474,7 @@ func (s *Server) handleChatSSE(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "chat not configured", http.StatusServiceUnavailable)
 		return
 	}
-	userID, _ := r.Context().Value(ctxUserID).(string)
+	userID := s.resolveUserID(r)
 	if userID == "" {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
@@ -552,7 +552,7 @@ func (s *Server) handleChatWS(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "chat not configured", http.StatusServiceUnavailable)
 		return
 	}
-	userID, _ := r.Context().Value(ctxUserID).(string)
+	userID := s.resolveUserID(r)
 	if userID == "" {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return

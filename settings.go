@@ -355,3 +355,33 @@ func (sm *SettingsManager) EffectiveAgentRuntime(envDefault string) string {
 	}
 	return envDefault
 }
+
+// EffectiveAuthMethod returns auth.method from settings if set, else envDefault.
+func (sm *SettingsManager) EffectiveAuthMethod(envDefault string) string {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+	if sm.current.Auth != nil && sm.current.Auth.Method != nil {
+		return *sm.current.Auth.Method
+	}
+	return envDefault
+}
+
+// EffectiveDiscordToken returns the Discord bot token from settings if set, else envDefault.
+func (sm *SettingsManager) EffectiveDiscordToken(envDefault string) string {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+	if sm.current.Discord != nil && sm.current.Discord.BotToken != nil {
+		return *sm.current.Discord.BotToken
+	}
+	return envDefault
+}
+
+// EffectiveTelegramToken returns the Telegram bot token from settings if set, else envDefault.
+func (sm *SettingsManager) EffectiveTelegramToken(envDefault string) string {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+	if sm.current.Telegram != nil && sm.current.Telegram.BotToken != nil {
+		return *sm.current.Telegram.BotToken
+	}
+	return envDefault
+}

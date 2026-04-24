@@ -25,6 +25,13 @@ func main() {
 		os.Exit(1)
 	}
 
+	// --- Settings manager (loaded early so restart-required fields are effective) ---
+	sm, err := NewSettingsManager("/data/settings.json")
+	if err != nil {
+		logger.Warn("settings manager init failed", "err", err)
+		sm = &SettingsManager{path: "/data/settings.json"}
+	}
+
 	// --- Operating mode ---
 	mode, err := parseOperatingMode()
 	if err != nil {
@@ -38,10 +45,10 @@ func main() {
 		}
 	}
 
-	// --- Auth method (AUTH_METHOD, with fallback to legacy AUTH_MODE) ---
-	authMethod := os.Getenv("AUTH_METHOD")
+	// --- Auth method (AUTH_METHOD, with fallback to legacy AUTH_MODE, then settings.json) ---
+	authMethod := sm.EffectiveAuthMethod(os.Getenv("AUTH_METHOD"))
 	if authMethod == "" {
-		authMethod = os.Getenv("AUTH_MODE") // backward compat
+		authMethod = sm.EffectiveAuthMethod(os.Getenv("AUTH_MODE")) // backward compat
 	}
 	if authMethod == "" {
 		authMethod = "none"
@@ -102,10 +109,10 @@ func main() {
 	// --- IM bots (optional) ---
 	var im *IMManager
 	var discordSess *DiscordSessionManager
-	discordToken := os.Getenv("DISCORD_BOT_TOKEN")
+	discordToken := sm.EffectiveDiscordToken(os.Getenv("DISCORD_BOT_TOKEN"))
 	discordChannel := os.Getenv("DISCORD_CHANNEL_ID")
 	discordAllowedDMRaw := os.Getenv("DISCORD_ALLOWED_USER_IDS")
-	telegramToken := os.Getenv("TELEGRAM_BOT_TOKEN")
+	telegramToken := sm.EffectiveTelegramToken(os.Getenv("TELEGRAM_BOT_TOKEN"))
 	telegramChatStr := os.Getenv("TELEGRAM_CHAT_ID")
 
 	var discordAllowedDMUsers []string
@@ -188,13 +195,6 @@ func main() {
 	var userRL *UserRateLimiter
 	if gitlabAuth.enabled() {
 		userRL = newUserRateLimiter(rateLimitRPM)
-	}
-
-	// --- Settings manager ---
-	sm, err := NewSettingsManager("/data/settings.json")
-	if err != nil {
-		logger.Warn("settings manager init failed", "err", err)
-		sm = &SettingsManager{path: "/data/settings.json"}
 	}
 
 	srv := newServerWithMode(pm, auth, im, sessProvider, userSessions, gitlabAuth, adminAuth, adminHub, store, userRL, sm, mode, logger.Logger)

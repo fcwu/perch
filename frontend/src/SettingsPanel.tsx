@@ -223,6 +223,13 @@ function GeneralTab({ settings, onSave, saving }: TabProps) {
   const [rpm, setRpm] = useState(String(settings.rate_limit?.rpm ?? ''))
   const [blockIPs, setBlockIPs] = useState((settings.network?.block_ips ?? []).join('\n'))
 
+  useEffect(() => {
+    setRuntime(settings.agent?.runtime ?? '')
+    setArgs(settings.agent?.args ?? '')
+    setRpm(String(settings.rate_limit?.rpm ?? ''))
+    setBlockIPs((settings.network?.block_ips ?? []).join('\n'))
+  }, [settings])
+
   return (
     <>
       <Field label="Agent Runtime" restartRequired>
@@ -260,6 +267,12 @@ function GeneralTab({ settings, onSave, saving }: TabProps) {
 function AuthTab({ settings, onSave, saving }: TabProps) {
   const [method, setMethod] = useState(settings.auth?.method ?? '')
   const [password, setPassword] = useState(settings.auth?.password ?? '')
+
+  useEffect(() => {
+    setMethod(settings.auth?.method ?? '')
+    setPassword(settings.auth?.password ?? '')
+  }, [settings])
+
   return (
     <>
       <Field label="Auth Method" restartRequired>
@@ -287,6 +300,17 @@ function IntegrationsTab({ settings, onSave, saving }: TabProps) {
   const [allowedUsers, setAllowedUsers] = useState((d.allowed_user_ids ?? []).join(','))
   const [telegramToken, setTelegramToken] = useState(t.bot_token ?? '')
   const [telegramChat, setTelegramChat] = useState(t.chat_id ?? '')
+
+  useEffect(() => {
+    const disc = settings.discord ?? {}
+    const tele = settings.telegram ?? {}
+    setDiscordToken(disc.bot_token ?? '')
+    setChannelID(disc.channel_id ?? '')
+    setAllowedUsers((disc.allowed_user_ids ?? []).join(','))
+    setTelegramToken(tele.bot_token ?? '')
+    setTelegramChat(tele.chat_id ?? '')
+  }, [settings])
+
   return (
     <>
       <div style={{ color: '#4a9eff', fontSize: 12, fontFamily: 'sans-serif', marginBottom: 12, fontWeight: 600 }}>Discord</div>
@@ -313,6 +337,16 @@ function WorkspaceTab({ settings, onSave, saving }: TabProps) {
   const [token, setToken] = useState(w.git_token ?? '')
   const [notify, setNotify] = useState(w.notify_channel ?? '')
   const [submodules, setSubmodules] = useState(w.sync_submodules ?? false)
+
+  useEffect(() => {
+    const ws = settings.workspace ?? {}
+    setEnabled(ws.sync_enabled ?? false)
+    setSyncInterval(ws.sync_interval ?? '60s')
+    setToken(ws.git_token ?? '')
+    setNotify(ws.notify_channel ?? '')
+    setSubmodules(ws.sync_submodules ?? false)
+  }, [settings])
+
   return (
     <>
       <Field label="Git Sync Enabled">
@@ -335,6 +369,11 @@ function WorkspaceTab({ settings, onSave, saving }: TabProps) {
 
 function AdvancedTab({ settings, onSave, saving }: TabProps) {
   const [logFormat, setLogFormat] = useState(settings.log?.format ?? '')
+
+  useEffect(() => {
+    setLogFormat(settings.log?.format ?? '')
+  }, [settings])
+
   return (
     <>
       <Field label="Log Format">

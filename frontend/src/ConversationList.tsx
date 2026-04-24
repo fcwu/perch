@@ -22,7 +22,7 @@ function groupConversations(convs: Conversation[]) {
     { label: 'Older', items: [] },
   ]
   for (const c of convs) {
-    const age = now - c.updated_at
+    const age = now - c.updated_at * 1000
     if (age < dayMs) groups[0].items.push(c)
     else if (age < 2 * dayMs) groups[1].items.push(c)
     else if (age < 7 * dayMs) groups[2].items.push(c)
