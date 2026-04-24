@@ -22,7 +22,7 @@ interface ChatPageProps {
   sidebarOpen?: boolean
 }
 
-export default function ChatPage(_: ChatPageProps) {
+export default function ChatPage({ conversationId }: ChatPageProps) {
   const [query, setQuery] = useState('')
   const [messages, setMessages] = useState<Message[]>([])
   const [newConversation, setNewConversation] = useState(false)
@@ -61,7 +61,7 @@ export default function ChatPage(_: ChatPageProps) {
       const resp = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query: q, new_conversation: sendNewConversation }),
+        body: JSON.stringify({ query: q, new_conversation: sendNewConversation, conversation_id: conversationId }),
       })
       if (resp.status === 409) {
         alert('A session is already in progress. Please wait.')
@@ -74,6 +74,12 @@ export default function ChatPage(_: ChatPageProps) {
         setLoading(false)
         setMessages(prev => prev.slice(0, -2))
         return
+      }
+      const data = await resp.json()
+      if (data.conversation_id && !conversationId) {
+        // Update URL without reload and refresh sidebar
+        window.history.replaceState({}, '', `/chat?id=${data.conversation_id}`)
+        window.dispatchEvent(new CustomEvent('perch:refresh-conversations'))
       }
     } catch (e) {
       alert('Network error: ' + e)
@@ -137,7 +143,7 @@ export default function ChatPage(_: ChatPageProps) {
       setLoading(false)
       es.close()
     }
-  }, [query, loading, newConversation])
+  }, [query, loading, newConversation, conversationId])
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {

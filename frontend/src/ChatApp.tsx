@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import Sidebar from './Sidebar'
 import ChatPage from './ChatPage'
+import SettingsPanel from './SettingsPanel'
 
 interface AuthStatus {
   authenticated: boolean
@@ -26,6 +27,7 @@ export default function ChatApp({ authStatus }: ChatAppProps) {
   }
 
   return (
+    <>
     <div style={{ display: 'flex', height: '100dvh', background: '#0a0a0a', overflow: 'hidden' }}>
       {/* Sidebar */}
       {sidebarOpen && (
@@ -58,5 +60,7 @@ export default function ChatApp({ authStatus }: ChatAppProps) {
         />
       </div>
     </div>
+    <SettingsPanel />
+    </>
   )
 }
