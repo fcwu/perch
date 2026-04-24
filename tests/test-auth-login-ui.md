@@ -279,7 +279,7 @@
 
 **Given** 使用者已以 password 模式登入並持有 session cookie
 **When** 使用者執行登出
-**Then** session cookie 被清除，使用者被導向首頁，需重新登入才能存取
+**Then** session cookie 被清除，使用者被導向 `/chat`（或登入畫面），需重新登入才能存取
 
 ---
 
@@ -289,7 +289,7 @@
 
 **Given** 使用者尚未登入（沒有 session cookie）
 **When** 使用者觸發登出操作
-**Then** 操作成功完成，被導向首頁，不出現任何錯誤
+**Then** 操作成功完成，被導向 `/chat`，不出現任何錯誤
 
 ---
 
@@ -327,17 +327,17 @@
 
 **Given** 使用者已以 password 模式登入並看到登出按鈕
 **When** 使用者點擊登出按鈕
-**Then** session 被清除，使用者被導回首頁，登出按鈕消失
+**Then** session 被清除，使用者被導回 `/chat`（顯示登入畫面），登出按鈕消失
 
 ---
 
-### AL29 — Single-user 模式已驗證時直接顯示 terminal UI
+### AL29 — Single-user 模式已驗證時重導向至 Chat UI
 
 **層級**：E2E-browser（無需 GitLab）
 
 **Given** Perch 以 `PERCH_MODE=single`、`AUTH_METHOD=none` 啟動
 **When** 使用者開啟 `/`
-**Then** 頁面直接顯示 terminal（Claude Code）UI，不出現任何登入畫面
+**Then** 瀏覽器收到 302 重導向至 `/chat`；`/chat` 頁面直接顯示 Chat UI（sidebar + chat 輸入區），不出現任何登入畫面
 
 ---
 

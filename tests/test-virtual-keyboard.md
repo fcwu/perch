@@ -10,7 +10,7 @@
 
 **層級**：E2E-browser
 
-**Given** 使用者在電腦瀏覽器開啟 `http://localhost:8080`
+**Given** 使用者在電腦瀏覽器開啟 `http://localhost:8080/terminal`
 **When** 頁面載入完成
 **Then** 畫面右下角顯示一個 ⌨ 浮動按鈕，虛擬鍵盤列預設收合
 

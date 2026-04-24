@@ -12,18 +12,28 @@
 
 **Given** Perch 以 `AUTH_MODE=none` 啟動
 **When** 使用者在瀏覽器開啟 `http://localhost:8080`
-**Then** 頁面正常載入，顯示 terminal 畫面，不出現任何錯誤頁面
+**Then** 瀏覽器收到 302 重導向至 `/chat`；`/chat` 頁面正常載入，顯示左側 sidebar 與 chat 輸入區的 Chat UI 版面，不出現任何錯誤頁面
 
 **反向驗證**：若改用 `https://localhost:8080`，瀏覽器應顯示無法連線（非 TLS server）。
 
 ---
 
-## T02 — 前端載入
+## T01b — Terminal 路由（none 模式）
+
+**層級**：E2E-browser
+
+**Given** Perch 以 `AUTH_MODE=none` 啟動（auth=none 模式下 /terminal 無需 admin cookie）
+**When** 使用者在瀏覽器開啟 `http://localhost:8080/terminal`
+**Then** 頁面正常載入，顯示 xterm.js terminal 畫面，不出現任何錯誤頁面或重導向
+
+---
+
+## T02 — 前端載入（Terminal）
 
 **層級**：E2E-browser
 
 **Given** Perch 已正常啟動
-**When** 使用者開啟 `http://localhost:8080`
+**When** 使用者開啟 `http://localhost:8080/terminal`
 **Then**
 - 看到黑色 terminal 畫面
 - 畫面底部顯示虛擬鍵盤列
@@ -56,7 +66,7 @@
 **層級**：E2E-browser
 
 **Given** Perch 已啟動（任何認證模式均可）
-**When** 使用者開啟一個全新瀏覽器分頁，直接輸入 `http://localhost:8080`
+**When** 使用者開啟一個全新瀏覽器分頁，直接輸入 `http://localhost:8080/terminal`
 **Then**
 - Terminal 黑色區域填滿整個視窗，上下左右無明顯空白邊緣
 - 不需手動縮放或重整頁面
