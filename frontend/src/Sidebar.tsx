@@ -1,3 +1,4 @@
+import type { MouseEvent } from 'react'
 import ConversationList from './ConversationList'
 
 interface SidebarProps {
@@ -66,7 +67,7 @@ export default function Sidebar({ isAdmin, authMethod, onNewChat, onCollapse, ac
   )
 }
 
-function NavLink({ href, label, onClick }: { href: string; label: string; onClick?: (e: React.MouseEvent) => void }) {
+function NavLink({ href, label, onClick }: { href: string; label: string; onClick?: (e: MouseEvent<HTMLAnchorElement>) => void }) {
   return (
     <a
       href={href}

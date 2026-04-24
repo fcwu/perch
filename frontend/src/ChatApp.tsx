@@ -16,14 +16,12 @@ interface ChatAppProps {
 
 export default function ChatApp({ authStatus }: ChatAppProps) {
   const [sidebarOpen, setSidebarOpen] = useState(true)
-  const isAdmin = authStatus.role === 'admin' || authStatus.auth_method === 'none' || authStatus.auth_method === 'password'
+  const isAdmin = authStatus.role === 'admin' || authStatus.mode === 'single'
 
   // conversation_id from URL ?id=<uuid>
   const conversationId = new URLSearchParams(window.location.search).get('id') ?? undefined
 
   const onNewChat = () => {
-    window.history.pushState({}, '', '/chat')
-    // force re-render by reloading
     window.location.href = '/chat'
   }
 
