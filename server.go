@@ -74,7 +74,6 @@ func newServerWithMode(pm *PTYManager, auth *AuthMiddleware, im *IMManager, sess
 		s.mux.HandleFunc("/api/logout", gitlabAuth.handleLogout)
 	}
 	// Admin endpoints — POST handled by adminAuth, GET falls through to SPA below.
-	adminLoginHandler := adminAuth.handleLogin
 	if adminAuth != nil {
 		adminMW := adminAuth.middleware
 		s.mux.Handle("/api/admin/history/", adminMW(http.HandlerFunc(s.handleAdminHistoryDetail)))
@@ -129,8 +128,8 @@ func newServerWithMode(pm *PTYManager, auth *AuthMiddleware, im *IMManager, sess
 		s.mux.Handle("/", spaHandler)
 		// /admin/login GET → SPA, POST → login handler.
 		s.mux.HandleFunc("/admin/login", func(w http.ResponseWriter, r *http.Request) {
-			if r.Method == http.MethodPost {
-				adminLoginHandler(w, r)
+			if r.Method == http.MethodPost && adminAuth != nil {
+				adminAuth.handleLogin(w, r)
 				return
 			}
 			serveIndexHTML(w, r, distFS)
@@ -156,19 +155,25 @@ func newServerWithMode(pm *PTYManager, auth *AuthMiddleware, im *IMManager, sess
 			serveIndexHTML(w, r, distFS)
 		}
 		if mode == ModeMulti && gitlabAuth != nil && gitlabAuth.enabled() {
-			// Multi-user GitLab: wrap with role check.
+			// Multi-user GitLab: wrap with role check; redirect non-admin to /chat.
 			s.mux.Handle("/terminal", gitlabAuth.middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				// Check if user has admin role.
 				role, _ := r.Context().Value(ctxRole).(string)
 				if role != "admin" {
-					http.Error(w, "forbidden", http.StatusForbidden)
+					http.Redirect(w, r, "/chat", http.StatusFound)
 					return
 				}
 				terminalHandler(w, r)
 			})))
 		} else if adminAuth != nil {
-			// Single-user: wrap with adminAuth.middleware.
-			s.mux.Handle("/terminal", adminAuth.middleware(http.HandlerFunc(terminalHandler)))
+			// Single-user: check admin cookie; redirect to /chat if missing.
+			s.mux.HandleFunc("/terminal", func(w http.ResponseWriter, r *http.Request) {
+				if !adminAuth.isAdmin(r) {
+					http.Redirect(w, r, "/chat", http.StatusFound)
+					return
+				}
+				terminalHandler(w, r)
+			})
 		} else {
 			// No admin auth configured: allow everyone (shouldn't happen in production).
 			s.mux.HandleFunc("/terminal", terminalHandler)
