@@ -39,20 +39,21 @@ type Server struct {
 	adminHub        *AdminHub
 	store           *Store
 	userRateLimiter *UserRateLimiter
+	sm              *SettingsManager
 	mode            OperatingMode
 	logger          *slog.Logger
 	mux             *http.ServeMux
 }
 
 func newServer(pm *PTYManager, auth *AuthMiddleware, im *IMManager, sessions SessionProvider, userSessions *UserSessionManager, gitlabAuth *gitLabAuth, adminAuth *adminAuth, adminHub *AdminHub, store *Store, userRL *UserRateLimiter, logger *slog.Logger) *Server {
-	return newServerWithMode(pm, auth, im, sessions, userSessions, gitlabAuth, adminAuth, adminHub, store, userRL, ModeSingle, logger)
+	return newServerWithMode(pm, auth, im, sessions, userSessions, gitlabAuth, adminAuth, adminHub, store, userRL, nil, ModeSingle, logger)
 }
 
-func newServerWithMode(pm *PTYManager, auth *AuthMiddleware, im *IMManager, sessions SessionProvider, userSessions *UserSessionManager, gitlabAuth *gitLabAuth, adminAuth *adminAuth, adminHub *AdminHub, store *Store, userRL *UserRateLimiter, mode OperatingMode, logger *slog.Logger) *Server {
+func newServerWithMode(pm *PTYManager, auth *AuthMiddleware, im *IMManager, sessions SessionProvider, userSessions *UserSessionManager, gitlabAuth *gitLabAuth, adminAuth *adminAuth, adminHub *AdminHub, store *Store, userRL *UserRateLimiter, sm *SettingsManager, mode OperatingMode, logger *slog.Logger) *Server {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	s := &Server{pty: pm, auth: auth, im: im, sessions: sessions, userSessions: userSessions, gitlabAuth: gitlabAuth, adminAuth: adminAuth, adminHub: adminHub, store: store, userRateLimiter: userRL, mode: mode, logger: logger, mux: http.NewServeMux()}
+	s := &Server{pty: pm, auth: auth, im: im, sessions: sessions, userSessions: userSessions, gitlabAuth: gitlabAuth, adminAuth: adminAuth, adminHub: adminHub, store: store, userRateLimiter: userRL, sm: sm, mode: mode, logger: logger, mux: http.NewServeMux()}
 	s.mux.HandleFunc("/ws", s.handleWS)
 	s.mux.HandleFunc("/input", s.handleInput)
 	s.mux.HandleFunc("/sessions", s.handleSessions)
@@ -80,6 +81,9 @@ func newServerWithMode(pm *PTYManager, auth *AuthMiddleware, im *IMManager, sess
 		s.mux.Handle("/api/admin/history", adminMW(http.HandlerFunc(s.handleAdminHistory)))
 		s.mux.Handle("/api/admin/analytics", adminMW(http.HandlerFunc(s.handleAdminAnalytics)))
 		s.mux.Handle("/ws/admin", adminMW(http.HandlerFunc(s.handleAdminWS)))
+		s.mux.Handle("GET /api/settings", adminMW(http.HandlerFunc(s.handleGetSettings)))
+		s.mux.Handle("PATCH /api/settings", adminMW(http.HandlerFunc(s.handlePatchSettings)))
+		s.mux.Handle("POST /api/admin/restart", adminMW(http.HandlerFunc(s.handleAdminRestart)))
 	}
 	// GitLab OAuth endpoints (no auth required).
 	// Chat routes use GitLab middleware only when GitLab auth is active AND
@@ -159,6 +163,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Admin paths use their own cookie auth or are public (login page, SPA).
 	if r.URL.Path == "/ws/admin" ||
 		strings.HasPrefix(r.URL.Path, "/api/admin/") ||
+		r.URL.Path == "/api/settings" ||
 		r.URL.Path == "/admin/login" ||
 		r.URL.Path == "/admin" || strings.HasPrefix(r.URL.Path, "/admin/") {
 		s.mux.ServeHTTP(w, r)

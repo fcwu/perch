@@ -190,7 +190,14 @@ func main() {
 		userRL = newUserRateLimiter(rateLimitRPM)
 	}
 
-	srv := newServerWithMode(pm, auth, im, sessProvider, userSessions, gitlabAuth, adminAuth, adminHub, store, userRL, mode, logger.Logger)
+	// --- Settings manager ---
+	sm, err := NewSettingsManager("/data/settings.json")
+	if err != nil {
+		logger.Warn("settings manager init failed", "err", err)
+		sm = &SettingsManager{path: "/data/settings.json"}
+	}
+
+	srv := newServerWithMode(pm, auth, im, sessProvider, userSessions, gitlabAuth, adminAuth, adminHub, store, userRL, sm, mode, logger.Logger)
 
 	// Apply rate limiting to sensitive endpoints only
 	sensitivePaths := map[string]bool{"/login": true, "/bootstrap": true}

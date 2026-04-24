@@ -249,7 +249,7 @@ func TestPasswordModeGitLabRouteReturns404(t *testing.T) {
 		adminIDs:     map[string]bool{},
 		allowedIDs:   map[string]bool{},
 	}
-	srv := newServerWithMode(pm, auth, nil, nil, nil, ga, nil, nil, nil, nil, ModeSingle, nil)
+	srv := newServerWithMode(pm, auth, nil, nil, nil, ga, nil, nil, nil, nil, nil, ModeSingle, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/auth/gitlab", nil)
 	rr := httptest.NewRecorder()
