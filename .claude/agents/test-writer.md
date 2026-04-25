@@ -75,7 +75,7 @@ description: Writes test cases into tests/test*.md based on openspec specs or us
    - **When**：描述單一操作（curl 指令、瀏覽器動作）
    - **Then**：描述可觀察的結果（HTTP 狀態碼、cookie、回應 body）
    - 同一 test case 可有多組 When/Then 涵蓋不同情境分支
-   - 具體指令（curl）可放在 When 或 Then 的 code block 中
+   - **不寫詳細 setup/teardown 步驟**：前置操作只用一句話描述意圖（例：「透過 `PATCH /api/settings` 切換到 password 模式並重啟」），不展開成完整指令；test-verifier 依描述自行執行
 
    **用戶導向原則**（最重要）：
    - 測試描述的是**使用者能觀察到的行為**，不是程式內部狀態

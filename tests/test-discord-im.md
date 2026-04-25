@@ -25,7 +25,7 @@
 
 **層級**：E2E-browser（含 Discord 整合）
 
-**前置操作**：需先切換到 PTY 模式（將 `DISCORD_ACP_ENABLED=false`），容器重啟後再執行測試，測試完畢後還原為 `DISCORD_ACP_ENABLED=true`。容器重啟需使用兩個 compose 檔：`docker compose -f docker-compose.yml -f docker-compose.local.yml`。
+**前置操作**：透過 `PATCH /api/settings` 將 `discord.acp_enabled` 設為 `false`，再 `POST /api/admin/restart` 重啟並等待 server 回來。**後置操作**：`PATCH /api/settings` 將 `discord.acp_enabled` 設回 `true`，再重啟並等待 server 回來。
 
 **Given** Perch 已完成 Discord Bot 設定並以 PTY 模式啟動（`DISCORD_ACP_ENABLED=false`）
 **When** 使用者在指定 Discord channel 傳送訊息：「你好，今天幾號？」
@@ -39,7 +39,7 @@
 
 **層級**：E2E-browser（含 Discord 整合）
 
-**前置操作**：需先切換到 PTY 模式（`DISCORD_ACP_ENABLED=false`），容器重啟後再執行測試，測試完畢後還原。
+**前置操作**：透過 `PATCH /api/settings` 將 `discord.acp_enabled` 設為 `false`，再 `POST /api/admin/restart` 重啟並等待 server 回來。**後置操作**：`PATCH /api/settings` 將 `discord.acp_enabled` 設回 `true`，再重啟並等待 server 回來。
 
 **Given** Discord bot 已連線，Claude Code Hooks 已啟用，Perch 以 PTY 模式啟動（`DISCORD_ACP_ENABLED=false`）
 **When** 使用者在 Discord 傳送會觸發工具的指令，例如：「列出 /workspace 下的所有檔案」
@@ -57,7 +57,7 @@
 
 **層級**：E2E-browser（含 Discord 整合）
 
-**前置操作**：需先切換到 PTY 模式（將 `DISCORD_ACP_ENABLED=false`，容器重啟），確認 Discord bot 已連線（觀察 log 有 `Discord bot connected` 訊息），再於 Discord 頻道傳送一則測試訊息確認 bot 正常回應，最後再執行本測試，測試完畢後還原為 `DISCORD_ACP_ENABLED=true`。
+**前置操作**：透過 `PATCH /api/settings` 將 `discord.acp_enabled` 設為 `false`，再 `POST /api/admin/restart` 重啟並等待 server 回來。**後置操作**：`PATCH /api/settings` 將 `discord.acp_enabled` 設回 `true`，再重啟並等待 server 回來。
 
 **Given** Perch 以 Discord Bot 設定啟動（PTY 模式，未設 `DISCORD_ACP_ENABLED`）
 **When** 使用者在瀏覽器開啟 Perch，並點擊頁面上方 tab 列中的 Discord channel tab
@@ -76,7 +76,7 @@
 
 **層級**：E2E-browser（含 Discord 整合）
 
-**前置操作**：需先切換到 PTY 模式（`DISCORD_ACP_ENABLED=false`），容器重啟後在瀏覽器開啟 Perch，確認頁面 tab 列中已出現 Discord channel tab，且 tab 可正常點擊切換，再執行本測試，測試完畢後還原為 `DISCORD_ACP_ENABLED=true`。
+**前置操作**：透過 `PATCH /api/settings` 將 `discord.acp_enabled` 設為 `false`，再 `POST /api/admin/restart` 重啟並等待 server 回來。**後置操作**：`PATCH /api/settings` 將 `discord.acp_enabled` 設回 `true`，再重啟並等待 server 回來。
 
 **Given** 使用者正在瀏覽器中檢視 Discord channel tab（PTY 模式）
 **When** 使用者調整瀏覽器視窗大小，然後在 Discord 傳送一個指令
@@ -131,7 +131,7 @@
 
 **層級**：E2E-browser（含 Discord 整合）
 
-**前置操作**：移除 `DISCORD_CHANNEL_ID` 並重啟容器（open-channel 模式）。
+**前置操作**：透過 `PATCH /api/settings` 清空 `discord.channel_id`（設為空字串），再 `POST /api/admin/restart` 重啟並等待 server 回來。**後置操作**：`PATCH /api/settings` 將 `discord.channel_id` 還原為原設定值，再重啟並等待 server 回來。
 
 **Given** Perch 以純 `DISCORD_BOT_TOKEN`（不帶 `DISCORD_CHANNEL_ID`）啟動，測試頻道為 public（#general）
 **When** 使用者在 public 頻道直接傳送訊息（不 @mention Bot）：「你好」
@@ -146,7 +146,7 @@
 
 **層級**：E2E-browser（含 Discord 整合）
 
-**前置操作**：移除 `DISCORD_CHANNEL_ID` 並重啟容器（open-channel 模式）。
+**前置操作**：透過 `PATCH /api/settings` 清空 `discord.channel_id`（設為空字串），再 `POST /api/admin/restart` 重啟並等待 server 回來。**後置操作**：`PATCH /api/settings` 將 `discord.channel_id` 還原為原設定值，再重啟並等待 server 回來。
 
 **Given** Perch 以純 `DISCORD_BOT_TOKEN` 啟動，測試頻道為 private（#myprivate）
 **When** 使用者在 private 頻道直接傳送訊息（不 @mention）：「你是誰？」
@@ -160,7 +160,7 @@
 
 **層級**：E2E-browser（含 Discord 整合）
 
-**前置操作**：移除 `DISCORD_CHANNEL_ID` 並重啟容器（open-channel 模式）。
+**前置操作**：透過 `PATCH /api/settings` 清空 `discord.channel_id`（設為空字串），再 `POST /api/admin/restart` 重啟並等待 server 回來。**後置操作**：`PATCH /api/settings` 將 `discord.channel_id` 還原為原設定值，再重啟並等待 server 回來。
 
 **Given** Perch 以純 `DISCORD_BOT_TOKEN` 啟動（無 `DISCORD_CHANNEL_ID`），Discord user ID 為 `1075643998632419380` 的使用者開啟與 Bot 的私訊（DM）
 **When** 使用者直接傳送：「今天日期是？」
@@ -175,7 +175,7 @@
 
 **層級**：E2E-browser（含 Discord 整合）
 
-**前置操作**：設定 `DISCORD_CHANNEL_ID=1496278101166915694`（#myprivate）並重啟容器，測試完畢後還原為 `DISCORD_CHANNEL_ID=1496644257149353994`。
+**前置操作**：透過 `PATCH /api/settings` 將 `discord.channel_id` 設為 `1496278101166915694`（#myprivate），再 `POST /api/admin/restart` 重啟並等待 server 回來。**後置操作**：`PATCH /api/settings` 將 `discord.channel_id` 還原為 `1496644257149353994`，再重啟並等待 server 回來。
 
 **Given** Perch 同時設定 `DISCORD_BOT_TOKEN` 與 `DISCORD_CHANNEL_ID=1496278101166915694`（指向 #myprivate）
 **When** 使用者在指定頻道（#myprivate）傳送訊息（不需 @mention）：「你好」
@@ -190,7 +190,7 @@
 
 **層級**：E2E-browser（含 Discord 整合）
 
-**前置操作**：移除 `DISCORD_CHANNEL_ID` 並重啟容器（open-channel 模式）。
+**前置操作**：透過 `PATCH /api/settings` 清空 `discord.channel_id`（設為空字串），再 `POST /api/admin/restart` 重啟並等待 server 回來。**後置操作**：`PATCH /api/settings` 將 `discord.channel_id` 還原為原設定值，再重啟並等待 server 回來。
 
 **Given** Perch 以純 `DISCORD_BOT_TOKEN` 啟動（無 channel filter），測試頻道為 public（#general）
 **When** 使用者傳送：`@Perch 列出 /workspace 下的檔案`
@@ -300,7 +300,7 @@ LISTEN_ADDR=:18080
 
 **層級**：E2E-browser（含 Discord 整合）
 
-**前置操作**：需先切換到 PTY 模式（將 `DISCORD_ACP_ENABLED=false`），容器重啟後再執行測試，測試完畢後還原為 `DISCORD_ACP_ENABLED=true`。
+**前置操作**：透過 `PATCH /api/settings` 將 `discord.acp_enabled` 設為 `false`，再 `POST /api/admin/restart` 重啟並等待 server 回來。**後置操作**：`PATCH /api/settings` 將 `discord.acp_enabled` 設回 `true`，再重啟並等待 server 回來。
 
 **Given** Perch 啟動時設定 `DISCORD_BOT_TOKEN`，且 `DISCORD_ACP_ENABLED=false`（PTY 模式）
 **When** 使用者在 Discord channel 傳送訊息，並在瀏覽器開啟 Perch 首頁

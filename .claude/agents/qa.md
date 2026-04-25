@@ -61,11 +61,13 @@ test-verifier 執行完每個檔案後會輸出一份獨立報告。你記錄每
 
 #### SKIP 項目
 
-**可透過 deployer 解決的**（切換 AUTH_METHOD、PERCH_MODE、調整 env var 等）：
+**可透過 deployer 解決的**（需修改 `.env` 或重建容器，例：`PERCH_MODE`、volume mount）：
 
 1. 命令 **deployer** 調整遠端 `.env` 並 `docker compose up -d --force-recreate`（不需重新 build image）
 2. 等容器就緒後，再次呼叫 **test-verifier** 執行這些 test cases（同一份報告路徑）
 3. 重複直到沒有可解決的 SKIP
+
+> **注意**：前置操作已指定 `PATCH /api/settings` 的測試（auth 模式、`discord.acp_enabled` 等），test-verifier 應自行執行，不應出現在此類 SKIP 中。若出現，視為 test-verifier 的錯誤，退回重跑。
 
 **真正無法解決的**（缺少必要 env vars，deployer 也無法補）：
 
@@ -147,8 +149,8 @@ SKIP 原因：<列出每個 SKIP 的缺少設定>
 |------|----------|------------|
 | 需要真實 GitLab OAuth 且 `.env` 無 GitLab 設定 | ✅ | ❌ |
 | 需要 mTLS 憑證且 `.env` 無 cert 設定 | ✅ | ❌ |
-| 需要切換 AUTH_METHOD / PERCH_MODE / 功能 env | ❌（deployer 調整） | ❌ |
-| 需要重啟容器 | ❌（deployer recreate） | ❌ |
+| 需要切換 settings API 管轄的設定（auth.method、discord.acp_enabled 等） | ❌（test-verifier 自行 PATCH + restart） | ❌ |
+| 需要修改 `.env` 或重建容器（PERCH_MODE、volume mount 等） | ❌（deployer 調整） | ❌ |
 | 需要 terminal 互動（Claude Code）| ❌（CDP 可做）| ❌ |
 | 需要多個瀏覽器分頁 | ❌（CDP 可做）| ❌ |
 | 需要 Discord 真人傳訊 | ❌ | ✅ |

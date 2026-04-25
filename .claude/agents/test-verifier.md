@@ -98,18 +98,18 @@ tests/.env.<name>.md
 
 2. **分析設定需求，規劃執行批次**
 
-   掃描所有 test cases 的前置條件，依需要的容器設定（`AUTH_METHOD`、`PERCH_MODE` 等）分組：
+   掃描所有 test cases 的前置條件，依切換方式分組：
 
    ```
    批次規劃：
-   - 批次 A（目前設定，不需 redeploy）：AL11, AL12, MC01 … (N 個)
-   - 批次 B（AUTH_METHOD=gitlab）：AL21, AL22 … (N 個)
-   - 批次 C（PERCH_MODE=multi）：MU01, MU02 … (N 個)
-   - 永久 SKIP（需 GitLab / 手機 / 特殊硬體）：… (N 個)
-   總計 redeploy 次數：X 次
+   - 批次 A（目前設定，不需切換）：(N 個)
+   - 批次 B（前置操作指定 PATCH /api/settings，test-verifier 可自行切換）：(N 個)
+   - 批次 C（需修改 .env 或重建容器）：(N 個)
+   - 永久 SKIP（`.env` 缺少 GitLab 設定 / 需手機 / 特殊硬體）：(N 個)
+   總計 PATCH+restart 次數：X 次；deployer redeploy 次數：Y 次
    ```
 
-   **原則**：只要能透過修改遠端 `.env` + `docker compose up --force-recreate` 滿足的前置條件，**就規劃成一個批次執行，不得 SKIP**。真正不可自動化的條件（需真實 GitLab OAuth、手機裝置、mTLS 憑證未配置）才列為永久 SKIP。
+   **原則**：只要前置操作已指定用 `PATCH /api/settings` 切換，**test-verifier 直接執行，不得 SKIP**。需修改 `.env` 或重建容器的才標 SKIP 交由 qa agent 處理。真正不可自動化的條件（需真實 GitLab OAuth、手機裝置、mTLS 憑證未配置）才列為永久 SKIP。
 
 3. **顯示執行計畫後直接執行**
 
@@ -127,14 +127,17 @@ tests/.env.<name>.md
 
    每個批次：
 
-   a. 若此批次需要與當前容器設定不同的 env（`AUTH_METHOD`、`PERCH_MODE` 等），**不自行修改 `.env`**，直接將該批次所有 test cases 標記為 `⚠️ SKIP`，並在備註欄填入所需設定（e.g. `需要 AUTH_METHOD=gitlab`），讓呼叫方（qa agent）決定是否調整環境後重跑
+   a. 若此批次需要切換設定：
+      - 前置操作已指定 `PATCH /api/settings` + `POST /api/admin/restart`：**自行執行切換與重啟**，等待 server 回來後繼續；測試結束後執行後置操作還原
+      - 需修改 `.env` 或重建容器（`PERCH_MODE`、volume mount 等）：**不自行修改**，標記 `⚠️ SKIP`，備註所需設定，讓呼叫方（qa agent）決定是否調整後重跑
    b. 若批次設定與當前容器相符，逐一執行該批次的 test cases
 
    對每個 test case，**執行前先檢查並滿足前置條件**：
 
    a. 讀取該 test case 的 `**前置條件**` 欄位
    b. 逐一確認每個前置條件是否已滿足：
-   - **環境變數類**（`WORKSPACE_GIT_SYNC_ENABLED=true`、`AUTH_METHOD=gitlab` 等）：**不自行修改**，標記 SKIP 並回報所需設定
+   - **Settings API 類**（前置操作指定 `PATCH /api/settings`，例：`auth.method`、`discord.acp_enabled` 等）：**直接執行 PATCH + restart**，測後執行後置還原
+   - **環境變數類**（`WORKSPACE_GIT_SYNC_ENABLED=true`、`PERCH_MODE` 等，非 settings API 管轄）：**不自行修改**，標記 SKIP 並回報所需設定
    - **資料/狀態類**（需要特定檔案、git repo、已存在的 session 等）：先執行必要的 setup 指令建立狀態
    - **外部服務類**（需要真實 GitLab OAuth 完整流程、無法程式觸發的第三方操作）：列為永久 SKIP
    c. 前置條件全部滿足後，記錄開始時間（`date +%H:%M:%S`），顯示標題：`### 執行 <ID> [<層級>] — <描述>`
@@ -320,19 +323,19 @@ tests/.env.<name>.md
 
 如何滿足常見類型（以下為通用原則，不限特定 test case）：
 
-- **需要修改容器設定**（例：切換 auth 模式、調整某個 env var）：**不自行修改**，標記 SKIP 並在備註填入所需設定（e.g. `需要 AUTH_METHOD=password`），由 qa agent 透過 deployer 調整後重跑
+- **需要修改容器設定（settings API 管轄）**（例：切換 auth 模式、`discord.acp_enabled`、`discord.channel_id` 等）：前置操作已指定 `PATCH /api/settings` + `POST /api/admin/restart`，**直接執行**，測後還原
+- **需要修改容器設定（非 settings API）**（例：`PERCH_MODE`、volume mount）：**不自行修改**，標記 SKIP 並在備註填入所需設定，由 qa agent 透過 deployer 調整後重跑
 - **需要用本機 binary 測試**（例：測試特定啟動參數組合）：`go build -o /tmp/perch_test .`，以指定 env vars 啟動並監聽非衝突 port，測完 kill process
 - **需要多個瀏覽器分頁**（例：測試多連線並發行為）：用 CDP `nav` 開新分頁，以不同 target ID 操作
 
 在以下情況才標記為永久 SKIP（qa 也無法解決），並在報告中說明原因：
 
-- 需要真實 GitLab instance（無法 mock）
-- 需要 mTLS 憑證（環境未配置）
+- **E2E-gitlab**：`.env` 中缺少 GitLab 設定（`GITLAB_CLIENT_ID`、`GITLAB_CLIENT_SECRET`、`GITLAB_URL`）；若 `.env` 已有這些設定，則正常執行
+- **mTLS 憑證**：環境未配置且無法自動生成
 
 **以下是合法的 SKIP 理由，回報給呼叫方處理**：
 
-- 需要切換模式（`DISCORD_ACP_ENABLED`、`AUTH_METHOD` 等）→ 標記 SKIP，備註所需設定，由 qa agent 命令 deployer 調整後重跑
-- 需要重啟容器以套用不同設定 → 同上，不自行 recreate
+- 需要修改 `.env` 或重建容器（`PERCH_MODE`、volume mount 等非 settings API 管轄）→ 標記 SKIP，備註所需設定，由 qa agent 命令 deployer 調整後重跑
 
 ## 注意事項
 

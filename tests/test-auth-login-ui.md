@@ -134,7 +134,7 @@
 
 **層級**：E2E-browser（無需 GitLab）
 
-**前置操作**：需先切換到 password 模式（參考 `tests/.env.home2.md`「模式切換」→「Password 模式」），密碼為 `testpass123`，測試完畢後還原。
+**前置操作**：透過 `PATCH /api/settings` 將 `auth.method` 切為 `password`、`auth.password` 設為 `testpass123`，再 `POST /api/admin/restart` 重啟並等待 server 回來。**後置操作**：`PATCH /api/settings` 將 `auth.method` 切回 `none`，再重啟並等待 server 回來。
 
 **Given** Perch 以 `AUTH_METHOD=password` 啟動
 **When** 未登入的使用者開啟 `/`
@@ -149,7 +149,7 @@
 
 **層級**：E2E-curl（無需 GitLab）
 
-**前置操作**：需先切換到 password 模式（參考 `tests/.env.home2.md`「模式切換」→「Password 模式」），密碼為 `testpass123`，測試完畢後還原。
+**前置操作**：透過 `PATCH /api/settings` 將 `auth.method` 切為 `password`、`auth.password` 設為 `testpass123`，再 `POST /api/admin/restart` 重啟並等待 server 回來。**後置操作**：`PATCH /api/settings` 將 `auth.method` 切回 `none`，再重啟並等待 server 回來。
 
 **Given** Perch 以 `AUTH_METHOD=password` 啟動
 **When** 使用者以正確的帳號密碼登入
@@ -275,7 +275,7 @@
 
 **層級**：E2E-browser（可用 password auth，無需 GitLab）
 
-**前置操作**：需先切換到 password 模式（參考 `tests/.env.home2.md`「模式切換」→「Password 模式」），以 `testpass123` 登入取得 session cookie 後執行，測試完畢後還原。
+**前置操作**：透過 `PATCH /api/settings` 將 `auth.method` 切為 `password`、`auth.password` 設為 `testpass123`，再 `POST /api/admin/restart` 重啟並等待 server 回來，再以 `testpass123` 登入取得 session cookie。**後置操作**：`PATCH /api/settings` 將 `auth.method` 切回 `none`，再重啟並等待 server 回來。
 
 **Given** 使用者已以 password 模式登入並持有 session cookie
 **When** 使用者執行登出
@@ -311,7 +311,7 @@
 
 **層級**：E2E-browser（可用 password auth，無需 GitLab）
 
-**前置操作**：需先切換到 password 模式（參考 `tests/.env.home2.md`「模式切換」→「Password 模式」），以 `testpass123` 登入後執行，測試完畢後還原。
+**前置操作**：透過 `PATCH /api/settings` 將 `auth.method` 切為 `password`、`auth.password` 設為 `testpass123`，再 `POST /api/admin/restart` 重啟並等待 server 回來，再以 `testpass123` 登入。**後置操作**：`PATCH /api/settings` 將 `auth.method` 切回 `none`，再重啟並等待 server 回來。
 
 **Given** 使用者已以 password 模式完成登入
 **When** 使用者查看頁面
@@ -323,7 +323,7 @@
 
 **層級**：E2E-browser（可用 password auth，無需 GitLab）
 
-**前置操作**：需先切換到 password 模式（參考 `tests/.env.home2.md`「模式切換」→「Password 模式」），以 `testpass123` 登入後執行，測試完畢後還原。
+**前置操作**：透過 `PATCH /api/settings` 將 `auth.method` 切為 `password`、`auth.password` 設為 `testpass123`，再 `POST /api/admin/restart` 重啟並等待 server 回來，再以 `testpass123` 登入。**後置操作**：`PATCH /api/settings` 將 `auth.method` 切回 `none`，再重啟並等待 server 回來。
 
 **Given** 使用者已以 password 模式登入並看到登出按鈕
 **When** 使用者點擊登出按鈕
