@@ -81,11 +81,12 @@ func (a *adminAuth) isAdmin(r *http.Request) bool {
 type contextAdminKey struct{}
 
 // middleware protects /admin/* routes (except /admin/login).
-// Returns 503 if ADMIN_TOKEN is not configured; 401 if cookie is missing/invalid.
+// If ADMIN_TOKEN is not configured, all requests are allowed through.
+// Returns 401 if cookie is missing/invalid when token is configured.
 func (a *adminAuth) middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !a.enabled() {
-			http.Error(w, "admin not configured", http.StatusServiceUnavailable)
+			next.ServeHTTP(w, r)
 			return
 		}
 		cookie, err := r.Cookie("perch_admin")

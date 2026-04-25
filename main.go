@@ -192,7 +192,7 @@ func main() {
 	if v := os.Getenv("RATE_LIMIT_RPM"); v != "" {
 		fmt.Sscanf(v, "%d", &rateLimitRPM)
 	}
-	sm.SetSeed(buildEnvSeed())
+	sm.SetSeed(buildEnvSeed(runtime))
 	var userRL *UserRateLimiter
 	if gitlabAuth.enabled() {
 		userRL = newUserRateLimiter(rateLimitRPM)
@@ -301,36 +301,49 @@ func main() {
 }
 
 // buildEnvSeed reads environment variables into a RuntimeSettings used as the
-// base layer for GetEffective(). Only non-empty env vars populate the seed.
-func buildEnvSeed() RuntimeSettings {
+// base layer for GetEffective(). Hardcoded defaults are always populated;
+// env vars override them when set.
+func buildEnvSeed(runtime AgentRuntime) RuntimeSettings {
 	var s RuntimeSettings
+
+	// Agent defaults
+	s.Agent = &AgentSettings{Runtime: strPtr(runtime.Name)}
+	if runtime.ArgsEnv != "" {
+		if v := os.Getenv(runtime.ArgsEnv); v != "" {
+			s.Agent.Args = strPtr(v)
+		}
+	}
 
 	// Auth
 	authMethod := os.Getenv("AUTH_METHOD")
 	if authMethod == "" {
 		authMethod = os.Getenv("AUTH_MODE")
 	}
+	if authMethod == "" {
+		authMethod = "none"
+	}
 	password := os.Getenv("PERCH_PASSWORD")
 	if password == "" {
 		password = os.Getenv("AUTH_PASSWORD")
 	}
-	if authMethod != "" || password != "" {
-		s.Auth = &AuthSettings{}
-		if authMethod != "" {
-			s.Auth.Method = strPtr(authMethod)
-		}
-		if password != "" {
-			s.Auth.Password = strPtr(password)
-		}
+	s.Auth = &AuthSettings{Method: strPtr(authMethod)}
+	if password != "" {
+		s.Auth.Password = strPtr(password)
 	}
 
-	// Rate limit
+	// Rate limit — default 10 RPM, overridden by env var
+	rpm := 10
 	if v := os.Getenv("RATE_LIMIT_RPM"); v != "" {
-		var rpm int
-		if _, err := fmt.Sscanf(v, "%d", &rpm); err == nil {
-			s.RateLimit = &RateLimitSettings{RPM: intPtr(rpm)}
-		}
+		fmt.Sscanf(v, "%d", &rpm)
 	}
+	s.RateLimit = &RateLimitSettings{RPM: intPtr(rpm)}
+
+	// Log format — default "text"
+	logFormat := "text"
+	if os.Getenv("LOG_FORMAT") == "json" {
+		logFormat = "json"
+	}
+	s.Log = &LogSettings{Format: strPtr(logFormat)}
 
 	// Network
 	if v := os.Getenv("BLOCK_IPS"); v != "" {

@@ -165,7 +165,7 @@ func newServerWithMode(pm *PTYManager, auth *AuthMiddleware, im *IMManager, sess
 				}
 				terminalHandler(w, r)
 			})))
-		} else if adminAuth != nil {
+		} else if adminAuth != nil && adminAuth.enabled() {
 			// Single-user: check admin cookie; redirect to /chat if missing.
 			s.mux.HandleFunc("/terminal", func(w http.ResponseWriter, r *http.Request) {
 				if !adminAuth.isAdmin(r) {
@@ -175,7 +175,7 @@ func newServerWithMode(pm *PTYManager, auth *AuthMiddleware, im *IMManager, sess
 				terminalHandler(w, r)
 			})
 		} else {
-			// No admin auth configured: allow everyone (shouldn't happen in production).
+			// No admin token configured: allow everyone.
 			s.mux.HandleFunc("/terminal", terminalHandler)
 		}
 	}
