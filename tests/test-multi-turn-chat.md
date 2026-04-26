@@ -17,7 +17,9 @@
 
 ---
 
-## MT02 — 24 小時以外的 session 不注入
+## Unit / Integration（無需啟動 server）
+
+### MT02 — 24 小時以外的 session 不注入
 
 **層級**：Unit / Integration
 
@@ -27,7 +29,7 @@
 
 ---
 
-## MT03 — 無歷史記錄時不加前置
+### MT03 — 無歷史記錄時不加前置
 
 **層級**：Unit / Integration
 
@@ -37,7 +39,7 @@
 
 ---
 
-## MT04 — 歷史最多 20 筆
+### MT04 — 歷史最多 20 筆
 
 **層級**：Unit
 
@@ -47,7 +49,7 @@
 
 ---
 
-## MT05 — new_conversation=true 略過歷史查詢
+### MT05 — new_conversation=true 略過歷史查詢
 
 **層級**：Integration
 
@@ -57,7 +59,7 @@
 
 ---
 
-## MT06 — 省略 new_conversation 欄位時行為正常
+### MT06 — 省略 new_conversation 欄位時行為正常
 
 **層級**：Integration
 
@@ -67,32 +69,7 @@
 
 ---
 
-## MT07 — 前端顯示多輪對話串
-
-**層級**：E2E-browser（JS mock inject，無需真實 agent）
-
-**Given** 使用者已登入 chat 頁面
-**When** 使用者依序送出「訊息 A」，等待回應後，再送出「訊息 B」
-**Then**
-- 畫面上同時顯示「訊息 A」和「回應 A」、「訊息 B」和「回應 B」
-- 每個新回應 append 至底部，先前的訊息不消失
-- 對話串可垂直捲動
-
----
-
-## MT08 — 新對話按鈕清除前端並重置歷史
-
-**層級**：E2E-browser
-
-**Given** 使用者已送出幾則訊息，畫面上有對話內容
-**When** 使用者點擊「New conversation」按鈕，然後送出新的查詢
-**Then**
-- 點擊後，畫面上的舊訊息立即清空
-- 新的查詢以全新上下文送出，Agent 不帶任何歷史記錄開始回應
-
----
-
-## MT09 — Discord 查詢不注入對話歷史
+### MT09 — Discord 查詢不注入對話歷史
 
 **層級**：Unit
 
@@ -102,7 +79,7 @@
 
 ---
 
-## MT10 — Scheduler 查詢不注入對話歷史
+### MT10 — Scheduler 查詢不注入對話歷史
 
 **層級**：Unit
 
@@ -112,7 +89,7 @@
 
 ---
 
-## MT11 — 歷史格式正確
+### MT11 — 歷史格式正確
 
 **層級**：Unit
 
@@ -132,7 +109,9 @@ Assistant: <turn 1 response>
 
 ---
 
-## MT12 — 管理員歷史頁面不受影響
+## E2E-curl — 預設設定（AUTH_METHOD=none）
+
+### MT12 — 管理員歷史頁面不受影響
 
 **層級**：E2E-curl / Integration
 
@@ -141,3 +120,30 @@ Assistant: <turn 1 response>
 **Then**
 - 每一輪查詢以獨立記錄顯示
 - 儲存的查詢內容只有使用者原始輸入，不含歷史前置（歷史注入只在送給 agent 前發生，不影響儲存）
+
+---
+
+## E2E-browser — 預設設定（AUTH_METHOD=none）
+
+### MT07 — 前端顯示多輪對話串
+
+**層級**：E2E-browser（JS mock inject，無需真實 agent）
+
+**Given** 使用者已登入 chat 頁面
+**When** 使用者依序送出「訊息 A」，等待回應後，再送出「訊息 B」
+**Then**
+- 畫面上同時顯示「訊息 A」和「回應 A」、「訊息 B」和「回應 B」
+- 每個新回應 append 至底部，先前的訊息不消失
+- 對話串可垂直捲動
+
+---
+
+### MT08 — 新對話按鈕清除前端並重置歷史
+
+**層級**：E2E-browser
+
+**Given** 使用者已送出幾則訊息，畫面上有對話內容
+**When** 使用者點擊「New conversation」按鈕，然後送出新的查詢
+**Then**
+- 點擊後，畫面上的舊訊息立即清空
+- 新的查詢以全新上下文送出，Agent 不帶任何歷史記錄開始回應

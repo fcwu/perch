@@ -97,7 +97,25 @@ description: Writes test cases into tests/test*.md based on openspec specs or us
 
 5. **每個 test case 之間加 `---` 分隔線**
 
-6. **Append 到目標測試檔末尾**
+6. **排序：依 server 設定分組，減少 restart 次數**
+
+   同一批 test cases 寫完後，在 append 前先重新排序，讓需要相同 server 設定的測試**排在一起**，避免執行時頻繁切換模式重啟。
+
+   排序優先序：
+   1. **Unit / Integration**（無需啟動 server，最快，排最前）
+   2. **E2E-curl — 預設設定**（無前置操作、用 AUTH_METHOD=none 或 no extra env）
+   3. **E2E-curl — 需切換設定**（按設定分組：同 auth method / same mode 的排在一起）
+   4. **E2E-browser — 預設設定**（無前置操作）
+   5. **E2E-browser — 需切換設定**（按設定分組：同 auth method / same mode 的排在一起）
+
+   **分組規則**：
+   - 有相同前置操作（e.g. 同樣要切 `auth.method=password`）的測試排成連續區塊
+   - 同一區塊的後置 restore 只做一次，在整個區塊結束後才切回
+   - 在測試案例的前置操作描述中可用括號標記分組（e.g. `（與 T12 共用 password mode）`）
+
+   **若新增的 test case 要插入現有檔案中間**（為了分組）：
+   - 改用 Insert 方式插入至正確位置，而非強制 append 到末尾
+   - 在 回報結果 中說明插入位置與原因
 
 7. **回報結果**
 

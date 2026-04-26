@@ -6,7 +6,26 @@
 
 ---
 
-## T01 — 啟動（none 模式）
+## E2E-curl — 預設設定（AUTH_METHOD=none）
+
+### T33 — Build Time 顯示在啟動 Log
+
+**層級**：E2E-curl
+
+**Given** 使用 Docker 執行 perch 官方 image
+**When** container 啟動並輸出第一批 log
+**Then** log 中可見 `built=` 欄位，值為 ISO 8601 格式的 UTC 時間，例如：
+```
+time=... level=INFO msg="perch listening" addr=:8080 auth=none built=2026-04-12T10:30:00Z
+```
+
+**反向驗證**：本機直接 `go build`（不帶 ldflags）執行，`built=unknown` 應出現在 log 中。
+
+---
+
+## E2E-browser — 預設設定（AUTH_METHOD=none）
+
+### T01 — 啟動（none 模式）
 
 **層級**：E2E-browser
 
@@ -18,7 +37,7 @@
 
 ---
 
-## T01b — Terminal 路由（none 模式）
+### T01b — Terminal 路由（none 模式）
 
 **層級**：E2E-browser
 
@@ -28,7 +47,7 @@
 
 ---
 
-## T02 — 前端載入（Terminal）
+### T02 — 前端載入（Terminal）
 
 **層級**：E2E-browser
 
@@ -41,7 +60,7 @@
 
 ---
 
-## T03 — Terminal 輸出（PTY 串流）
+### T03 — Terminal 輸出（PTY 串流）
 
 **層級**：E2E-browser
 
@@ -51,7 +70,7 @@
 
 ---
 
-## T04 — Terminal 輸入
+### T04 — Terminal 輸入
 
 **層級**：E2E-browser
 
@@ -61,7 +80,7 @@
 
 ---
 
-## T17 — 首次開啟 Web UI Terminal 填滿畫面
+### T17 — 首次開啟 Web UI Terminal 填滿畫面
 
 **層級**：E2E-browser
 
@@ -73,18 +92,3 @@
 - 字元排列正確對應視窗大小
 
 **反向驗證**：調整瀏覽器視窗大小後，terminal 應自動重新填滿，不出現黑色空白條。
-
----
-
-## T33 — Build Time 顯示在啟動 Log
-
-**層級**：E2E-curl
-
-**Given** 使用 Docker 執行 perch 官方 image
-**When** container 啟動並輸出第一批 log
-**Then** log 中可見 `built=` 欄位，值為 ISO 8601 格式的 UTC 時間，例如：
-```
-time=... level=INFO msg="perch listening" addr=:8080 auth=none built=2026-04-12T10:30:00Z
-```
-
-**反向驗證**：本機直接 `go build`（不帶 ldflags）執行，`built=unknown` 應出現在 log 中。

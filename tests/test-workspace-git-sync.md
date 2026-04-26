@@ -7,7 +7,9 @@
 
 ---
 
-## T44 — Workspace Git Sync：功能停用（預設行為）
+## E2E-curl — 預設設定
+
+### T44 — Workspace Git Sync：功能停用（預設行為）
 
 **層級**：E2E-curl
 
@@ -17,7 +19,7 @@
 
 ---
 
-## T45 — Workspace Git Sync：HTTPS remote 正常 pull + push
+### T45 — Workspace Git Sync：HTTPS remote 正常 pull + push
 
 **層級**：E2E-curl
 
@@ -32,7 +34,34 @@
 
 ---
 
-## T46 — Workspace Git Sync：rebase 衝突偵測與通知
+### T48 — Workspace Git Sync：SSH remote 忽略 token
+
+**層級**：E2E-curl
+
+**Given** workspace 的 remote 為 SSH 格式，Perch 設有 `WORKSPACE_GIT_TOKEN`
+**When** Perch 啟動並嘗試同步
+**Then**
+- log 顯示「SSH remote，token 被忽略」的說明
+- 不嘗試注入 token 到 credential store
+- 同步結果取決於系統 SSH 設定，但不 crash
+
+---
+
+### T49 — Workspace Git Sync：非 git 目錄不啟動
+
+**層級**：E2E-curl
+
+**Given** `/workspace` 存在但不是 git repo（無 `.git` 目錄），且 Perch 啟用了同步
+**When** Perch 啟動
+**Then**
+- log 顯示「workspace 不是 git repo，跳過同步」的說明
+- Perch 正常啟動，不 crash，不強制執行同步
+
+---
+
+## E2E-browser — 含 Discord 整合
+
+### T46 — Workspace Git Sync：rebase 衝突偵測與通知
 
 **層級**：E2E-browser（含 Discord 整合）
 
@@ -47,7 +76,7 @@
 
 ---
 
-## T47 — Workspace Git Sync：push 失敗通知
+### T47 — Workspace Git Sync：push 失敗通知
 
 **層級**：E2E-browser（含 Discord 整合）
 
@@ -56,28 +85,3 @@
 **Then**
 - log 記錄 push 失敗的錯誤訊息（含 git 的錯誤說明）
 - 指定的 Discord channel 收到 `⚠️ git sync: git push failed` 通知
-
----
-
-## T48 — Workspace Git Sync：SSH remote 忽略 token
-
-**層級**：E2E-curl
-
-**Given** workspace 的 remote 為 SSH 格式，Perch 設有 `WORKSPACE_GIT_TOKEN`
-**When** Perch 啟動並嘗試同步
-**Then**
-- log 顯示「SSH remote，token 被忽略」的說明
-- 不嘗試注入 token 到 credential store
-- 同步結果取決於系統 SSH 設定，但不 crash
-
----
-
-## T49 — Workspace Git Sync：非 git 目錄不啟動
-
-**層級**：E2E-curl
-
-**Given** `/workspace` 存在但不是 git repo（無 `.git` 目錄），且 Perch 啟用了同步
-**When** Perch 啟動
-**Then**
-- log 顯示「workspace 不是 git repo，跳過同步」的說明
-- Perch 正常啟動，不 crash，不強制執行同步

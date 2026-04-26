@@ -4,62 +4,11 @@
 > 涵蓋範圍：Rate Limit、Password 認證、mTLS Bootstrap，含對應 unit test。
 > 撰寫日期：2026-04-20
 
----
-
-## T09 — Rate Limit
-
-**層級**：E2E-curl
-
-**前置操作**：透過 `PATCH /api/settings` 將 `auth.method` 切為 `password`、`auth.password` 設為 `testpass123`，再 `POST /api/admin/restart` 重啟並等待 server 回來。密碼為 `testpass123`。
-
-**Given** Perch 以 password 模式啟動（`AUTH_METHOD=password`，`AUTH_PASSWORD=testpass123`）
-**When** 使用者在短時間內對登入端點發送超過 5 次錯誤的密碼嘗試
-**Then** 前 5 次收到「密碼錯誤」或「找不到」的正常錯誤回應；第 6 次起收到「請求過多」的限速回應（HTTP 429）
-
-**後置操作**：`PATCH /api/settings` 將 `auth.method` 切回 `none`，再重啟並等待 server 回來。
+> **執行順序說明**：測試案例依 server 設定分組，減少 restart 次數。標注「共用一次 restart」的區段，前置操作只做一次，後置操作在整個區段結束後才執行。
 
 ---
 
-## T10 — 密碼模式
-
-**層級**：E2E-curl
-
-**前置操作**：透過 `PATCH /api/settings` 將 `auth.method` 切為 `password`、`auth.password` 設為 `testpass123`，再 `POST /api/admin/restart` 重啟並等待 server 回來。密碼為 `testpass123`。
-
-**Given** Perch 以 `AUTH_METHOD=password` 及 `AUTH_PASSWORD=testpass123` 啟動
-**When** 使用者以正確密碼登入
-**Then** 登入成功，伺服器發放 session cookie，使用者可繼續存取頁面
-
-**When** 使用者以錯誤密碼登入
-**Then** 登入被拒絕，收到「未授權」錯誤（HTTP 401）
-
-**反向驗證**：未帶 cookie 直接存取頁面，應收到「未授權」回應。
-
-**後置操作**：`PATCH /api/settings` 將 `auth.method` 切回 `none`，再重啟並等待 server 回來。
-
----
-
-## T12 — mTLS Bootstrap 流程
-
-**層級**：E2E-curl
-
-> **注意**：此模式有已知 Bug（generateClientP12 key mismatch），建議在 Bug 修復後執行。
-
-**前置操作**：透過 `PATCH /api/settings` 將 `auth.method` 切為 `mtls`，再 `POST /api/admin/restart` 重啟並等待 server 回來。
-
-**Given** Perch 以 `AUTH_METHOD=mtls` 啟動
-**When** 使用者首次造訪 `/bootstrap` 端點（不帶任何用戶端憑證）
-**Then** 成功下載 `client.p12` 憑證檔案，可用於後續連線
-
-**When** 使用者再次造訪 `/bootstrap`
-**Then** 端點已失效，收到「已過期」回應（HTTP 410）
-
-**When** 使用者不帶憑證造訪其他頁面
-**Then** 自動被導向 `/bootstrap` 頁面，可完成首次設定
-
-**後置操作**：`PATCH /api/settings` 將 `auth.method` 切回 `none`，再重啟並等待 server 回來。
-
----
+## Unit / Integration（無需啟動 server）
 
 ## T20 — Password 模式：所有端點受保護（unit test）
 
@@ -108,6 +57,63 @@
 **Given** Perch 以 mTLS 模式啟動，使用者沒有用戶端憑證
 **When** 使用者造訪 `/bootstrap`
 **Then** 可以正常到達並下載憑證，不被擋下（否則形成無法打破的雞生蛋困境）
+
+---
+
+## E2E-curl — Password 模式（共用一次 restart）
+
+> 本區段所有測試共用一次 server 切換：區段開始時透過 `PATCH /api/settings` 切為 `auth.method=password`、`auth.password=testpass123` 並重啟；區段結束後切回 `auth.method=none` 並重啟。
+
+### T10 — 密碼模式
+
+**層級**：E2E-curl
+
+**前置操作**：透過 `PATCH /api/settings` 將 `auth.method` 切為 `password`、`auth.password` 設為 `testpass123`，再 `POST /api/admin/restart` 重啟並等待 server 回來。密碼為 `testpass123`。
+
+**Given** Perch 以 `AUTH_METHOD=password` 及 `AUTH_PASSWORD=testpass123` 啟動
+**When** 使用者以正確密碼登入
+**Then** 登入成功，伺服器發放 session cookie，使用者可繼續存取頁面
+
+**When** 使用者以錯誤密碼登入
+**Then** 登入被拒絕，收到「未授權」錯誤（HTTP 401）
+
+**反向驗證**：未帶 cookie 直接存取頁面，應收到「未授權」回應。
+
+---
+
+### T09 — Rate Limit
+
+**層級**：E2E-curl
+
+**後置操作**：`PATCH /api/settings` 將 `auth.method` 切回 `none`，再重啟並等待 server 回來。
+
+**Given** Perch 以 password 模式啟動（`AUTH_METHOD=password`，`AUTH_PASSWORD=testpass123`）
+**When** 使用者在短時間內對登入端點發送超過 5 次錯誤的密碼嘗試
+**Then** 前 5 次收到「密碼錯誤」或「找不到」的正常錯誤回應；第 6 次起收到「請求過多」的限速回應（HTTP 429）
+
+---
+
+## E2E-curl — mTLS 模式
+
+### T12 — mTLS Bootstrap 流程
+
+**層級**：E2E-curl
+
+> **注意**：此模式有已知 Bug（generateClientP12 key mismatch），建議在 Bug 修復後執行。
+
+**前置操作**：透過 `PATCH /api/settings` 將 `auth.method` 切為 `mtls`，再 `POST /api/admin/restart` 重啟並等待 server 回來。
+
+**Given** Perch 以 `AUTH_METHOD=mtls` 啟動
+**When** 使用者首次造訪 `/bootstrap` 端點（不帶任何用戶端憑證）
+**Then** 成功下載 `client.p12` 憑證檔案，可用於後續連線
+
+**When** 使用者再次造訪 `/bootstrap`
+**Then** 端點已失效，收到「已過期」回應（HTTP 410）
+
+**When** 使用者不帶憑證造訪其他頁面
+**Then** 自動被導向 `/bootstrap` 頁面，可完成首次設定
+
+**後置操作**：`PATCH /api/settings` 將 `auth.method` 切回 `none`，再重啟並等待 server 回來。
 
 ---
 
