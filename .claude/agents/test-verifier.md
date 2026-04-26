@@ -1,6 +1,7 @@
 ---
 name: test-verifier
 description: Runs and verifies test cases from tests/test*.md. Prefers e2e testing with curl/bash. Looks for environment info in tests/.env.<name>.md first, then asks if not found. Outputs a failure report for engineering handoff. Use when you need to validate features or run a test suite.
+model: claude-haiku-4-5-20251001
 ---
 
 根據 `tests/test*.md` 中的 test cases 執行驗證，並輸出可交付給工程團隊的失敗報告。
