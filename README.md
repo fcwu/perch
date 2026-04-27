@@ -160,7 +160,9 @@ Settings 儲存在 `/data/settings.json`。需要重啟的設定，按 **Save & 
 | `WORKSPACE_GIT_SYNC_ENABLED` | `false` | 設為 `true` 啟用自動 git sync |
 | `WORKSPACE_GIT_SYNC_INTERVAL` | `60` | Sync 間隔秒數 |
 | `WORKSPACE_PATH` | `/workspace` | 要同步的 git repo 路徑 |
-| `WORKSPACE_GIT_TOKEN` | — | HTTPS remote 的 git token |
+| `WORKSPACE_GIT_TOKEN` | — | HTTPS remote 的 git token（SSH remote 請略過） |
+| `WORKSPACE_GIT_USER_NAME` | — | git commit 的 user.name |
+| `WORKSPACE_GIT_USER_EMAIL` | — | git commit 的 user.email |
 | `WORKSPACE_GIT_SYNC_NOTIFY_CHANNEL` | — | 同步失敗時送通知的 Discord channel ID |
 | `WORKSPACE_GIT_SYNC_SUBMODULES` | `false` | 設為 `true` 在 pull 後自動更新 submodule |
 
@@ -349,18 +351,68 @@ npm install -g @agentclientprotocol/claude-agent-acp
 
 自動定時將 `/workspace` 的 git repo 與 remote 同步（pull + push）。
 
+**前提：** `/workspace`（或 `WORKSPACE_PATH`）必須已是設好 remote 的 git repo。Perch 啟動時若偵測不到 `.git/` 目錄，sync 功能會跳過。
+
+每次 sync 流程：
+1. 偵測 rebase 狀態 → 若在 rebase 中先執行 `git rebase --abort`
+2. 若工作區有未提交的變更 → 自動 `git add -A` + `git commit -m "auto-sync: <timestamp>"`
+3. `git pull --rebase`
+4. submodule 更新（若 `WORKSPACE_GIT_SYNC_SUBMODULES=true`）
+5. `git push`
+
+同一類型的錯誤在 5 分鐘內只通知一次（debounce）。
+
+### HTTPS Remote（GitHub / GitLab）
+
 ```bash
 docker run -d \
   -e WORKSPACE_GIT_SYNC_ENABLED=true \
-  -e WORKSPACE_GIT_SYNC_INTERVAL=60 \
   -e WORKSPACE_GIT_TOKEN=ghp_your_token \
+  -e WORKSPACE_GIT_USER_NAME="Your Name" \
+  -e WORKSPACE_GIT_USER_EMAIL="you@example.com" \
   -e WORKSPACE_GIT_SYNC_NOTIFY_CHANNEL=your_discord_channel_id \
   ...
 ```
 
-每次 sync 流程：偵測 rebase 狀態 → stash dirty 工作區 → `git pull --rebase` → submodule 更新（若啟用）→ stash pop → `git push`。
+`WORKSPACE_GIT_TOKEN` 會寫入容器內的 `~/.git-credentials`，remote 須為 HTTPS。
 
-同一類型的錯誤在 5 分鐘內只通知一次（debounce）。
+### SSH Remote
+
+```bash
+docker run -d \
+  -e WORKSPACE_GIT_SYNC_ENABLED=true \
+  -e WORKSPACE_GIT_USER_NAME="Your Name" \
+  -e WORKSPACE_GIT_USER_EMAIL="you@example.com" \
+  -v ~/.ssh:/home/perchuser/.ssh:ro \
+  ...
+```
+
+remote 為 `git@...` 或 `ssh://` 時，`WORKSPACE_GIT_TOKEN` 自動略過，直接使用 SSH key。
+
+### Local Bare Repo（NAS / 本機 file://）
+
+若 bare repo 在本機或 NAS 上，可直接掛載進容器，不需 token：
+
+```yaml
+# docker-compose.yml
+volumes:
+  - /path/to/your/repo.git:/mykb.git   # 掛載 bare repo
+  - /path/to/workspace:/workspace
+```
+
+```env
+# .env
+WORKSPACE_GIT_SYNC_ENABLED=true
+WORKSPACE_GIT_USER_NAME=Your Name
+WORKSPACE_GIT_USER_EMAIL=you@example.com
+```
+
+workspace 內的 git remote 設為容器內路徑：
+
+```bash
+# 首次設定（在 NAS 或容器內執行）
+git -C /workspace remote set-url origin file:///mykb.git
+```
 
 ## License
 
