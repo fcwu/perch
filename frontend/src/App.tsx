@@ -277,9 +277,12 @@ export default function App() {
     return <LoadingScreen />
   }
 
-  // Multi-user unauthenticated: show inline login screen
-  if (authStatus.mode === 'multi' && !authStatus.authenticated) {
+  // Unauthenticated: show appropriate login screen
+  if (!authStatus.authenticated && authStatus.auth_method === 'gitlab') {
     return <GitLabLoginScreen error={accessDenied} />
+  }
+  if (!authStatus.authenticated && authStatus.auth_method === 'password') {
+    return <LoginOverlay onLogin={() => window.location.reload()} />
   }
 
   // Route based on path
