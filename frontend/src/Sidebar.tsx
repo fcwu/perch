@@ -7,12 +7,14 @@ const FONT = "-apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-ser
 interface SidebarProps {
   isAdmin: boolean
   authMethod: string
+  authenticated?: boolean
+  accessDenied?: boolean
   onNewChat: () => void
   onCollapse: () => void
   activeConversationId?: string
 }
 
-export default function Sidebar({ isAdmin, authMethod, onNewChat, onCollapse, activeConversationId }: SidebarProps) {
+export default function Sidebar({ isAdmin, authMethod, authenticated = true, accessDenied, onNewChat, onCollapse, activeConversationId }: SidebarProps) {
   return (
     <div style={{
       width: 260, flexShrink: 0, display: 'flex', flexDirection: 'column',
@@ -35,51 +37,77 @@ export default function Sidebar({ isAdmin, authMethod, onNewChat, onCollapse, ac
         </button>
       </div>
 
-      {/* New Chat */}
-      <div style={{ padding: '2px 10px 10px' }}>
-        <button
-          onClick={onNewChat}
-          style={{
-            width: '100%', background: 'rgba(255,255,255,0.05)', border: '1px solid #2e2e2e',
-            borderRadius: 8, color: '#c8c8c8', padding: '8px 12px',
-            fontSize: 13, cursor: 'pointer', fontFamily: FONT,
-            display: 'flex', alignItems: 'center', gap: 8,
-            transition: 'background 0.15s',
-          }}
-          onMouseEnter={e => (e.currentTarget.style.background = 'rgba(255,255,255,0.09)')}
-          onMouseLeave={e => (e.currentTarget.style.background = 'rgba(255,255,255,0.05)')}
-        >
-          <PlusIcon />
-          New Chat
-        </button>
-      </div>
-
-      {/* Conversation list */}
-      <div style={{ flex: 1, overflowY: 'auto' }}>
-        <ConversationList activeId={activeConversationId} />
-      </div>
-
-      {/* Bottom nav */}
-      <div style={{ borderTop: '1px solid #222', padding: '6px 8px 10px' }}>
-        {isAdmin && (
-          <>
-            <NavItem
-              href="/chat"
-              icon={<SettingsIcon />}
-              label="Settings"
-              onClick={(e) => {
-                e.preventDefault()
-                window.dispatchEvent(new CustomEvent('perch:open-settings'))
+      {authenticated ? (
+        <>
+          {/* New Chat */}
+          <div style={{ padding: '2px 10px 10px' }}>
+            <button
+              onClick={onNewChat}
+              style={{
+                width: '100%', background: 'rgba(255,255,255,0.05)', border: '1px solid #2e2e2e',
+                borderRadius: 8, color: '#c8c8c8', padding: '8px 12px',
+                fontSize: 13, cursor: 'pointer', fontFamily: FONT,
+                display: 'flex', alignItems: 'center', gap: 8,
+                transition: 'background 0.15s',
               }}
-            />
-            <NavItem href="/terminal" icon={<TerminalIcon />} label="Terminal" />
-            <NavItem href="/admin" icon={<ShieldIcon />} label="Admin" />
-          </>
-        )}
-        {authMethod !== 'none' && (
-          <NavItem href="/auth/logout" icon={<LogoutIcon />} label="Log out" />
-        )}
-      </div>
+              onMouseEnter={e => (e.currentTarget.style.background = 'rgba(255,255,255,0.09)')}
+              onMouseLeave={e => (e.currentTarget.style.background = 'rgba(255,255,255,0.05)')}
+            >
+              <PlusIcon />
+              New Chat
+            </button>
+          </div>
+
+          {/* Conversation list */}
+          <div style={{ flex: 1, overflowY: 'auto' }}>
+            <ConversationList activeId={activeConversationId} />
+          </div>
+
+          {/* Bottom nav */}
+          <div style={{ borderTop: '1px solid #222', padding: '6px 8px 10px' }}>
+            {isAdmin && (
+              <>
+                <NavItem
+                  href="/chat"
+                  icon={<SettingsIcon />}
+                  label="Settings"
+                  onClick={(e) => {
+                    e.preventDefault()
+                    window.dispatchEvent(new CustomEvent('perch:open-settings'))
+                  }}
+                />
+                <NavItem href="/terminal" icon={<TerminalIcon />} label="Terminal" />
+                <NavItem href="/admin" icon={<ShieldIcon />} label="Admin" />
+              </>
+            )}
+            {authMethod !== 'none' && (
+              <NavItem href="/auth/logout" icon={<LogoutIcon />} label="Log out" />
+            )}
+          </div>
+        </>
+      ) : (
+        /* Unauthenticated GitLab: show login button in sidebar */
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '24px 16px', gap: 12 }}>
+          {accessDenied && (
+            <div style={{
+              color: '#f66', fontSize: 12, textAlign: 'center', padding: '8px 12px',
+              background: '#2a0000', borderRadius: 6, border: '1px solid #800', width: '100%',
+            }}>
+              Access denied. Contact the administrator.
+            </div>
+          )}
+          <button
+            onClick={() => { window.location.href = '/auth/gitlab' }}
+            style={{
+              width: '100%', background: '#fc6d26', border: 'none', borderRadius: 6,
+              color: '#fff', padding: '10px 16px', fontSize: 13,
+              cursor: 'pointer', fontFamily: FONT, fontWeight: 600,
+            }}
+          >
+            Login with GitLab
+          </button>
+        </div>
+      )}
     </div>
   )
 }

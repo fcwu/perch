@@ -13,9 +13,10 @@ interface AuthStatus {
 
 interface ChatAppProps {
   authStatus: AuthStatus
+  accessDenied?: boolean
 }
 
-export default function ChatApp({ authStatus }: ChatAppProps) {
+export default function ChatApp({ authStatus, accessDenied }: ChatAppProps) {
   const [sidebarOpen, setSidebarOpen] = useState(true)
   const isAdmin = authStatus.role === 'admin' || authStatus.mode === 'single'
 
@@ -34,6 +35,8 @@ export default function ChatApp({ authStatus }: ChatAppProps) {
         <Sidebar
           isAdmin={isAdmin}
           authMethod={authStatus.auth_method}
+          authenticated={authStatus.authenticated}
+          accessDenied={accessDenied}
           onNewChat={onNewChat}
           onCollapse={() => setSidebarOpen(false)}
           activeConversationId={conversationId}

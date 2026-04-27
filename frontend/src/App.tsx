@@ -279,7 +279,10 @@ export default function App() {
 
   // Unauthenticated: show appropriate login screen
   if (!authStatus.authenticated && authStatus.auth_method === 'gitlab') {
-    return <GitLabLoginScreen error={accessDenied} />
+    // For /chat and /, let ChatApp render with sidebar login button
+    if (!(path.startsWith('/chat') || path === '/')) {
+      return <GitLabLoginScreen error={accessDenied} />
+    }
   }
   if (!authStatus.authenticated && authStatus.auth_method === 'password') {
     return <LoginOverlay onLogin={() => window.location.reload()} />
@@ -291,7 +294,7 @@ export default function App() {
   }
 
   if (path.startsWith('/chat') || path === '/') {
-    return <ChatApp authStatus={authStatus} />
+    return <ChatApp authStatus={authStatus} accessDenied={accessDenied} />
   }
 
   if (path.startsWith('/admin')) {
