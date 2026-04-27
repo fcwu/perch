@@ -9,17 +9,7 @@
 
 ---
 
-## Discord 頻道對照表
-
-| 頻道 | 類型 | Channel ID |
-|------|------|-----------|
-| #general | public | `1496275503961608287` |
-| #myprivate | private | `1496278101166915694` |
-| #myprivate2 | private（設定頻道） | `1496644257149353994` |
-| DM with perch-dev | DM | `1492891645413167194` |
-| Server ID | — | `1496275499482091611` |
-
-> **傳訊自動化**：所有需要「使用者在 Discord 傳訊」的步驟，均可用 `chrome-cdp` 導航到對應 channel URL，點擊輸入框 `[data-slate-editor]`，`type` 訊息後送出 Enter key event，不需真人操作。
+> **傳訊自動化**：所有需要「使用者在 Discord 傳訊」的步驟，均可用 `chrome-cdp` 導航到對應 channel URL，點擊輸入框 `[data-slate-editor]`，`type` 訊息後送出 Enter key event，不需真人操作。頻道 ID 請查閱 `tests/.env.*.md` 的 Discord 頻道對照表。
 
 ---
 
@@ -278,7 +268,7 @@ LISTEN_ADDR=:18080
 
 **層級**：E2E-browser（含 Discord 整合）
 
-**Given** Perch 以純 `DISCORD_BOT_TOKEN` 啟動（無 `DISCORD_CHANNEL_ID`），Discord user ID 為 `1075643998632419380` 的使用者開啟與 Bot 的私訊（DM）
+**Given** Perch 以純 `DISCORD_BOT_TOKEN` 啟動（無 `DISCORD_CHANNEL_ID`），DM 測試帳號（user ID 見 `.env.*.md`）開啟與 Bot 的私訊（DM）
 **When** 使用者直接傳送：「今天日期是？」
 **Then**
 - 訊息出現 👀 reaction
@@ -307,9 +297,9 @@ LISTEN_ADDR=:18080
 
 **層級**：E2E-browser（含 Discord 整合）
 
-**前置操作**：透過 `PATCH /api/settings` 將 `discord.channel_id` 設為 `1496278101166915694`（#myprivate），再 `POST /api/admin/restart` 重啟並等待 server 回來。**後置操作**：`PATCH /api/settings` 將 `discord.channel_id` 還原為 `1496644257149353994`，再重啟並等待 server 回來。
+**前置操作**：透過 `PATCH /api/settings` 將 `discord.channel_id` 設為 #myprivate 的 channel ID（見 `.env.*.md`），再 `POST /api/admin/restart` 重啟並等待 server 回來。**後置操作**：`PATCH /api/settings` 將 `discord.channel_id` 還原為 #myprivate2 的 channel ID（即 `DISCORD_CHANNEL_ID` 預設值，見 `.env.*.md`），再重啟並等待 server 回來。
 
-**Given** Perch 同時設定 `DISCORD_BOT_TOKEN` 與 `DISCORD_CHANNEL_ID=1496278101166915694`（指向 #myprivate）
+**Given** Perch 同時設定 `DISCORD_BOT_TOKEN` 與 `DISCORD_CHANNEL_ID` 指向 #myprivate（channel ID 見 `.env.*.md`）
 **When** 使用者在指定頻道（#myprivate）傳送訊息（不需 @mention）：「你好」
 **Then** 訊息出現 👀 reaction，Claude 正常回應（維持原有行為）
 

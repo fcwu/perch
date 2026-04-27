@@ -1,5 +1,6 @@
 .worktrees/
 frontend/node_modules/
+frontend/dist/
 perch
 perch_linux_amd64
 schedules.json
