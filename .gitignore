@@ -14,3 +14,5 @@ tests/test-report-*.md
 .claude/scheduled_tasks.lock
 data/
 tests/.chrome-agent/
+.perch/
+frontend/.mcp.json
