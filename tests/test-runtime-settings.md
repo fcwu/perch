@@ -11,7 +11,7 @@
 | 層級 | 說明 |
 |---|---|
 | **Unit** | Go unit test，直接測試 SettingsManager |
-| **E2E-curl** | 啟動真實 binary，curl 驗證 HTTP 行為（需 ADMIN_TOKEN） |
+| **E2E-curl** | 啟動真實 binary，curl 驗證 HTTP 行為 |
 | **E2E-browser** | 瀏覽器操作驗證前端 Settings panel |
 
 ---

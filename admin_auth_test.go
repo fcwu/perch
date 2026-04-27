@@ -54,22 +54,6 @@ func TestAdminLoginWrongToken(t *testing.T) {
 	}
 }
 
-func TestAdminTokenNotConfigured(t *testing.T) {
-	t.Setenv("ADMIN_TOKEN", "")
-	a := newAdminAuth()
-
-	protected := a.middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-	}))
-
-	req := httptest.NewRequest(http.MethodGet, "/admin/history", nil)
-	w := httptest.NewRecorder()
-	protected.ServeHTTP(w, req)
-
-	if w.Code != http.StatusServiceUnavailable {
-		t.Errorf("expected 503, got %d", w.Code)
-	}
-}
 
 func TestAdminMiddlewareMissingCookie(t *testing.T) {
 	t.Setenv("ADMIN_TOKEN", "tok")

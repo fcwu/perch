@@ -12,10 +12,6 @@ The server SHALL provide `POST /admin/login` accepting `{"token": "<value>"}` an
 - **WHEN** the posted token does not match `ADMIN_TOKEN`
 - **THEN** the server SHALL return HTTP 401 with no cookie set
 
-#### Scenario: ADMIN_TOKEN not configured
-- **WHEN** `ADMIN_TOKEN` env var is empty or unset
-- **THEN** `/admin/*` routes SHALL return HTTP 503 (admin not available)
-
 ### Requirement: Admin session middleware
 
 All `/admin/*` routes (except `/admin/login`) SHALL require a valid `perch_admin` cookie.

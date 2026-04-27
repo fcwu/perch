@@ -80,8 +80,6 @@
 **When** 管理員輸入錯誤的 token
 **Then** 登入被拒絕
 
-**反向驗證（未設 ADMIN_TOKEN）**：管理功能整體停用，存取管理頁面收到「服務無法使用」的提示。
-
 **自動化**：`go test -run TestAdminLogin ./...`
 
 ---
