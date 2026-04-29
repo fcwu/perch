@@ -98,6 +98,8 @@ ls tests/test-*.md
 | `env-fix-by-qa`（備註需 container 行為）| 收集起來，留到批次 B 處理 |
 | `needs-user-action` | 接受；summary 列出（真機限定、token 沒備、mTLS 未配置等）|
 
+**硬性規則**：禁止以「成本偏高」「穩定性風險」「重啟麻煩」「次數太多」等理由將 `env-fix-by-qa` 重分類成 `needs-user-action`。env-fix-by-qa 必須跑完，不論需要幾次 binary respawn 或 chrome-cdp 切 channel。test-verifier 的判定表是唯一分類依據，qa 不得自創分類或在 summary 中以括註（如「屬 env-fix-by-qa 但成本高」）變相跳過。若 summary 的「env-fix-by-qa」段非空，視為 qa 流程瑕疵。
+
 ### 5. 批次 B：local docker（必要時）
 
 收集批次 A 中 `env-fix-by-qa` 且備註需 container 行為的 case，若有：
