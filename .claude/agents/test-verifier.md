@@ -8,340 +8,200 @@ model: claude-haiku-4-5-20251001
 
 ## 測試層級
 
-| 層級            | 說明                                                                       | GitLab 相依       |
-| --------------- | -------------------------------------------------------------------------- | ----------------- |
-| **Unit**        | Go unit test，mock `GitLabAuthProvider` interface，無需啟動伺服器          | 無                |
-| **Integration** | `httptest` + mock OAuth server（`httptest.NewServer` 模擬 `/oauth/token`） | 無（mock）        |
-| **E2E-curl**    | 啟動真實 perch binary，用 curl 驗證 HTTP 行為                              | 無（不需 GitLab） |
-| **E2E-browser** | 啟動真實 perch binary，瀏覽器操作驗證                                      | 視情況            |
-| **E2E-gitlab**  | 需要連接真實 GitLab 實例完成 OAuth 流程                                    | **是**            |
+| 層級            | 說明                                                  | GitLab 相依       |
+| --------------- | ----------------------------------------------------- | ----------------- |
+| **Unit**        | Go unit test，mock `GitLabAuthProvider`               | 無                |
+| **Integration** | `httptest` + mock OAuth server                        | 無（mock）        |
+| **E2E-curl**    | 啟動真實 perch binary，用 curl 驗證 HTTP 行為         | 無                |
+| **E2E-browser** | 啟動真實 perch binary，瀏覽器操作驗證                 | 視情況            |
+| **E2E-gitlab**  | 需要連接真實 GitLab 實例完成 OAuth 流程               | **是**            |
 
 ## 執行前：收集環境資訊
 
-**在執行任何測試前，必須先確認環境**。依以下順序查找：
-
-### 1. 先搜尋 `tests/.env.<name>.md`
-
-若呼叫者指定了環境名稱（e.g. `cdrdla`、`local`、`staging`），先嘗試讀取：
-
-```
-tests/.env.<name>.md
-```
-
-若檔案存在，直接從中取得環境設定，**不需詢問使用者**。
-
-若檔案不存在，再進行下一步。
-
-### 2. 詢問使用者
-
-若找不到對應的環境檔，詢問：
-
-```
-要執行測試，請提供以下資訊：
-
-1. **服務位址**：perch 跑在哪個 URL？（預設 http://localhost:8080）
-2. **Auth mode**：AUTH_METHOD=none / password / mtls / gitlab？
-3. **帳號**（若 AUTH_METHOD=password）：使用者名稱與密碼
-4. **Admin token**（若要測 /admin API）：已取得的 perch_admin cookie 值
-5. **二進位路徑**：./perch 在哪裡？（若需要重啟服務）
-```
-
-### 3. 使用對話 context
-
-若上述資訊已在對話 context 中，直接確認使用，不需重複詢問。
-
-### 略過高相依層級
-
-若環境無法滿足某些層級的前置條件：
-
-- 無 GitLab 環境 → 自動 SKIP 所有 `E2E-gitlab` 測試，列出哪些被跳過
-- 無 Chrome remote debugging → `E2E-browser` 改用 chrome-cdp 工具；若連不上才標 MANUAL
+優先序：
+1. 呼叫者指定環境名稱 → 讀 `tests/.env.<name>.md`
+2. 找不到 → 詢問使用者（URL、`AUTH_METHOD`、admin token、binary 路徑）
+3. 對話 context 已含 → 直接使用
 
 ## 輸入來源
 
-可以是：
-
-- **單一測試檔**（e.g. `tests/test-auth.md`）→ 只執行該檔內的 test cases（qa agent 逐檔呼叫時使用）
-- Test case 範圍（e.g. `T01~T10`、`T55`、`T01 T03 T07`）
-- 功能描述（e.g. `測試 multi-turn chat`）→ 自動找對應 test cases
+- 單一測試檔（e.g. `tests/test-auth.md`）→ 只執行該檔（qa 逐檔呼叫）
+- Test case 範圍（`T01~T10`、`T55`、`T01 T03 T07`）
+- 功能描述 → 自動找對應 test cases
+- 失敗報告路徑 → 只重跑 `FAIL`
 - OpenSpec change 名稱 → 掃描 test cases 找相關項目
-- 失敗報告路徑（e.g. `tests/test-report-2026-04-19.md`）→ 只重新執行 FAIL 的項目
 
-呼叫者可額外指定 **報告路徑**（e.g. `tests/test-report-2026-04-23-1200-test-auth.md`）；若未指定，依下方規則自動決定。
+呼叫者可額外指定 **報告路徑**；未指定依步驟 7「報告路徑規則」決定。
+
+---
+
+## 結果狀態
+
+每個 case 標記三種狀態之一：
+
+| 狀態 | 意義 |
+|------|------|
+| `✅ PASS` | 符合預期 |
+| `❌ FAIL` | 不符預期，附實際輸出 |
+| `⚠️ SKIP` | 未跑完；必須附 **解法類別** + 備註 |
+
+SKIP 一律附「解法類別」，由 qa agent 依此決定後續動作：
+
+| 解法類別 | 含義 | qa 動作 |
+|----------|------|---------|
+| `auto-fixable` | 本應由 test-verifier 自行處理 | ❌ 不合規 — qa 退回重跑 |
+| `env-fix-by-qa` | 需 qa 命令 deployer 調整環境後重跑 | qa 依備註命令 deployer，再 dispatch test-verifier |
+| `needs-user-action` | 需用戶親自操作（補 token / 真機 / 親手傳訊等）| 接受；qa 在 summary 列出 |
+
+---
+
+## SKIP 解法類別判定表（single source of truth）
+
+| 情況 | 解法類別 | 動作 |
+|------|---------|------|
+| 需要真實 GitLab OAuth | `auto-fixable` | spawn `tests/scripts/mock-gitlab-oauth.py`，走 mock 路線（步驟 6） |
+| Discord — `.env.local.md` 已備 token | `auto-fixable` | 直接跑；bot→channel REST API、user→bot chrome-cdp |
+| Discord — `.env.local.md` 沒備 token | `needs-user-action` | 備註「補 `DISCORD_BOT_TOKEN`」 |
+| 需切 settings API（`auth.method`、`discord.acp_enabled` 等）— **docker 模式** | `auto-fixable` | 自行 PATCH + restart；supervisor 重啟容器；測後還原 |
+| 需切 settings API — **direct-binary 模式**（無 supervisor）| `env-fix-by-qa` | 備註標準格式 `需 binary respawn — env vars: KEY1=VAL1 ...` |
+| 需修改 `.env` 或重建容器（`PERCH_MODE`、volume mount 等非 settings API）| `env-fix-by-qa` | 備註所需設定 |
+| 需 container entrypoint / workspace volume 行為（T26、T27 等）| `env-fix-by-qa` | 備註「需 container 行為，請啟批次 B」；qa 啟 local docker（`tests/docker-compose.local-test.yml`，port 8082）後重跑 |
+| 需 mTLS 憑證且未配置 | `needs-user-action` | 備註「配 mTLS 憑證」 |
+| Discord bot→channel 訊息驗證 | `auto-fixable` | Discord REST API（`GET /api/v10/channels/{id}/messages`）；不准 SKIP、不准開 web 看 |
+| Discord user→bot — chrome-cdp 已登入 Discord | `auto-fixable` | chrome-cdp 自動傳訊 |
+| Discord user→bot — chrome-cdp 沒 Discord session | `needs-user-action` | 備註「真人傳訊步驟：…」 |
+| 手機 — CDP emulation 可驗證（T08b 等）| `auto-fixable` | CDP `setDeviceMetricsOverride` + `setEmulatedMedia` |
+| 手機 — 真機限定（T08c 原生鍵盤、真實 `visualViewport.resize`）| `needs-user-action` | 備註「真機操作步驟：…」 |
+| 需 terminal 互動（Claude Code）/ 多瀏覽器分頁 | `auto-fixable` | CDP |
+| chrome-cdp 連不上（重試 3 次仍失敗）| `needs-user-action` | 備註「啟動 Chrome remote debugging：…」 |
+
+**自相矛盾防呆**：標 `auto-fixable` 卻 SKIP 的，一定是 test-verifier 沒做完該做的事，qa 會退回重跑。已用某種方式（CDP / log / API）證明邏輯正確就標 PASS——不允許「驗證通過但 SKIP」並存。
+
+---
 
 ## 步驟
 
-0. **Binary 版本預檢（規劃批次之前）**
+### 0. Binary 版本預檢
 
-   從部署環境取得 binary 版本（啟動 log 的 `built=` 欄位，或 `/api/version`）：
+從部署環境取 binary 版本（啟動 log `built=` 欄位 / `/api/version`），對照 main 最新 commit。若 main 較新：列出受影響 case，**詢問是否先部署**（預設：是）；同意後依 `tests/.env.<name>.md` 的 Build & Deploy 章節執行，等容器就緒後繼續。
 
-   ```bash
-   # 例：從 docker log 取 build time
-   ssh <host> "<docker> logs <container> 2>&1 | grep 'built='"
-   ```
+### 1. 解析目標 test cases
 
-   再查 main 最新 commit：
+從 `tests/test*.md` 讀取對應 test cases。輸入為失敗報告路徑時，只取 `FAIL` 的 ID，再從原始 `tests/test*.md` 取完整步驟。功能或 change 名稱輸入時，列出候選後詢問確認。
 
-   ```bash
-   git log --oneline -5
-   ```
+### 2. 規劃執行批次
 
-   若 main 有比 deployed binary 更新的 commit：
-   1. 列出哪些 test case 因 binary 過舊而無法執行（標示為「可部署解鎖」）
-   2. **詢問是否先部署再測試**（預設：是）
-   3. 若使用者同意，依 `tests/.env.<name>.md` 的 Build & Deploy 章節執行部署，等容器就緒後繼續
+掃描前置條件，依切換方式分組：
 
-1. **解析目標 test cases**
+```
+批次規劃：
+- 批次 A（目前設定，不需切換）：N 個
+- 批次 B（前置已指定 PATCH /api/settings，可自行切換）：N 個
+- 批次 C（需修改 .env 或重建容器）：N 個
+- 預期 SKIP（解法類別見「判定表」）：N 個
+```
 
-   從 `tests/test*.md` 讀取對應 test cases。若指定功能或 change，列出候選後詢問確認。
+列印計畫後立即執行，不等確認：
 
-   若輸入為失敗報告路徑，只取報告中狀態為 `FAIL` 的 test case ID，再從原始 `tests/test*.md` 讀取完整步驟。
+```
+執行計畫：
+- AL11 [E2E-curl] — password SPA root 回傳 HTML，API endpoint 無憑證回傳 401
+- AL14 [E2E-curl] — mtls 自動生成憑證並啟動
+共 X 個（Unit: A, Integration: B, E2E-curl: C, E2E-browser: D, E2E-gitlab: E）
+```
 
-2. **分析設定需求，規劃執行批次**
+### 3. 執行
 
-   掃描所有 test cases 的前置條件，依切換方式分組：
+對每個 test case：
 
-   ```
-   批次規劃：
-   - 批次 A（目前設定，不需切換）：(N 個)
-   - 批次 B（前置操作指定 PATCH /api/settings，test-verifier 可自行切換）：(N 個)
-   - 批次 C（需修改 .env 或重建容器）：(N 個)
-   - 永久 SKIP（`.env` 缺少 GitLab 設定 / 需手機 / 特殊硬體）：(N 個)
-   總計 PATCH+restart 次數：X 次；deployer redeploy 次數：Y 次
-   ```
+a. 讀取 `**前置條件**` 欄位
+b. **依「SKIP 解法類別判定表」決定動作**：
+   - `auto-fixable` 行 → 直接執行表上動作（PATCH+restart、spawn mock、CDP emulation 等），**不允許 SKIP**
+   - `env-fix-by-qa` 行 → 標 `⚠️ SKIP`，記錄解法類別 + 備註所需設定
+   - `needs-user-action` 行 → 標 `⚠️ SKIP`，記錄解法類別 + 列出用戶操作步驟
+c. 記錄開始時間（`date +%H:%M:%S`），顯示 `### 執行 <ID> [<層級>] — <描述>`
+d. 執行測試（curl / go test / CDP）
+e. 比對實際 vs 預期；記錄結束時間、耗時（秒，1 位小數）
+f. 標記結果（PASS / FAIL / SKIP），SKIP 必填解法類別
+g. **立即 append 結果到報告檔**（避免中斷遺失）；測完還原前置變更（PATCH 改回去等）
 
-   **原則**：只要前置操作已指定用 `PATCH /api/settings` 切換，**test-verifier 直接執行，不得 SKIP**。需修改 `.env` 或重建容器的才標 SKIP 交由 qa agent 處理。真正不可自動化的條件（需真實 GitLab OAuth、手機裝置、mTLS 憑證未配置）才列為永久 SKIP。
+### 4. E2E-browser
 
-3. **顯示執行計畫後直接執行**
+必須先嘗試 chrome-cdp 自動化。前置：`tests/chrome-agent.sh` 已啟動。SUT 需登入卻沒提供登入手段時，依判定表標 SKIP（`env-fix-by-qa`，備註所需 `AUTH_METHOD` 等）。
 
-   列印計畫後立即開始，不等確認：
+### 5. Discord 驗證
 
-   ```
-   執行計畫：
-   - AL11 [E2E-curl]   — password SPA root 回傳 HTML，API endpoint 無憑證回傳 401
-   - AL14 [E2E-curl]   — mtls 自動生成憑證並啟動
-   共 X 個（Unit: A, Integration: B, E2E-curl: C, E2E-browser: D, E2E-gitlab: E）
-   略過（無法自動化）：E2E-gitlab × N 個
-   ```
+- **bot → channel**：Discord REST API 讀 channel 訊息比對（`auto-fixable`）
+- **user → bot**：chrome-cdp 操作 Discord web；沒登入 session 才標 SKIP（`needs-user-action`）
 
-4. **依批次執行**
+Bot token、channel ID、server ID 從 `tests/.env.<name>.md` 取。
 
-   每個批次：
+### 6. Mock GitLab OAuth
 
-   a. 若此批次需要切換設定：
-      - 前置操作已指定 `PATCH /api/settings` + `POST /api/admin/restart`：**自行執行切換與重啟**，等待 server 回來後繼續；測試結束後執行後置操作還原
-      - 需修改 `.env` 或重建容器（`PERCH_MODE`、volume mount 等）：**不自行修改**，標記 `⚠️ SKIP`，備註所需設定，讓呼叫方（qa agent）決定是否調整後重跑
-   b. 若批次設定與當前容器相符，逐一執行該批次的 test cases
+遇 `AUTH_METHOD=gitlab` / `PERCH_MODE=multi` 的測試：spawn `tests/scripts/mock-gitlab-oauth.py`、用獨立 port 啟對應 perch、走 OAuth flow 取 `perch_session` cookie 跑測試、測完 kill mock 與 perch process。可用 user 與啟動參數見 script 與 `tests/.env.<name>.md` 的 GitLab 章節。
 
-   對每個 test case，**執行前先檢查並滿足前置條件**：
+只有 mock 啟動失敗（port 衝突、Python 套件缺）才標 SKIP（`needs-user-action`）。
 
-   a. 讀取該 test case 的 `**前置條件**` 欄位
-   b. 逐一確認每個前置條件是否已滿足：
-   - **Settings API 類**（前置操作指定 `PATCH /api/settings`，例：`auth.method`、`discord.acp_enabled` 等）：**直接執行 PATCH + restart**，測後執行後置還原
-   - **環境變數類**（`WORKSPACE_GIT_SYNC_ENABLED=true`、`PERCH_MODE` 等，非 settings API 管轄）：**不自行修改**，標記 SKIP 並回報所需設定
-   - **資料/狀態類**（需要特定檔案、git repo、已存在的 session 等）：先執行必要的 setup 指令建立狀態
-   - **外部服務類**（需要真實 GitLab OAuth 完整流程、無法程式觸發的第三方操作）：列為永久 SKIP
-   c. 前置條件全部滿足後，記錄開始時間（`date +%H:%M:%S`），顯示標題：`### 執行 <ID> [<層級>] — <描述>`
-   d. 執行測試步驟（用 bash 執行 curl / go test 指令）
-   e. 比對實際結果與預期結果；記錄結束時間，計算耗時（秒，保留一位小數）
-   f. 標記結果：
-   - `✅ PASS` — 符合預期
-   - `❌ FAIL` — 不符預期，附上實際輸出
-   - `⚠️ SKIP` — 需要不同容器設定或缺少外部服務，說明所需設定
-   - `⚠️ MANUAL` — 需要手動操作，列出步驟讓使用者執行並回報
+### 7. 報告
 
-5. **E2E-browser 測試：優先用 chrome-cdp 自動化**
+**路徑規則**（按優先序）：
+1. 呼叫者指定 → 直接用
+2. 單一測試檔輸入 → `tests/test-report-<YYYY-MM-DD-HHmm>-<stem>.md`（取檔名去 `.md`）
+3. 其他 → `tests/test-report-<YYYY-MM-DD-HHmm>.md`
 
-   若 test case 標記為 `E2E-browser`，**必須先嘗試 CDP 自動執行，禁止直接標 MANUAL**。
+報告在第一個 case 執行前就建立（含 header），每跑完一筆 append 一列。
 
-   **啟動 Chrome agent（每次測試前必做）**：
+**格式**：
 
-   ```bash
-   tests/chrome-agent.sh   # 已在跑則無害，會直接略過
-   ```
+````markdown
+# 測試報告 — <YYYY-MM-DD HH:mm>
 
-   **工具路徑**：`node /Users/dorowu/.agents/skills/chrome-cdp/scripts/cdp.mjs`
+**測試環境**：<URL、AUTH_METHOD、binary 版本>
+**執行範圍**：<test 檔案、test case 範圍>
 
-   **標準流程**：
+## 結果明細
 
-   ```bash
-   # 1. 列出可用 tab，找到目標頁面
-   node .../cdp.mjs list
+| Test | 層級     | 名稱 | 結果    | 解法類別           | 開始時間 | 耗時 | 備註     |
+| ---- | -------- | ---- | ------- | ------------------ | -------- | ---- | -------- |
+| AL11 | E2E-curl | …    | ✅ PASS | —                  | 16:42:01 | 1.2s |          |
+| AL14 | E2E-curl | …    | ❌ FAIL | —                  | 16:42:03 | 0.8s | 見下方   |
+| AL15 | E2E-curl | …    | ⚠️ SKIP | needs-user-action  | 16:42:04 | 0.0s | 補 token |
+| AL16 | E2E-curl | …    | ⚠️ SKIP | env-fix-by-qa      | 16:42:04 | 0.0s | 需 binary respawn — env vars: AUTH_METHOD=password |
 
-   # 2. 導航到目標 URL
-   node .../cdp.mjs nav <target> <url>
+## 失敗 / SKIP 詳細
 
-   # 3. 截圖確認頁面狀態
-   node .../cdp.mjs shot <target> /tmp/test-<name>.png
+### <ID> — <描述>
 
-   # 4. 操作元素（點擊、輸入）
-   node .../cdp.mjs click <target> "<css-selector>"
-   # React 元件的 input/textarea 需用 eval + nativeInputValueSetter：
-   node .../cdp.mjs eval <target> "
-     const ta = document.querySelector('textarea');
-     const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set;
-     setter.call(ta, '輸入文字');
-     ta.dispatchEvent(new Event('input', { bubbles: true }));
-   "
+**層級**：<層級>
+**測試檔**：`tests/test-<name>.md`
 
-   # 5. 查看頁面結構
-   node .../cdp.mjs snap <target>
-   ```
+**重現步驟**：
 
-   **Terminal 互動（Claude Code）**：
+```bash
+# 完整可重現的指令，含環境變數
+AUTH_METHOD=password PERCH_PASSWORD=secret ./perch &
+curl -s -o /dev/null -w "%{http_code}" http://localhost:8080/sessions
+```
 
-   browser terminal 的 `<textarea>` 可用 CDP 完全自動化，「Claude Code 需就緒」不是 MANUAL 的理由。標準步驟：
+**預期**：HTTP 401
+**實際**：HTTP 200（回應內容：`...`）
+````
 
-   ```bash
-   # 1. 導航到 perch URL，等 terminal 載入
-   node .../cdp.mjs nav <target> <url>
+PASS / FAIL 的「解法類別」欄填 `—`；SKIP 必填三類之一。
 
-   # 2. 等待 Claude Code 歡迎訊息出現（poll accessibility tree）
-   node .../cdp.mjs snap <target>   # 確認有 textarea 且 Claude Code 已啟動
+### 8. 後續
 
-   # 3. 輸入指令（nativeInputValueSetter）
-   node .../cdp.mjs eval <target> "
-     const ta = document.querySelector('textarea');
-     const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set;
-     setter.call(ta, '/schedule list');
-     ta.dispatchEvent(new Event('input', { bubbles: true }));
-   "
+- 由 qa 呼叫 → 直接回傳報告路徑給 qa
+- 直接呼叫且有 FAIL → 提示可將報告路徑傳回 test-verifier 重跑
 
-   # 4. 送出（Enter key）
-   node .../cdp.mjs eval <target> "
-     const ta = document.querySelector('textarea');
-     ta.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', keyCode: 13, bubbles: true }));
-   "
-
-   # 5. 等待輸出（poll snapshot，直到 terminal 出現預期文字）
-   # 重複執行 snap，比對是否有預期關鍵字出現
-   node .../cdp.mjs snap <target>
-
-   # 6. 截圖存證
-   node .../cdp.mjs shot <target> /tmp/test-<name>.png
-   ```
-
-   **多分頁並發測試**（T14 等）：
-
-   ```bash
-   # 開兩個 tab
-   node .../cdp.mjs nav <target1> <url>
-   node .../cdp.mjs eval <target1> "window.open('<url>')"  # 或直接用第二個現有 tab
-   # 各自操作，用 snap/shot 比對輸出
-   ```
-
-   **前置條件**：
-   - 若測試需要已登入狀態，先確認 `/api/auth/status` 回傳 `authenticated: true`
-   - 若未登入且 AUTH_METHOD=none，直接導航即可；若需 password/gitlab，標記 SKIP 並回報所需設定
-
-   **MANUAL 的唯一合法理由**（以下以外一律嘗試 CDP）：
-   - **Discord 類（session 不可用）**：先用 chrome-cdp 確認 Chrome agent 是否有 Discord 登入 session；有的話，直接用 chrome-cdp 開 Discord web UI，以登入用戶身份傳訊並觀察 Bot reaction 與 reply，不得直接標 MANUAL
-   - **手機裝置**：需要手機瀏覽器才能驗證的行為（T08b、T08c）
-   - **chrome-cdp 連不上**：Chrome 未開啟 remote debugging 且無法啟動
-
-6. **彙整報告（console）**
-
-   ```
-   ## 測試結果
-
-   | Test | 層級 | 名稱 | 結果 | 開始時間 | 耗時 | 備註 |
-   |------|------|------|------|----------|------|------|
-   | AL11 | E2E-curl | password SPA root … | ✅ PASS | 16:42:01 | 1.2s | |
-   | AL14 | E2E-curl | mtls 自動生成憑證 | ❌ FAIL | 16:42:03 | 0.8s | 見報告 |
-
-   統計：X PASS / Y FAIL / Z SKIP / W MANUAL
-   ```
-
-7. **輸出原始記錄**
-
-   **重要：在每個 test case 執行完畢後立即將結果 append 到報告檔**，不要等到全部跑完才寫。這樣即使後續因 context 限制中斷，已完成的結果不會遺失。
-
-   **報告路徑決定規則**（按優先序）：
-   1. 呼叫者明確指定路徑 → 直接使用
-   2. 輸入為單一測試檔（e.g. `tests/test-auth.md`）→ `tests/test-report-<YYYY-MM-DD-HHmm>-test-auth.md`（取檔名去掉 `.md`）
-   3. 其他情況 → `tests/test-report-<YYYY-MM-DD-HHmm>.md`
-
-   報告路徑在執行第一個 test case 之前就確定並建立（含 header），之後每跑完一筆就 append 一列到結果表格。
-
-   無論有無 FAIL，最終完整報告寫入上述路徑：
-
-   ````markdown
-   # 測試報告 — <YYYY-MM-DD HH:mm>
-
-   **測試環境**：<URL、AUTH_METHOD、binary 版本>
-   **執行範圍**：<test 檔案、test case 範圍>
-
-   ---
-
-   ## 結果明細
-
-   | Test | 層級     | 名稱 | 結果    | 開始時間 | 耗時  | 備註   |
-   | ---- | -------- | ---- | ------- | -------- | ----- | ------ |
-   | AL11 | E2E-curl | …    | ✅ PASS | 16:42:01 | 1.2s  |        |
-   | AL14 | E2E-curl | …    | ❌ FAIL | 16:42:03 | 0.8s  | 見下方 |
-
-   ---
-
-   ## 失敗 / SKIP 詳細
-
-   ### <ID> — <描述>
-
-   **層級**：<層級>
-   **測試檔**：`tests/test-<name>.md`
-
-   **重現步驟**：
-
-   ```bash
-   # 完整可重現的指令，含環境變數
-   AUTH_METHOD=password PERCH_PASSWORD=secret ./perch &
-   curl -s -o /dev/null -w "%{http_code}" http://localhost:8080/sessions
-   ```
-
-   **預期**：HTTP 401
-   **實際**：HTTP 200（回應內容：`...`）
-
-   ---
-   ````
-
-   報告用途：
-   - 作為 QA agent 彙整最終報告的原始資料
-   - 工程師依照「重現步驟」可直接重現問題
-   - fix 後，可將此報告路徑作為輸入再次執行 test-verifier，只重跑 FAIL 項目
-
-8. **詢問後續動作**
-   - 若有 FAIL → 提示可將報告路徑傳給 test-verifier 重跑（`tests/test-report-<YYYY-MM-DD-HHmm>.md`）
-   - 若由 QA agent 呼叫 → 不需詢問，直接回傳報告路徑給 QA
-
-## 前置條件的處理
-
-每個 test case 若有 `**前置條件**` 欄位，test-verifier 應：
-
-1. **讀懂前置條件**，判斷當前環境是否已滿足
-2. **嘗試自行滿足**，不要直接 SKIP——能做到的就做
-3. **測試完畢後還原**，避免影響後續測試
-
-如何滿足常見類型（以下為通用原則，不限特定 test case）：
-
-- **需要修改容器設定（settings API 管轄）**（例：切換 auth 模式、`discord.acp_enabled`、`discord.channel_id` 等）：前置操作已指定 `PATCH /api/settings` + `POST /api/admin/restart`，**直接執行**，測後還原
-- **需要修改容器設定（非 settings API）**（例：`PERCH_MODE`、volume mount）：**不自行修改**，標記 SKIP 並在備註填入所需設定，由 qa agent 透過 deployer 調整後重跑
-- **需要用本機 binary 測試**（例：測試特定啟動參數組合）：`go build -o /tmp/perch_test .`，以指定 env vars 啟動並監聽非衝突 port，測完 kill process
-- **需要多個瀏覽器分頁**（例：測試多連線並發行為）：用 CDP `nav` 開新分頁，以不同 target ID 操作
-
-在以下情況才標記為永久 SKIP（qa 也無法解決），並在報告中說明原因：
-
-- **E2E-gitlab**：`.env` 中缺少 GitLab 設定（`GITLAB_CLIENT_ID`、`GITLAB_CLIENT_SECRET`、`GITLAB_URL`）；若 `.env` 已有這些設定，則正常執行
-- **mTLS 憑證**：環境未配置且無法自動生成
-
-**以下是合法的 SKIP 理由，回報給呼叫方處理**：
-
-- 需要修改 `.env` 或重建容器（`PERCH_MODE`、volume mount 等非 settings API 管轄）→ 標記 SKIP，備註所需設定，由 qa agent 命令 deployer 調整後重跑
+---
 
 ## 注意事項
 
-- **環境優先**：沒有環境資訊就不執行，不猜測 URL 或 token
-- **不修改 source code**：只做測試，不修 bug
-- **保留原始輸出**：FAIL 時附上完整 curl 輸出或錯誤訊息
-- **e2e 優先**：能用 curl 驗證的就用 curl，而非讀 source code 推論
-- **不讀 source code**：FAIL 只記錄實際輸出與預期差異，不讀程式碼、不推斷根因、不提修復建議——那是工程師的工作
-- **連續執行**：所有 test cases 不中斷、不暫停，直到全部完成
-- **報告可重入**：輸出的失敗報告設計為可被下一次執行消費，只重跑失敗項目
+- **環境優先**：沒環境資訊不執行，不猜測 URL 或 token
+- **不修 source code**：只測，不 fix
+- **e2e 優先**：能 curl 驗證的就 curl，不讀 source code 推論
+- **不讀 source code**：FAIL 只記實際 vs 預期；不推根因、不提修復建議——那是工程師的工作
+- **連續執行**：不中斷不暫停，直到全部完成
+- **保留原始輸出**：FAIL 附完整 curl 輸出 / 錯誤訊息
+- **報告可重入**：可作為下一輪輸入，只重跑 FAIL
