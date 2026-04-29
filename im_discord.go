@@ -994,11 +994,10 @@ func (d *DiscordSessionManager) SubscribeSession(channelID string) (<-chan []byt
 // only when the target is not a Discord session or the bot is not connected,
 // allowing the caller to fall back to default routing.
 func (d *DiscordSessionManager) DispatchScheduled(target, message string) bool {
-	const prefix = "discord:"
-	if !strings.HasPrefix(target, prefix) {
+	channelID, ok := parseDiscordTarget(target)
+	if !ok {
 		return false
 	}
-	channelID := target[len(prefix):]
 
 	d.mu.Lock()
 	dgo := d.dgo
@@ -1047,18 +1046,33 @@ func (d *DiscordSessionManager) DispatchScheduled(target, message string) bool {
 // PTYForTarget returns the PTYManager for a session target string (e.g. "discord:<channelID>").
 // Returns nil if the target is not a known Discord session or if the session is in ACP mode.
 func (d *DiscordSessionManager) PTYForTarget(target string) *PTYManager {
-	const prefix = "discord:"
-	if !strings.HasPrefix(target, prefix) {
-		return nil
-	}
-	channelID := target[len(prefix):]
-	d.mu.Lock()
-	sess, ok := d.sessions[channelID]
-	d.mu.Unlock()
+	channelID, ok := parseDiscordTarget(target)
 	if !ok {
 		return nil
 	}
+	d.mu.Lock()
+	sess, found := d.sessions[channelID]
+	d.mu.Unlock()
+	if !found {
+		return nil
+	}
 	return sess.pty // nil in ACP mode
+}
+
+// parseDiscordTarget extracts the channel ID from a scheduler target string.
+// Accepts both the canonical "discord:<channelID>" form and the looser
+// "discord:channel:<channelID>" form that mirrors Discord's <#channelID>
+// mention syntax (T31/T32: tolerant parsing prevents 400 "not snowflake").
+func parseDiscordTarget(target string) (string, bool) {
+	const prefix = "discord:"
+	if !strings.HasPrefix(target, prefix) {
+		return "", false
+	}
+	rest := strings.TrimPrefix(target[len(prefix):], "channel:")
+	if rest == "" {
+		return "", false
+	}
+	return rest, true
 }
 
 // ResizeSession resizes the PTY for the given Discord channel (no-op in ACP mode).

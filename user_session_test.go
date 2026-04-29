@@ -6,6 +6,65 @@ import (
 	"time"
 )
 
+// TestSignalDoneOnPTYExitWhenHooksAbsent guards the MT07/T52 regression:
+// when an agent (e.g. `claude -p`) exits without firing the Stop hook
+// (because hooks aren't configured in the active settings.json), the
+// frontend must still receive a `done` JSON event so the textarea unlocks.
+// The fallback in StartSession's PTY-exit observer broadcasts that event.
+func TestSignalDoneOnPTYExitWhenHooksAbsent(t *testing.T) {
+	rt := makeTestRuntime() // command "true" — exits immediately, never fires hooks
+	m := newUserSessionManager(rt, "", nil, nil, nil)
+	if err := m.StartSession("u1", "alice", "q", false, ""); err != nil {
+		t.Fatalf("StartSession: %v", err)
+	}
+	m.mu.Lock()
+	sess := m.sessions["u1"]
+	m.mu.Unlock()
+	if sess == nil {
+		t.Fatal("expected session for u1")
+	}
+	jsonCh, unsub := sess.subscribeJSON()
+	defer unsub()
+
+	select {
+	case msg := <-jsonCh:
+		if msg != `{"type":"done"}` {
+			t.Errorf("expected done message from PTY-exit fallback, got %q", msg)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("expected done JSON event after PTY exit; frontend would be stuck loading")
+	}
+}
+
+// TestSignalDoneIdempotentAcrossStopAndPTYExit guards against double
+// finalisation: once the Stop hook fires, the PTY-exit fallback must not
+// emit a second `done` event nor flip the in-memory state again.
+func TestSignalDoneIdempotentAcrossStopAndPTYExit(t *testing.T) {
+	usm := newTestUserSessionManager()
+	sess := newUserSession("u1", "alice", "q")
+	sess.sessionUUID = "uuid-stop-then-exit"
+	usm.sessions["u1"] = sess
+	usm.uuidMap["uuid-stop-then-exit"] = "u1"
+
+	// Stop hook arrives first.
+	usm.NotifyHook(HookEvent{EventName: "Stop", SessionID: "uuid-stop-then-exit"})
+
+	// Drain the first done.
+	jsonCh, unsub := sess.subscribeJSON()
+	defer unsub()
+
+	// Fallback fires after PTY exits. It must be a no-op.
+	if usm.signalDoneIfRunning(sess) {
+		t.Error("PTY-exit fallback should be a no-op after Stop hook already ran")
+	}
+	select {
+	case msg := <-jsonCh:
+		t.Errorf("unexpected duplicate broadcast after Stop hook: %q", msg)
+	case <-time.After(50 * time.Millisecond):
+		// expected: no second event
+	}
+}
+
 func TestBuildPrompt(t *testing.T) {
 	// Empty history returns raw query
 	if got := buildPrompt(nil, "hello"); got != "hello" {

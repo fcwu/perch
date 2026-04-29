@@ -193,13 +193,16 @@ func (m *UserSessionManager) StartSession(userID, username, query string, newCon
 		// startOnce runs the PTY once and closes p.done on exit.
 		sess.pty.startOnce(cmd, args, m.workdir, m.logger)
 
-		// PTY exited (EOF) — mark completed.
-		sess.mu.Lock()
-		sess.status = userSessionCompleted
-		sess.completedAt = time.Now()
-		sess.mu.Unlock()
-
 		m.logger.Info("UserSession PTY exited", "userID", userID)
+
+		// Fallback for the case where Claude exits without firing a Stop
+		// hook (no hooks installed in the active settings.json) — broadcast
+		// `done` so frontend SSE/WS subscribers don't stay loading forever
+		// (MT07/T52). When hooks are configured the Stop hook has already
+		// run by now and this is a no-op.
+		if m.signalDoneIfRunning(sess) {
+			m.logger.Info("query_done_via_pty_exit", "userID", userID, "session_id", sess.sessionUUID)
+		}
 
 		// Retain for 5 minutes, then clean up.
 		time.AfterFunc(userSessionRetain, func() {
@@ -407,6 +410,32 @@ func (m *UserSessionManager) NotifyHook(event HookEvent) {
 		}
 		m.logger.Info("query_done", "session_id", sess.sessionUUID, "duration_ms", durationMs, "tool_count", toolCount, "status", "done")
 	}
+}
+
+// signalDoneIfRunning broadcasts a `done` JSON event when the session is
+// still in the running state. Used by the PTY-exit observer as a fallback
+// for the case where Claude (or another agent) terminates without firing
+// the Stop hook — typically because hooks aren't installed in the active
+// .claude/settings.json. Without this broadcast, frontend SSE/WS clients
+// stay loading forever waiting for a `done` that never arrives (MT07/T52).
+//
+// Store and admin-hub updates remain the responsibility of the Stop hook;
+// this fallback only unblocks the UI. Returns true when the broadcast
+// happened, false if the session was already marked completed (Stop hook
+// already ran or another fallback already fired).
+func (m *UserSessionManager) signalDoneIfRunning(sess *userSession) bool {
+	sess.mu.Lock()
+	if sess.status == userSessionCompleted {
+		sess.mu.Unlock()
+		return false
+	}
+	sess.status = userSessionCompleted
+	sess.completedAt = time.Now()
+	sess.mu.Unlock()
+
+	msg, _ := json.Marshal(map[string]string{"type": "done"})
+	sess.broadcastJSON(string(msg))
+	return true
 }
 
 // SubscribeJSON returns a JSON event channel for the given userID session.

@@ -99,6 +99,32 @@ func TestSplitForDiscordNoSplitInsideCodeBlock(t *testing.T) {
 	}
 }
 
+// TestParseDiscordTarget guards T31/T32: the scheduler accepts both the
+// canonical "discord:<channelID>" target and the looser
+// "discord:channel:<channelID>" form (mirrors <#channelID> mention syntax),
+// since the latter slipped through the schedule-add flow and produced a 400
+// "not snowflake" from the Discord REST API.
+func TestParseDiscordTarget(t *testing.T) {
+	cases := []struct {
+		in     string
+		wantID string
+		wantOK bool
+	}{
+		{"discord:1496278101166915694", "1496278101166915694", true},
+		{"discord:channel:1496278101166915694", "1496278101166915694", true},
+		{"discord:", "", false},
+		{"discord:channel:", "", false},
+		{"telegram:42", "", false},
+		{"", "", false},
+	}
+	for _, c := range cases {
+		gotID, gotOK := parseDiscordTarget(c.in)
+		if gotID != c.wantID || gotOK != c.wantOK {
+			t.Errorf("parseDiscordTarget(%q) = (%q,%v), want (%q,%v)", c.in, gotID, gotOK, c.wantID, c.wantOK)
+		}
+	}
+}
+
 func TestChannelSessionIDFormat(t *testing.T) {
 	id := channelSessionID("123456789")
 	if !uuidRE.MatchString(id) {

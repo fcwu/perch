@@ -22,7 +22,9 @@ type Job struct {
 	Message string `json:"message"`
 	Repeat  bool   `json:"repeat"`
 	// Target identifies which PTY to write to when the job fires.
-	// Empty string means the main PTY. "discord:<channelID>" routes to that Discord session.
+	// Empty string means the main PTY. "discord:<channelID>" (or the looser
+	// "discord:channel:<channelID>" form mirroring <#channelID> mentions)
+	// routes to that Discord session.
 	// Claude running inside a Discord PTY can read PERCH_SESSION_TARGET to obtain this value.
 	Target string `json:"target,omitempty"`
 

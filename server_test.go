@@ -237,6 +237,30 @@ func TestSessionWSResizeNotForwarded(t *testing.T) {
 }
 
 
+// TestMTLSChatRouteRedirectsWithoutClientCert guards the T12 regression:
+// /chat (and other chat paths) under AUTH_METHOD=mtls must 302 to /bootstrap
+// when the request lacks a client certificate. Earlier the chat-path branch
+// in ServeHTTP unconditionally fell through to s.mux, bypassing the mtls
+// middleware and returning 200 SPA HTML to unauthenticated callers.
+func TestMTLSChatRouteRedirectsWithoutClientCert(t *testing.T) {
+	pm := newPTYManager()
+	auth := newAuthMiddleware("mtls", "")
+	srv := newServerWithMode(pm, auth, nil, nil, nil, nil, nil, nil, nil, nil, nil, ModeSingle, nil)
+
+	chatPaths := []string{"/chat", "/api/chat", "/api/chat/stream", "/ws/chat", "/api/conversations", "/api/conversations/abc"}
+	for _, p := range chatPaths {
+		req := httptest.NewRequest(http.MethodGet, p, nil) // no TLS state
+		rr := httptest.NewRecorder()
+		srv.ServeHTTP(rr, req)
+		if rr.Code != http.StatusFound {
+			t.Errorf("mtls %s without cert: expected 302 redirect, got %d", p, rr.Code)
+		}
+		if loc := rr.Header().Get("Location"); loc != "/bootstrap" {
+			t.Errorf("mtls %s without cert: expected Location=/bootstrap, got %q", p, loc)
+		}
+	}
+}
+
 func TestPasswordModeGitLabRouteReturns404(t *testing.T) {
 	pm := newPTYManager()
 	auth := newAuthMiddleware("password", "secret")
