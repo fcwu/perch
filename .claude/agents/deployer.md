@@ -48,6 +48,7 @@ description: Builds and deploys the perch Docker image to a target environment. 
 - **確認再執行**：顯示部署計畫後等用戶確認；`autonomous: true` 時直接執行
 - **Local 優先 direct binary**：除非呼叫者明確要求 `--with-docker`，預設為 direct binary
 - **不負責 mock 服務**：mock GitLab OAuth 等測試 fixture 由 test-verifier 自行 spawn
+- **啟 binary 必須全量 source env**：direct binary 模式啟 perch 前必須 `set -a; source tests/.env.<name>; set +a`，**不可** 只 inline 設 `LISTEN_ADDR/CLAUDE_WORKDIR/DB_PATH` 三個基本值——否則 Discord、GitLab 等可選 feature 全沒注入，相關測試會被 test-verifier 誤判為環境缺失。詳見 `tests/.env.<name>.md` 模式 1
 
 ## 部署完成後
 

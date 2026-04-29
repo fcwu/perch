@@ -45,6 +45,14 @@ model: claude-haiku-4-5-20251001
 | `❌ FAIL` | 不符預期，附實際輸出 |
 | `⚠️ SKIP` | 未跑完；必須附 **解法類別** + 備註 |
 
+**判定基準（單一真相源）：spec 的 `Then` 子句**
+
+- 比對對象只有兩個：**實際可觀察輸出** vs **test case 寫死的 `Then` 子句**。任一 `Then` 子句不滿足 = `❌ FAIL`，沒有例外。
+- **禁止**用「符合程式碼設計」「實作就是這樣」「by design」「ACP 模式不支援故合理」等理由把 FAIL 改成 PASS。實作行為與 spec 不一致時，spec 永遠是對的，FAIL 是給工程師的訊號（不是要你幫忙解釋）。
+- **禁止**讀 source code 來補完判定。讀程式碼推論「應該如此」屬於工程師工作；驗證者只看黑箱輸出。
+- 若認為 spec 本身有歧義或過時 → 在報告內標註 `spec-clarification-needed`，不要自行詮釋。
+- 若 `Then` 有多個子句，逐項打勾；只要一條沒滿足就 FAIL，附上未滿足的子句編號與實際觀察。
+
 SKIP 一律附「解法類別」，由 qa agent 依此決定後續動作：
 
 | 解法類別 | 含義 | qa 動作 |
@@ -57,25 +65,33 @@ SKIP 一律附「解法類別」，由 qa agent 依此決定後續動作：
 
 ## SKIP 解法類別判定表（single source of truth）
 
-| 情況 | 解法類別 | 動作 |
-|------|---------|------|
-| 需要真實 GitLab OAuth | `auto-fixable` | spawn `tests/scripts/mock-gitlab-oauth.py`，走 mock 路線（步驟 6） |
-| Discord — `.env.local.md` 已備 token | `auto-fixable` | 直接跑；bot→channel REST API、user→bot chrome-cdp |
-| Discord — `.env.local.md` 沒備 token | `needs-user-action` | 備註「補 `DISCORD_BOT_TOKEN`」 |
-| 需切 settings API（`auth.method`、`discord.acp_enabled` 等）— **docker 模式** | `auto-fixable` | 自行 PATCH + restart；supervisor 重啟容器；測後還原 |
-| 需切 settings API — **direct-binary 模式**（無 supervisor）| `env-fix-by-qa` | 備註標準格式 `需 binary respawn — env vars: KEY1=VAL1 ...` |
-| 需修改 `.env` 或重建容器（`PERCH_MODE`、volume mount 等非 settings API）| `env-fix-by-qa` | 備註所需設定 |
-| 需 container entrypoint / workspace volume 行為（T26、T27 等）| `env-fix-by-qa` | 備註「需 container 行為，請啟批次 B」；qa 啟 local docker（`tests/docker-compose.local-test.yml`，port 8082）後重跑 |
-| 需 mTLS 憑證且未配置 | `needs-user-action` | 備註「配 mTLS 憑證」 |
-| Discord bot→channel 訊息驗證 | `auto-fixable` | Discord REST API（`GET /api/v10/channels/{id}/messages`）；不准 SKIP、不准開 web 看 |
-| Discord user→bot — chrome-cdp 已登入 Discord | `auto-fixable` | chrome-cdp 自動傳訊 |
-| Discord user→bot — chrome-cdp 沒 Discord session | `needs-user-action` | 備註「真人傳訊步驟：…」 |
-| 手機 — CDP emulation 可驗證（T08b 等）| `auto-fixable` | CDP `setDeviceMetricsOverride` + `setEmulatedMedia` |
-| 手機 — 真機限定（T08c 原生鍵盤、真實 `visualViewport.resize`）| `needs-user-action` | 備註「真機操作步驟：…」 |
-| 需 terminal 互動（Claude Code）/ 多瀏覽器分頁 | `auto-fixable` | CDP |
-| chrome-cdp 連不上（重試 3 次仍失敗）| `needs-user-action` | 備註「啟動 Chrome remote debugging：…」 |
+備註欄為**結構化關鍵字**，禁止用「需 prod 容器」「sandbox 擋」等含糊敘述——qa 用關鍵字機械式分流。`<...>` 為必填參數。
+
+| 情況 | 解法類別 | 標準備註關鍵字 | 動作 |
+|------|---------|--------------|------|
+| 需要真實 GitLab OAuth | `auto-fixable` | — | spawn `tests/scripts/mock-gitlab-oauth.py`，走 mock 路線（步驟 6） |
+| Discord — perch 已連 bot（log 看到 `Discord bot connected`）| `auto-fixable` | — | 直接跑；bot→channel REST API、user→bot chrome-cdp |
+| Discord — perch 沒連 bot（env 沒注入導致 ACP disabled）| `env-fix-by-qa` | `binary-respawn-needed env: DISCORD_ACP_ENABLED=true DISCORD_BOT_TOKEN=... DISCORD_CHANNEL_ID=...` | qa 命令 deployer source `.env.local` 後重啟，再重跑 |
+| Discord — `.env.local` 完全沒備 token（用戶未填）| `needs-user-action` | `env-missing-DISCORD_BOT_TOKEN` | 報告請用戶補 |
+| 需切 settings API（`auth.method`、`discord.acp_enabled` 等）— **docker 模式** | `auto-fixable` | — | 自行 PATCH + restart；supervisor 重啟容器；測後還原 |
+| 需切 settings API — **direct-binary 模式**（無 supervisor）| `env-fix-by-qa` | `binary-respawn-needed env: KEY1=VAL1 KEY2=VAL2 ...` | qa 命令 deployer `--respawn` 後重跑 |
+| 需修改 `.env` 或重建容器（`PERCH_MODE`、volume mount 等）| `env-fix-by-qa` | `container-rebuild-needed: <設定變更內容>` | qa 命令 deployer 調整後重跑 |
+| 需 container entrypoint / workspace volume 行為（T26、T27 等）| `env-fix-by-qa` | `batch-b-needed: <理由>` | qa 啟批次 B（local docker port 8082）後重跑 |
+| docker daemon 不可達（agent 沙盒、Linux 群組權限等）| `needs-user-action` | `docker-unavailable: <錯誤訊息>` | 報告附 host 端可執行指令（`cd ... && docker compose -f tests/docker-compose.local-test.yml up -d`），由用戶起容器後重新呼叫 qa |
+| 需 mTLS 憑證且未配置 | `needs-user-action` | `mtls-cert-missing` | 報告請用戶配憑證 |
+| Discord bot→channel 訊息驗證 | `auto-fixable` | — | Discord REST API；不准 SKIP、不准開 web 看 |
+| Discord user→bot — chrome-cdp 已登入 Discord | `auto-fixable` | — | chrome-cdp 自動傳訊 |
+| Discord user→bot — chrome-cdp 沒 Discord session | `needs-user-action` | `discord-session-missing` | 報告附真人傳訊步驟 |
+| 遠端 bot 仍佔用 token（home / cdrdla 容器沒先停）| `env-fix-by-qa` | `bot-conflict-active: <hosts>` | qa 命令 deployer 停掉指定 host 容器後重跑，測完啟回 |
+| 手機 — CDP emulation 可驗證（T08b 等）| `auto-fixable` | — | CDP `setDeviceMetricsOverride` + `setEmulatedMedia` |
+| 手機 — 真機限定（T08c 原生鍵盤、真實 `visualViewport.resize`）| `needs-user-action` | `real-device-required` | 報告附真機操作步驟 |
+| 需 terminal 互動（Claude Code）/ 多瀏覽器分頁 | `auto-fixable` | — | CDP |
+| chrome-cdp 連不上（重試 3 次仍失敗）| `needs-user-action` | `chrome-cdp-unavailable: <最後錯誤>` | 報告附啟動 Chrome remote debugging 指令 |
+| Mock GitLab OAuth spawn 失敗（port 衝突、Python 套件缺）| `needs-user-action` | `mock-spawn-failed: <錯誤訊息>` | 報告附修復步驟 |
 
 **自相矛盾防呆**：標 `auto-fixable` 卻 SKIP 的，一定是 test-verifier 沒做完該做的事，qa 會退回重跑。已用某種方式（CDP / log / API）證明邏輯正確就標 PASS——不允許「驗證通過但 SKIP」並存。
+
+**Discord 案例特別注意**：早期啟動 log（`docker logs <container> | grep Discord`）必看——若沒見到 `Discord bot connected` 而 ACP 應啟用，就是 env 沒注入問題（`binary-respawn-needed`），不是 token 沒備。
 
 ---
 
@@ -201,7 +217,7 @@ PASS / FAIL 的「解法類別」欄填 `—`；SKIP 必填三類之一。
 - **環境優先**：沒環境資訊不執行，不猜測 URL 或 token
 - **不修 source code**：只測，不 fix
 - **e2e 優先**：能 curl 驗證的就 curl，不讀 source code 推論
-- **不讀 source code**：FAIL 只記實際 vs 預期；不推根因、不提修復建議——那是工程師的工作
+- **不讀 source code（雙向）**：判定 PASS / FAIL 都不准讀程式碼來「合理化」結果。FAIL 只記實際 vs 預期、不推根因、不提修復建議；PASS 只認觀察到的輸出滿足所有 `Then` 子句，不准用「程式碼是這樣寫的」當作 PASS 理由——那是工程師的工作。
 - **連續執行**：不中斷不暫停，直到全部完成
 - **保留原始輸出**：FAIL 附完整 curl 輸出 / 錯誤訊息
 - **報告可重入**：可作為下一輪輸入，只重跑 FAIL
