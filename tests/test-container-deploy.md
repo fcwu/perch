@@ -49,7 +49,7 @@
 
 **層級**：E2E-browser
 
-**前置操作**：需重建一個未掛載 `~/.claude` 的測試容器（參考 `tests/.env.home2.md`「模式切換」→「移除 ~/.claude 掛載」，在 docker-compose 中移除 `~/.claude:/home/perchuser/.claude` 的 volume 設定），執行 `docker compose down && docker compose up -d` 後再執行測試，測試完畢後還原掛載設定。
+**前置操作**：需重建一個未掛載 `~/.claude` 的測試容器（參考 `tests/.env.home.md`「模式切換」→「移除 ~/.claude 掛載」，在 docker-compose 中移除 `~/.claude:/home/perchuser/.claude` 的 volume 設定），執行 `docker compose down && docker compose up -d` 後再執行測試，測試完畢後還原掛載設定。
 
 **Given** Docker container 啟動時未掛載 `~/.claude`
 **When** 使用者在瀏覽器開啟 terminal

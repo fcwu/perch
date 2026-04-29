@@ -45,7 +45,7 @@
 
 **層級**：E2E-browser
 
-**前置操作**：確認 Docker container 已以 workspace volume 掛載方式執行（docker-compose 中需有 `/workspace` volume 設定，參考 `tests/.env.home2.md`「環境確認」→「workspace volume」）。測試需重啟 container，請確認重啟後 workspace 資料不會遺失（volume 為 named volume 或 bind mount，而非匿名 volume）。
+**前置操作**：確認 Docker container 已以 workspace volume 掛載方式執行（docker-compose 中需有 `/workspace` volume 設定，參考 `tests/.env.home.md`「環境確認」→「workspace volume」）。測試需重啟 container，請確認重啟後 workspace 資料不會遺失（volume 為 named volume 或 bind mount，而非匿名 volume）。
 
 **Given** Perch 以 workspace volume 掛載的方式執行
 **When** 使用者透過 Claude 設定一個排程，然後重啟 container

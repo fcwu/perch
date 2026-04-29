@@ -79,7 +79,7 @@ tests/chrome-agent.sh stop
 ### CDP 操作
 
 ```bash
-CDP=/Users/dorowu/.claude/skills/chrome-cdp/scripts/cdp.mjs
+CDP=~/.claude/skills/chrome-cdp/scripts/cdp.mjs
 
 # 列出分頁
 node $CDP list
