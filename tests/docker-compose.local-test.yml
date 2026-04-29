@@ -1,0 +1,16 @@
+services:
+  perch:
+    image: perch:local-test
+    container_name: perch-local-test
+    ports:
+      - "8082:8080"
+    env_file:
+      - .env.local-test
+    volumes:
+      - ./test-workspace:/workspace
+      - ./test-perchuser:/home/perchuser
+      - ./test-data:/data
+      # T26 entrypoint skill 合併測試：把 host ~/.claude（不含 local-schedule）
+      # 掛進去，讓 entrypoint.sh 把 perch 內建的 skill 複製到 workspace
+      - ${HOME}/.claude:/home/perchuser/.claude:ro
+    restart: "no"

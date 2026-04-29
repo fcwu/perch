@@ -7,7 +7,7 @@ schedules.json
 .claude/*.json
 .opencode/
 deploy/.env
-tests/.env.*.md
+tests/.env.*
 !tests/.env.local.example.md
 docs/test-report-*.md
 tests/test-report-*.md

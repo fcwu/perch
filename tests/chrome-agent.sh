@@ -35,12 +35,75 @@ fi
 
 rm -f "$PORT_FILE"
 
-"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
+# Locate a Chrome/Chromium binary across macOS and Linux (incl. WSL).
+CHROME_BIN=""
+CHROME_EXTRA_ARGS=()
+for candidate in \
+  "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
+  "/Applications/Chromium.app/Contents/MacOS/Chromium" \
+  "$(command -v google-chrome 2>/dev/null)" \
+  "$(command -v google-chrome-stable 2>/dev/null)" \
+  "$(command -v chromium-browser 2>/dev/null)" \
+  "$(command -v chromium 2>/dev/null)"; do
+  if [[ -n "$candidate" && -x "$candidate" ]]; then
+    CHROME_BIN="$candidate"
+    break
+  fi
+done
+
+if [[ -z "$CHROME_BIN" ]]; then
+  echo "chrome-agent: no Chrome/Chromium binary found (looked for google-chrome, chromium, macOS bundles)" >&2
+  echo "  install: 'sudo apt-get install -y google-chrome-stable' or 'sudo apt-get install -y chromium-browser'" >&2
+  exit 1
+fi
+
+# Headed vs headless on Linux:
+#   - Headed needs a display (WSLg / X server / Wayland). Required when the user
+#     needs to interactively log in (Discord, GitLab) — the session then persists
+#     in DATA_DIR and later runs (headed or headless) reuse it.
+#   - Headless skips the UI; works for tests that don't need new login flows but
+#     CANNOT do an interactive login itself.
+# Default: headed when a display is detected; otherwise refuse to start and tell
+# the user to either enable a display (WSLg / X server) or set CHROME_HEADLESS=1
+# explicitly. Silent fallback to headless was removed because it makes login-
+# dependent tests fail in surprising ways.
+if [[ "$(uname -s)" == "Linux" ]]; then
+  HAS_DISPLAY=0
+  [[ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ]] && HAS_DISPLAY=1
+  case "${CHROME_HEADLESS:-auto}" in
+    1|true|yes)
+      CHROME_EXTRA_ARGS+=(--headless=new --no-sandbox --disable-gpu)
+      ;;
+    0|false|no)
+      if [[ "$HAS_DISPLAY" == 0 ]]; then
+        echo "chrome-agent: CHROME_HEADLESS=0 requested but no DISPLAY/WAYLAND_DISPLAY set" >&2
+        echo "  fix: enable WSLg / launch an X server, then re-run; or unset CHROME_HEADLESS to use auto mode" >&2
+        exit 1
+      fi
+      ;;
+    auto)
+      if [[ "$HAS_DISPLAY" == 0 ]]; then
+        echo "chrome-agent: no display detected (DISPLAY/WAYLAND_DISPLAY empty)" >&2
+        echo "  for tests that need interactive login (Discord, GitLab) — enable WSLg or X server" >&2
+        echo "  for tests that DON'T need login — re-run with: CHROME_HEADLESS=1 tests/chrome-agent.sh" >&2
+        echo "  to seed DATA_DIR from another machine — copy tests/.chrome-agent/ over after logging in there" >&2
+        exit 1
+      fi
+      ;;
+    *)
+      echo "chrome-agent: invalid CHROME_HEADLESS=${CHROME_HEADLESS} (use 1 / 0 / unset)" >&2
+      exit 1
+      ;;
+  esac
+fi
+
+"$CHROME_BIN" \
   --remote-debugging-port=$PORT \
   --user-data-dir="$DATA_DIR" \
   --no-first-run \
   --no-default-browser-check \
   --window-size=1280,800 \
+  "${CHROME_EXTRA_ARGS[@]}" \
   &>"$LOG" &
 
 for i in $(seq 1 20); do
