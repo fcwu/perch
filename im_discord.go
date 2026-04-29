@@ -833,7 +833,7 @@ func (d *DiscordSessionManager) Notify(event HookEvent, lastText string) error {
 			break
 		}
 		// Claim an unassigned session only when there is a pending message
-		// (user-triggered via Discord or scheduler-triggered via OnScheduledFire).
+		// (user-triggered via Discord or scheduler-triggered via DispatchScheduled).
 		// This prevents main-PTY hook events from being routed to Discord.
 		if sess.sessionUUID == "" {
 			sess.mu.Lock()
@@ -984,13 +984,19 @@ func (d *DiscordSessionManager) SubscribeSession(channelID string) (<-chan []byt
 	return ch, unsub, true
 }
 
-// OnScheduledFire is called by the scheduler before writing a job message to a Discord PTY.
-// It sends a header message to Discord so the scheduled run is visible, and stores the
-// message ID as sess.last so Claude's reply threads back to it.
-func (d *DiscordSessionManager) OnScheduledFire(target, message string) {
+// DispatchScheduled handles a scheduler-fired job for a Discord channel target.
+// It posts the visible "📅 local schedule > {message}" header, then routes the
+// prompt to either the ACP runtime (Claude reply threads back to the header) or
+// the session PTY (legacy mode, reply produced via PTY framebuffer + hooks).
+//
+// Returns true when the dispatch was handled (caller must skip its fallback
+// PTY write to avoid leaking the prompt into the main terminal). Returns false
+// only when the target is not a Discord session or the bot is not connected,
+// allowing the caller to fall back to default routing.
+func (d *DiscordSessionManager) DispatchScheduled(target, message string) bool {
 	const prefix = "discord:"
 	if !strings.HasPrefix(target, prefix) {
-		return
+		return false
 	}
 	channelID := target[len(prefix):]
 
@@ -998,23 +1004,44 @@ func (d *DiscordSessionManager) OnScheduledFire(target, message string) {
 	dgo := d.dgo
 	d.mu.Unlock()
 	if dgo == nil {
-		return
+		return false
 	}
 
 	sent, err := dgo.ChannelMessageSend(channelID, "📅 local schedule > "+message)
 	if err != nil {
-		d.logger.Warn("Discord schedule header send failed", "err", err)
-		return
+		d.logger.Warn("Discord schedule header send failed", "channel", channelID, "err", err)
+		return false
 	}
 
 	sess := d.getOrCreateSession(channelID)
+
+	// ACP mode: dispatch via the ACP subprocess so Claude actually replies,
+	// threading the reply back to the header message ID. Without this, the
+	// scheduler's earlier behaviour silently leaked the prompt into the main
+	// PTY (T31/T32 spec violation).
+	if sess.acpProcess != nil {
+		go sess.handleWithACP(dgo, channelID, sent.ID, message, d.logger)
+		return true
+	}
+
+	// PTY mode: thread the eventual reply via sess.last (so PTY hook / autoreply
+	// code paths reply to the header), then write the prompt to the session PTY.
 	sess.mu.Lock()
 	sess.last = &discordPending{
 		MessageID: sent.ID,
 		ChannelID: channelID,
 		AutoReply: !sess.runtime.SupportsHooks,
 	}
+	pty := sess.pty
 	sess.mu.Unlock()
+	if pty == nil {
+		d.logger.Warn("Discord schedule: session has no PTY in non-ACP mode", "channel", channelID)
+		return true
+	}
+	if err := pty.write([]byte(message + "\r")); err != nil {
+		d.logger.Warn("Discord schedule PTY write failed", "channel", channelID, "err", err)
+	}
+	return true
 }
 
 // PTYForTarget returns the PTYManager for a session target string (e.g. "discord:<channelID>").

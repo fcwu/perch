@@ -151,8 +151,7 @@ func main() {
 		im.start(IMConfig{PTY: pm, ACPEnabled: acpEnabled})
 	}
 	if discordSess != nil {
-		sched.ptyLookup = discordSess.PTYForTarget
-		sched.onFire = discordSess.OnScheduledFire
+		sched.dispatch = discordSess.DispatchScheduled
 	}
 
 	// --- Auth ---

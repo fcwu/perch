@@ -30,13 +30,12 @@ type Job struct {
 }
 
 type Scheduler struct {
-	mu        sync.Mutex
-	jobs      map[string]*Job
-	pty       *PTYManager
-	ptyLookup func(target string) *PTYManager // optional; routes jobs with a non-empty Target
-	onFire    func(target, message string)    // optional; called before writing to the PTY (e.g. Discord header)
-	savePath  string                          // path to schedules.jsonl
-	logger    *slog.Logger
+	mu       sync.Mutex
+	jobs     map[string]*Job
+	pty      *PTYManager
+	dispatch func(target, message string) bool // optional; if it returns true, scheduler skips the fallback PTY routing
+	savePath string                            // path to schedules.jsonl
+	logger   *slog.Logger
 	selfWrite bool // true while we are writing to prevent re-triggering watch
 }
 
@@ -294,46 +293,48 @@ func (s *Scheduler) run() {
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
 	for t := range ticker.C {
-		s.mu.Lock()
-		var toDelete []string
-		for id, job := range s.jobs {
-			if t.Hour() == job.Hour && t.Minute() == job.Minute {
-				// skip if already fired within this minute
-				if time.Since(job.lastFiredAt) < time.Minute {
-					continue
-				}
-				job.lastFiredAt = t
-				pm := s.pty
-				if job.Target != "" && s.ptyLookup != nil {
-					if found := s.ptyLookup(job.Target); found != nil {
-						pm = found
-					}
-				}
-				if pm != nil {
-					if s.onFire != nil && job.Target != "" {
-						s.onFire(job.Target, job.Message)
-					}
-					// IM sessions (Discord, Telegram) expect \r to submit input,
-					// matching writeToPTY in im_discord.go. Local PTY needs \n.
-					terminator := "\n"
-					if job.Target != "" {
-						terminator = "\r"
-					}
-					if err := pm.write([]byte(job.Message + terminator)); err != nil {
-						s.logger.Warn("scheduler PTY write failed", "jobID", id, "target", job.Target, "err", err)
-					}
-				}
-				if !job.Repeat {
-					toDelete = append(toDelete, id)
-				}
+		s.fireDue(t)
+	}
+}
+
+// fireDue runs all jobs whose Hour/Minute match t, dispatching each at most
+// once per minute. Extracted for tests so the per-job path can be exercised
+// without waiting on the 30s ticker.
+func (s *Scheduler) fireDue(t time.Time) {
+	s.mu.Lock()
+	var toDelete []string
+	for id, job := range s.jobs {
+		if t.Hour() != job.Hour || t.Minute() != job.Minute {
+			continue
+		}
+		if time.Since(job.lastFiredAt) < time.Minute {
+			continue
+		}
+		job.lastFiredAt = t
+
+		// Targeted jobs (e.g. discord:<channelID>) are routed by the
+		// adapter, which handles header posting and ACP/PTY dispatch
+		// itself. Falling through to the main-PTY write would leak the
+		// prompt into the local terminal (T31/T32 regression).
+		dispatched := false
+		if job.Target != "" && s.dispatch != nil {
+			dispatched = s.dispatch(job.Target, job.Message)
+		}
+
+		if !dispatched && s.pty != nil {
+			if err := s.pty.write([]byte(job.Message + "\n")); err != nil {
+				s.logger.Warn("scheduler PTY write failed", "jobID", id, "target", job.Target, "err", err)
 			}
 		}
-		for _, id := range toDelete {
-			delete(s.jobs, id)
+		if !job.Repeat {
+			toDelete = append(toDelete, id)
 		}
-		s.mu.Unlock()
-		if len(toDelete) > 0 {
-			s.persist()
-		}
+	}
+	for _, id := range toDelete {
+		delete(s.jobs, id)
+	}
+	s.mu.Unlock()
+	if len(toDelete) > 0 {
+		s.persist()
 	}
 }

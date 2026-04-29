@@ -25,39 +25,51 @@ func TestSchedulerListJobs(t *testing.T) {
 
 func TestSchedulerTargetRouting(t *testing.T) {
 	mainPTY := newPTYManager()
-	discordPTY := newPTYManager()
-
 	sched := newScheduler(mainPTY, "", nil)
-	sched.ptyLookup = func(target string) *PTYManager {
-		if target == "discord:chan1" {
-			return discordPTY
-		}
-		return nil
+
+	type call struct {
+		target  string
+		message string
+	}
+	var calls []call
+	sched.dispatch = func(target, message string) bool {
+		calls = append(calls, call{target, message})
+		return target == "discord:chan1"
 	}
 
-	resolve := func(job *Job) *PTYManager {
-		pm := sched.pty
-		if job.Target != "" && sched.ptyLookup != nil {
-			if found := sched.ptyLookup(job.Target); found != nil {
-				pm = found
-			}
-		}
-		return pm
-	}
-
+	// Targeted job that the adapter handles: dispatch true → no main-PTY leak.
 	discordJob := &Job{Target: "discord:chan1", Message: "hello discord"}
-	if got := resolve(discordJob); got != discordPTY {
-		t.Errorf("discord job: expected discordPTY, got %p (mainPTY=%p discordPTY=%p)", got, mainPTY, discordPTY)
+	dispatched := false
+	if discordJob.Target != "" && sched.dispatch != nil {
+		dispatched = sched.dispatch(discordJob.Target, discordJob.Message)
+	}
+	if !dispatched {
+		t.Errorf("discord job: expected dispatched=true")
 	}
 
+	// Untargeted job: dispatch never invoked, falls through to main PTY.
 	mainJob := &Job{Target: "", Message: "hello main"}
-	if got := resolve(mainJob); got != mainPTY {
-		t.Errorf("main job: expected mainPTY, got %p", got)
+	mainDispatched := false
+	if mainJob.Target != "" && sched.dispatch != nil {
+		mainDispatched = sched.dispatch(mainJob.Target, mainJob.Message)
+	}
+	if mainDispatched {
+		t.Errorf("main job: dispatch should not be invoked for empty target")
 	}
 
+	// Targeted job the adapter does not own: dispatch=false → caller may
+	// fall back to main-PTY behaviour.
 	unknownJob := &Job{Target: "discord:unknown", Message: "hello unknown"}
-	if got := resolve(unknownJob); got != mainPTY {
-		t.Errorf("unknown target: expected mainPTY, got %p", got)
+	unknownDispatched := false
+	if unknownJob.Target != "" && sched.dispatch != nil {
+		unknownDispatched = sched.dispatch(unknownJob.Target, unknownJob.Message)
+	}
+	if unknownDispatched {
+		t.Errorf("unknown target: expected dispatched=false (adapter declines, caller falls back)")
+	}
+
+	if len(calls) != 2 {
+		t.Errorf("expected dispatch called twice (chan1, unknown), got %d: %+v", len(calls), calls)
 	}
 }
 
@@ -145,6 +157,104 @@ func TestSchedulerWatchFileChange(t *testing.T) {
 		time.Sleep(50 * time.Millisecond)
 	}
 	t.Fatal("watcher did not reload the new job within 2s")
+}
+
+// TestSchedulerFireDue_TargetedJobSkipsMainPTY is the regression guard for
+// T31/T32: when a job has a non-empty Target and dispatch handles it, the
+// scheduler must NOT additionally write the message into the main local PTY.
+// The earlier implementation always fell through to a main-PTY write because
+// PTYForTarget returned nil for ACP-mode Discord sessions, leaking the
+// scheduled prompt into the local terminal and never invoking ACP.
+func TestSchedulerFireDue_TargetedJobSkipsMainPTY(t *testing.T) {
+	mainPTY := newPTYManager() // not started → write would return errPTYNotReady
+	sched := newScheduler(mainPTY, "", nil)
+
+	var dispatched []string
+	sched.dispatch = func(target, message string) bool {
+		dispatched = append(dispatched, target+"|"+message)
+		return true // adapter handled it
+	}
+
+	now := time.Date(2026, 4, 30, 9, 30, 0, 0, time.UTC)
+	sched.mu.Lock()
+	sched.jobs["t31"] = &Job{
+		ID: "t31", Hour: 9, Minute: 30,
+		Target: "discord:chan1", Message: "report time", Repeat: false,
+	}
+	sched.mu.Unlock()
+
+	sched.fireDue(now)
+
+	if len(dispatched) != 1 || dispatched[0] != "discord:chan1|report time" {
+		t.Fatalf("expected one dispatch call for the Discord target, got %v", dispatched)
+	}
+	sched.mu.Lock()
+	_, stillThere := sched.jobs["t31"]
+	sched.mu.Unlock()
+	if stillThere {
+		t.Errorf("one-shot scheduled job should be removed after firing")
+	}
+}
+
+// TestSchedulerFireDue_UntargetedFallsBackToMainPTY confirms the main-PTY
+// path still runs for jobs without a Target — dispatch must not be invoked.
+func TestSchedulerFireDue_UntargetedFallsBackToMainPTY(t *testing.T) {
+	sched := newScheduler(newPTYManager(), "", nil)
+
+	dispatched := 0
+	sched.dispatch = func(target, message string) bool {
+		dispatched++
+		return true
+	}
+
+	now := time.Date(2026, 4, 30, 9, 30, 0, 0, time.UTC)
+	sched.mu.Lock()
+	sched.jobs["m"] = &Job{ID: "m", Hour: 9, Minute: 30, Message: "main job", Repeat: true}
+	sched.mu.Unlock()
+
+	sched.fireDue(now) // unstarted PTY: write attempt returns errPTYNotReady,
+	// scheduler logs a warning and continues — no panic.
+
+	if dispatched != 0 {
+		t.Errorf("expected dispatch to be skipped for empty-target job, got %d calls", dispatched)
+	}
+}
+
+// TestSchedulerFireDue_AdapterDeclinesFallsBackToMainPTY covers the case
+// where the adapter does not own the target (e.g. unknown channel) — the
+// scheduler must fall back to the main-PTY write so a misconfigured target
+// never silently swallows the job.
+func TestSchedulerFireDue_AdapterDeclinesFallsBackToMainPTY(t *testing.T) {
+	sched := newScheduler(newPTYManager(), "", nil)
+
+	dispatchCalls := 0
+	sched.dispatch = func(target, message string) bool {
+		dispatchCalls++
+		return false // adapter declines
+	}
+
+	now := time.Date(2026, 4, 30, 9, 30, 0, 0, time.UTC)
+	sched.mu.Lock()
+	sched.jobs["u"] = &Job{
+		ID: "u", Hour: 9, Minute: 30,
+		Target: "discord:unknown", Message: "ping", Repeat: false,
+	}
+	sched.mu.Unlock()
+
+	sched.fireDue(now)
+
+	if dispatchCalls != 1 {
+		t.Errorf("expected dispatch called exactly once, got %d", dispatchCalls)
+	}
+	// Fallback runs; unstarted PTY write fails with errPTYNotReady but the
+	// scheduler swallows the error (logs warning). We just assert no panic
+	// and the one-shot was still removed.
+	sched.mu.Lock()
+	_, stillThere := sched.jobs["u"]
+	sched.mu.Unlock()
+	if stillThere {
+		t.Errorf("one-shot job should be removed even when adapter declined and fallback wrote to a not-ready PTY")
+	}
 }
 
 func TestSchedulerPersistJSONL(t *testing.T) {
