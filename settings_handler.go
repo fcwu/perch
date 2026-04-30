@@ -94,9 +94,9 @@ func (s *Server) handlePatchSettings(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// handleAdminRestart handles POST /api/admin/restart — admin only.
+// handleManagementRestart handles POST /api/management/restart — admin only.
 // Returns HTTP 202 immediately and sends SIGTERM to PID 1 in a goroutine.
-func (s *Server) handleAdminRestart(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleManagementRestart(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusAccepted)
 	go func() {
 		time.Sleep(100 * time.Millisecond) // brief delay to let response flush

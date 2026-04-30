@@ -145,14 +145,14 @@ function AdminLoginPage() {
     e.preventDefault()
     setLoading(true)
     setError('')
-    const r = await fetch('/admin/login', {
+    const r = await fetch('/management/login', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ token }),
     })
     setLoading(false)
     if (r.ok) {
-      window.location.href = '/admin'
+      window.location.href = '/management'
     } else {
       setError('Invalid token')
     }
@@ -177,15 +177,17 @@ type AdminTab = 'realtime' | 'history' | 'analytics'
 
 const ADMIN_FONT = "-apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif"
 
-function AdminApp({ showLogout }: { showLogout: boolean }) {
+function AdminApp({ showLogout, showLive }: { showLogout: boolean, showLive: boolean }) {
   const initTab = (): AdminTab => {
     const p = window.location.pathname
-    return p.startsWith('/admin/analytics') ? 'analytics' : p.startsWith('/admin/history') ? 'history' : 'realtime'
+    if (p.startsWith('/management/analytics')) return 'analytics'
+    if (p.startsWith('/management/history')) return 'history'
+    return showLive ? 'realtime' : 'history'
   }
   const [tab, setTab] = useState<AdminTab>(initTab)
 
   const navigate = (t: AdminTab) => {
-    const url = t === 'realtime' ? '/admin' : t === 'history' ? '/admin/history' : '/admin/analytics'
+    const url = t === 'realtime' ? '/management' : t === 'history' ? '/management/history' : '/management/analytics'
     window.history.pushState({}, '', url)
     setTab(t)
   }
@@ -214,7 +216,7 @@ function AdminApp({ showLogout }: { showLogout: boolean }) {
           onMouseLeave={e => (e.currentTarget.style.color = '#888')}
         >← Chat</a>
         <span style={{ color: '#4a4a4a', fontSize: 12, fontWeight: 600, paddingRight: 4, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Admin</span>
-        <button style={tabStyle(tab === 'realtime')} onClick={() => navigate('realtime')}>Live</button>
+        {showLive && <button style={tabStyle(tab === 'realtime')} onClick={() => navigate('realtime')}>Live</button>}
         <button style={tabStyle(tab === 'history')} onClick={() => navigate('history')}>History</button>
         <button style={tabStyle(tab === 'analytics')} onClick={() => navigate('analytics')}>Analytics</button>
         {showLogout && (
@@ -224,7 +226,7 @@ function AdminApp({ showLogout }: { showLogout: boolean }) {
         )}
       </div>
       <div style={{ flex: 1, overflowY: 'auto' }}>
-        {tab === 'realtime' && <AdminRealtimePage />}
+        {tab === 'realtime' && showLive && <AdminRealtimePage />}
         {tab === 'history' && <AdminHistoryPage />}
         {tab === 'analytics' && <AdminAnalyticsPage />}
       </div>
@@ -268,7 +270,7 @@ export default function App() {
   }, [])
 
   // Admin login page is always served as-is
-  if (path === '/admin/login') {
+  if (path === '/management/login') {
     return <AdminLoginPage />
   }
 
@@ -297,8 +299,8 @@ export default function App() {
     return <ChatApp authStatus={authStatus} accessDenied={accessDenied} />
   }
 
-  if (path.startsWith('/admin')) {
-    return <AdminApp showLogout={authStatus.authenticated && authStatus.auth_method !== 'none'} />
+  if (path.startsWith('/management')) {
+    return <AdminApp showLogout={authStatus.authenticated && authStatus.auth_method !== 'none'} showLive={authStatus.mode === 'multi'} />
   }
 
   // Fallback: render ChatApp

@@ -38,8 +38,11 @@ type ACPProcess struct {
 	pending map[int64]chan acpMsg
 
 	// streaming chunks from agent_message_chunk notifications (one prompt at a time)
-	chunkMu  sync.Mutex
-	chunkBuf strings.Builder
+	chunkMu     sync.Mutex
+	chunkBuf    strings.Builder
+	chunkCb     func(string)      // optional per-prompt callback; called from readLoop goroutine
+	toolStartCb func(string)      // called with tool name on tool_call_started
+	toolEndCb   func()            // called on tool_call_completed
 }
 
 // acpMsg is the wire format for ACP JSON-RPC 2.0 messages.
@@ -181,10 +184,28 @@ func (p *ACPProcess) Start(ctx context.Context) error {
 // Prompt sends text to the agent and returns the accumulated response text.
 // On ctx cancellation or error the subprocess is killed; EnsureRunning will restart it.
 func (p *ACPProcess) Prompt(ctx context.Context, text string) (string, error) {
-	// Reset chunk accumulator before sending the prompt.
+	return p.PromptWithChunks(ctx, text, nil, nil, nil)
+}
+
+// PromptWithChunks is like Prompt but calls onChunk for each agent_message_chunk as it
+// arrives (before the full response is available). onChunk may be nil.
+// onToolStart is called with the tool name when a tool_call_started event arrives.
+// onToolEnd is called when a tool_call_completed event arrives.
+func (p *ACPProcess) PromptWithChunks(ctx context.Context, text string, onChunk func(string), onToolStart func(string), onToolEnd func()) (string, error) {
+	// Reset chunk accumulator and register callbacks before sending the prompt.
 	p.chunkMu.Lock()
 	p.chunkBuf.Reset()
+	p.chunkCb = onChunk
+	p.toolStartCb = onToolStart
+	p.toolEndCb = onToolEnd
 	p.chunkMu.Unlock()
+	defer func() {
+		p.chunkMu.Lock()
+		p.chunkCb = nil
+		p.toolStartCb = nil
+		p.toolEndCb = nil
+		p.chunkMu.Unlock()
+	}()
 
 	p.mu.Lock()
 	sessionID := p.sessionID
@@ -351,22 +372,50 @@ func (p *ACPProcess) readLoop(r io.Reader) {
 			}
 
 		case msg.Method == "session/update":
-			// Streaming update notification. Extract agent_message_chunk text.
+			// Streaming update notification.
 			var params struct {
 				Update struct {
 					SessionUpdate string `json:"sessionUpdate"`
-					Content       struct {
+					// agent_message_chunk fields
+					Content struct {
 						Type string `json:"type"`
 						Text string `json:"text"`
 					} `json:"content"`
+					// tool_call_started fields
+					ToolUse struct {
+						Name string `json:"name"`
+					} `json:"tool_use"`
 				} `json:"update"`
 			}
-			if err := json.Unmarshal(msg.Params, &params); err == nil &&
-				params.Update.SessionUpdate == "agent_message_chunk" &&
-				params.Update.Content.Type == "text" {
+			if err := json.Unmarshal(msg.Params, &params); err != nil {
+				break
+			}
+			switch params.Update.SessionUpdate {
+			case "agent_message_chunk":
+				if params.Update.Content.Type == "text" {
+					chunk := params.Update.Content.Text
+					p.chunkMu.Lock()
+					p.chunkBuf.WriteString(chunk)
+					cb := p.chunkCb
+					p.chunkMu.Unlock()
+					if cb != nil {
+						cb(chunk)
+					}
+				}
+			case "tool_call_started":
 				p.chunkMu.Lock()
-				p.chunkBuf.WriteString(params.Update.Content.Text)
+				cb := p.toolStartCb
 				p.chunkMu.Unlock()
+				if cb != nil {
+					cb(params.Update.ToolUse.Name)
+				}
+			case "tool_call_completed":
+				p.chunkMu.Lock()
+				cb := p.toolEndCb
+				p.chunkMu.Unlock()
+				if cb != nil {
+					cb()
+				}
 			}
 		}
 	}

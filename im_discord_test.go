@@ -146,23 +146,6 @@ func TestChannelSessionIDUnique(t *testing.T) {
 	}
 }
 
-func TestExtractReplyFromSnapshot(t *testing.T) {
-	snapshot := strings.Join([]string{
-		"\x1b[32mThinking...\x1b[0m",
-		"Here is line one",
-		"Here is line two",
-		"❯",
-		"Here is line two",
-		"",
-	}, "\n")
-
-	got := extractReplyFromSnapshot(snapshot)
-	want := "Thinking...\nHere is line one\nHere is line two"
-	if got != want {
-		t.Fatalf("want %q, got %q", want, got)
-	}
-}
-
 func TestWriteSessionNotFound(t *testing.T) {
 	mgr := newDiscordSessionManager(AgentRuntime{}, "tok", "", nil, t.TempDir(), slog.Default())
 	err := mgr.WriteSession("nonexistent", []byte("hello"))
@@ -171,17 +154,15 @@ func TestWriteSessionNotFound(t *testing.T) {
 	}
 }
 
-func TestWriteSessionExists(t *testing.T) {
+func TestWriteSessionExistsACP(t *testing.T) {
 	mgr := newDiscordSessionManager(AgentRuntime{}, "tok", "", nil, t.TempDir(), slog.Default())
-	// Insert a session with a no-op PTY (ptmx nil) to verify the path is reached.
 	mgr.mu.Lock()
-	mgr.sessions["ch1"] = &discordSession{pty: newPTYManager()}
+	mgr.sessions["ch1"] = &discordSession{channelID: "ch1", acpProcess: NewACPProcess("", "", slog.Default())}
 	mgr.mu.Unlock()
-	// PTY not started → write returns errPTYNotReady, not "session not found".
+	// ACP session always returns an error (no writable PTY).
 	err := mgr.WriteSession("ch1", []byte("hello"))
 	if err == nil {
-		// Would only succeed if PTY is running; in test it returns errPTYNotReady.
-		t.Fatal("expected error from unstarted PTY, got nil")
+		t.Fatal("expected error for ACP session, got nil")
 	}
 	if err.Error() == "session not found: ch1" {
 		t.Fatalf("got session-not-found but session was inserted: %v", err)

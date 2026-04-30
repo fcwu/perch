@@ -99,12 +99,11 @@ func newMockDiscordSession(rt http.RoundTripper) *discordgo.Session {
 // --- Helpers ---
 
 // newTestDiscordManager builds a DiscordSessionManager without a live connection.
-func newTestDiscordManager(acpEnabled bool) *DiscordSessionManager {
+func newTestDiscordManager(_ bool) *DiscordSessionManager {
 	return &DiscordSessionManager{
 		runtime:        AgentRuntime{},
 		sessions:       make(map[string]*discordSession),
 		channelPrivate: make(map[string]bool),
-		acpEnabled:     acpEnabled,
 		logger:         slog.Default(),
 	}
 }
@@ -189,30 +188,14 @@ func TestACPRunTimeout(t *testing.T) {
 }
 
 // ============================================================
-// T64 — newDiscordSession: ACP mode has acpProcess, PTY mode has pty
+// T64 — newDiscordSession always uses ACP mode
 // ============================================================
 
 func TestDiscordACPMode(t *testing.T) {
-	logger := slog.Default()
-
-	// ACP mode
-	sess := newDiscordSession(AgentRuntime{}, "ch-acp", true, "fake-agent-acp", "", logger)
+	sess := newDiscordSession(AgentRuntime{}, "ch-acp", "fake-agent-acp", "", slog.Default())
 	if sess.acpProcess == nil {
 		t.Error("ACP mode: acpProcess should be non-nil")
 	}
-	if sess.pty != nil {
-		t.Error("ACP mode: pty should be nil")
-	}
-
-	// PTY mode — PTY is created (background goroutine fails to exec, that's OK)
-	sess2 := newDiscordSession(AgentRuntime{}, "ch-pty", false, "", "", logger)
-	if sess2.acpProcess != nil {
-		t.Error("PTY mode: acpProcess should be nil")
-	}
-	if sess2.pty == nil {
-		t.Error("PTY mode: pty should be non-nil")
-	}
-	sess2.pty.stop()
 }
 
 // ============================================================
@@ -248,26 +231,12 @@ func TestDiscordACPWriteSession(t *testing.T) {
 	if err == nil {
 		t.Error("ACP session: WriteSession should return error")
 	}
-	if !strings.Contains(err.Error(), "ACP mode") {
-		t.Errorf("error should mention ACP mode, got: %v", err)
+	if !strings.Contains(err.Error(), "ACP") {
+		t.Errorf("error should mention ACP, got: %v", err)
 	}
 }
 
-// ============================================================
-// T71 — Notify skips ACP sessions (no Discord call, returns nil)
-// ============================================================
-
-func TestDiscordACPNotifySkip(t *testing.T) {
-	mgr := newTestDiscordManager(true)
-	proc, srv := newFakeACPProcess(t, "sess-notify")
-	defer srv.close()
-	mgr.sessions["test-ch"] = &discordSession{channelID: "test-ch", acpProcess: proc}
-
-	err := mgr.Notify(HookEvent{EventName: "Stop", SessionID: "any-uuid"}, "hello world")
-	if err != nil {
-		t.Errorf("Notify on ACP session should return nil, got: %v", err)
-	}
-}
+// T71 was: Notify skips ACP sessions — removed (Notify no longer exists; Discord is ACP-only)
 
 // ============================================================
 // T66 — Happy path: 👀 → EnsureRunning → Prompt → 💬 + reply
@@ -515,7 +484,6 @@ func TestDiscordACPDMAllowlist(t *testing.T) {
 		runtime:          AgentRuntime{},
 		sessions:         make(map[string]*discordSession),
 		channelPrivate:   make(map[string]bool),
-		acpEnabled:       true,
 		acpExecutable:    "/nonexistent-binary-xyz", // will fail if actually invoked
 		allowedDMUserIDs: map[string]struct{}{"111": {}},
 		logger:           slog.Default(),

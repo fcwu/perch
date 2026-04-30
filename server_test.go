@@ -146,7 +146,7 @@ func postChat(t *testing.T, s *Server, userID, query string, newConversation boo
 func TestHandleChatAPIHistory(t *testing.T) {
 	store := tempStore(t)
 	rt := makeTestRuntime()
-	hub := newAdminHub()
+	hub := newManagementHub()
 	m := newUserSessionManager(rt, "", nil, store, hub)
 
 	// Insert a prior completed session for userID "u1"
@@ -179,7 +179,7 @@ func TestHandleChatAPIHistory(t *testing.T) {
 func TestHandleChatAPINewConversation(t *testing.T) {
 	store := tempStore(t)
 	rt := makeTestRuntime()
-	hub := newAdminHub()
+	hub := newManagementHub()
 	m := newUserSessionManager(rt, "", nil, store, hub)
 
 	// Insert a prior completed session

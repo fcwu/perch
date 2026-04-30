@@ -48,7 +48,7 @@ export default function AdminHistoryPage() {
     if (u) params.set('user', u)
     if (q) params.set('q', q)
     try {
-      const r = await fetch(`/api/admin/history?${params}`)
+      const r = await fetch(`/api/management/history?${params}`)
       if (r.ok) {
         const data = await r.json()
         setSessions(data.sessions ?? [])
@@ -64,7 +64,7 @@ export default function AdminHistoryPage() {
   }, [user, keyword, page, fetchSessions])
 
   const openDetail = async (id: string) => {
-    const r = await fetch(`/api/admin/history/${id}`)
+    const r = await fetch(`/api/management/history/${id}`)
     if (r.ok) setSelected(await r.json())
   }
 

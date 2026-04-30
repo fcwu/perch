@@ -43,7 +43,6 @@ type DiscordSettings struct {
 	BotToken       *string  `json:"bot_token,omitempty"`        // restart-required
 	ChannelID      *string  `json:"channel_id,omitempty"`       // restart-required
 	AllowedUserIDs []string `json:"allowed_user_ids,omitempty"` // immediate
-	ACPEnabled     *bool    `json:"acp_enabled,omitempty"`      // restart-required
 	ACPExecutable  *string  `json:"acp_executable,omitempty"`   // restart-required
 }
 
@@ -189,9 +188,6 @@ func mergeSettings(base, override RuntimeSettings) RuntimeSettings {
 		}
 		if override.Discord.AllowedUserIDs != nil {
 			d.AllowedUserIDs = override.Discord.AllowedUserIDs
-		}
-		if override.Discord.ACPEnabled != nil {
-			d.ACPEnabled = override.Discord.ACPEnabled
 		}
 		if override.Discord.ACPExecutable != nil {
 			d.ACPExecutable = override.Discord.ACPExecutable
@@ -350,10 +346,6 @@ func (sm *SettingsManager) Patch(delta RuntimeSettings) (restartRequired bool, e
 		}
 		if delta.Discord.AllowedUserIDs != nil {
 			sm.current.Discord.AllowedUserIDs = delta.Discord.AllowedUserIDs
-		}
-		if delta.Discord.ACPEnabled != nil {
-			sm.current.Discord.ACPEnabled = delta.Discord.ACPEnabled
-			changed = true // restart-required
 		}
 		if delta.Discord.ACPExecutable != nil {
 			sm.current.Discord.ACPExecutable = delta.Discord.ACPExecutable

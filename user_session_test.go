@@ -36,36 +36,6 @@ func TestSignalDoneOnPTYExitWhenHooksAbsent(t *testing.T) {
 	}
 }
 
-// TestStopHookDoesNotBroadcastDone confirms the Stop hook only marks the
-// session completed; the actual `done` event is the PTY-exit goroutine's
-// job so it lands after any trailing bytes claude writes between Stop
-// firing and the process exiting.
-func TestStopHookDoesNotBroadcastDone(t *testing.T) {
-	usm := newTestUserSessionManager()
-	sess := newUserSession("u1", "alice", "q")
-	sess.sessionUUID = "uuid-stop"
-	usm.sessions["u1"] = sess
-	usm.uuidMap["uuid-stop"] = "u1"
-
-	jsonCh, unsub := sess.subscribeJSON()
-	defer unsub()
-
-	usm.NotifyHook(HookEvent{EventName: "Stop", SessionID: "uuid-stop"})
-
-	select {
-	case msg := <-jsonCh:
-		t.Errorf("Stop hook unexpectedly broadcast: %q", msg)
-	case <-time.After(50 * time.Millisecond):
-	}
-
-	sess.mu.Lock()
-	st := sess.status
-	sess.mu.Unlock()
-	if st != userSessionCompleted {
-		t.Errorf("expected session completed after Stop hook, got %d", st)
-	}
-}
-
 func TestBuildPrompt(t *testing.T) {
 	// Empty history returns raw query
 	if got := buildPrompt(nil, "hello"); got != "hello" {
@@ -160,25 +130,3 @@ func TestUserSessionManagerCancelStopsPTY(t *testing.T) {
 	}
 }
 
-func TestUserSessionManagerClaimUUID(t *testing.T) {
-	rt := makeTestRuntime()
-	m := newUserSessionManager(rt, "", nil, nil, nil)
-	if err := m.StartSession("u1", "alice", "q", false, ""); err != nil {
-		t.Fatalf("StartSession: %v", err)
-	}
-	sess, ok := m.ClaimUUID("uuid-abc")
-	if !ok || sess == nil {
-		t.Fatal("expected ClaimUUID to succeed for pending session")
-	}
-	m.mu.Lock()
-	uid := m.uuidMap["uuid-abc"]
-	m.mu.Unlock()
-	if uid != "u1" {
-		t.Errorf("expected uuidMap to map uuid-abc → u1, got %q", uid)
-	}
-	// Second ClaimUUID for same uuid returns same session.
-	sess2, ok2 := m.ClaimUUID("uuid-abc")
-	if !ok2 || sess2 != sess {
-		t.Fatal("expected same session on second ClaimUUID")
-	}
-}

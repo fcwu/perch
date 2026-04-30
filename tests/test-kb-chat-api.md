@@ -102,11 +102,26 @@
 
 ---
 
-### T55 — Admin 即時監控（Phase 2）
+### T55-single — Management Live 端點在 single-user mode 下不存在
+
+**層級**：E2E-curl
+
+**Given** Perch 以 `PERCH_MODE=single`（預設）啟動
+**When** curl 嘗試升級 WebSocket 連線至 `/ws/management`
+```bash
+curl -i -N -H "Upgrade: websocket" -H "Connection: Upgrade" \
+     -H "Sec-WebSocket-Version: 13" -H "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==" \
+     http://localhost:<port>/ws/management
+```
+**Then** HTTP 回應狀態碼為 `404`（路由未註冊）
+
+---
+
+### T55-multi — Management Live 端點在 multi-user mode 下正常運作
 
 **層級**：E2E-browser
 
-**Given** 管理員已登入 `/admin`，另一位使用者正在送出查詢
+**Given** Perch 以 `PERCH_MODE=multi`（含 GitLab 設定）啟動，管理員已登入 `/management`，另一位使用者正在送出查詢
 **When** 管理員查看 Live Sessions 面板
 **Then**
 - 新查詢開始時，面板出現新的 row，顯示使用者名稱、查詢摘要、耗時與目前執行的工具

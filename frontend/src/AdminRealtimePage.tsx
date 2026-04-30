@@ -22,7 +22,7 @@ function useAdminWS() {
 
   useEffect(() => {
     const proto = location.protocol === 'https:' ? 'wss' : 'ws'
-    const ws = new WebSocket(`${proto}://${location.host}/ws/admin`)
+    const ws = new WebSocket(`${proto}://${location.host}/ws/management`)
     wsRef.current = ws
 
     ws.onmessage = (e) => {

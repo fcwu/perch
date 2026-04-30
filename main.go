@@ -125,16 +125,6 @@ func main() {
 	if discordToken != "" || telegramToken != "" && telegramChatStr != "" {
 		im = newIMManager(logger.Logger)
 	}
-	// --- ACP mode (optional): DISCORD_ACP_ENABLED=true uses claude-agent-acp subprocess ---
-	acpEnabled := os.Getenv("DISCORD_ACP_ENABLED") == "true"
-	if acpEnabled {
-		exe := os.Getenv("ACP_EXECUTABLE")
-		if exe == "" {
-			exe = "claude-agent-acp"
-		}
-		logger.Info("Discord ACP mode enabled", "executable", exe)
-	}
-
 	if im != nil && discordToken != "" {
 		discordSess = newDiscordSessionManager(runtime, discordToken, discordChannel, discordAllowedDMUsers, workdir, logger.Logger)
 		im.addAdapter(discordSess)
@@ -145,10 +135,10 @@ func main() {
 			logger.Error("invalid TELEGRAM_CHAT_ID", "value", telegramChatStr, "err", err)
 			os.Exit(1)
 		}
-		im.addAdapter(newTelegramAdapter(telegramToken, chatID, logger.Logger))
+		im.addAdapter(newTelegramAdapter(telegramToken, chatID, workdir, logger.Logger))
 	}
 	if im != nil {
-		im.start(IMConfig{PTY: pm, ACPEnabled: acpEnabled})
+		im.start(IMConfig{})
 	}
 	if discordSess != nil {
 		sched.dispatch = discordSess.DispatchScheduled
@@ -170,7 +160,7 @@ func main() {
 	}
 	gitlabAuth := newGitLabAuth(mode, authMethod)
 	adminAuth := newAdminAuth()
-	adminHub := newAdminHub()
+	adminHub := newManagementHub()
 
 	// Open SQLite store if DB_PATH is set (or default to /data/perch.db).
 	// Set DB_PATH= (empty) to disable history.
@@ -198,6 +188,7 @@ func main() {
 	}
 
 	srv := newServerWithMode(pm, auth, im, sessProvider, userSessions, gitlabAuth, adminAuth, adminHub, store, userRL, sm, mode, logger.Logger)
+	srv.chatSessions = newACPUserSessionManager(workdir, store, adminHub, logger.Logger)
 
 	// Apply rate limiting to sensitive endpoints only
 	sensitivePaths := map[string]bool{"/login": true, "/bootstrap": true}
@@ -361,9 +352,8 @@ func buildEnvSeed(runtime AgentRuntime) RuntimeSettings {
 	discordToken := os.Getenv("DISCORD_BOT_TOKEN")
 	discordChannel := os.Getenv("DISCORD_CHANNEL_ID")
 	discordAllowedRaw := os.Getenv("DISCORD_ALLOWED_USER_IDS")
-	discordACP := os.Getenv("DISCORD_ACP_ENABLED")
 	acpExe := os.Getenv("ACP_EXECUTABLE")
-	if discordToken != "" || discordChannel != "" || discordAllowedRaw != "" || discordACP != "" || acpExe != "" {
+	if discordToken != "" || discordChannel != "" || discordAllowedRaw != "" || acpExe != "" {
 		s.Discord = &DiscordSettings{}
 		if discordToken != "" {
 			s.Discord.BotToken = strPtr(discordToken)
@@ -379,10 +369,6 @@ func buildEnvSeed(runtime AgentRuntime) RuntimeSettings {
 				}
 			}
 			s.Discord.AllowedUserIDs = ids
-		}
-		if discordACP != "" {
-			b := discordACP == "true"
-			s.Discord.ACPEnabled = boolPtr(b)
 		}
 		if acpExe != "" {
 			s.Discord.ACPExecutable = strPtr(acpExe)

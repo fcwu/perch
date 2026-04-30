@@ -212,168 +212,6 @@ func splitForDiscord(text string) []string {
 	return chunks
 }
 
-// startPTYWatcher subscribes to PTY output and cycles "still working" emoji reactions
-// on the pending message every 10 s of activity. Call stopPTYWatcher (or cancel the
-// session) to tear it down.
-func (sess *discordSession) startPTYWatcher(s *discordgo.Session, pending *discordPending, logger *slog.Logger) {
-	sess.watcherMu.Lock()
-	if sess.watcherCancel != nil {
-		sess.watcherCancel()
-	}
-	ctx, cancel := context.WithCancel(context.Background())
-	sess.watcherCancel = cancel
-	sess.watcherMu.Unlock()
-
-	ptyCh, unsub := sess.pty.subscribe()
-	go func() {
-		defer unsub()
-		ticker := time.NewTicker(10 * time.Second)
-		defer ticker.Stop()
-		var lastEmoji string
-		emojiIdx := 0
-		hadActivity := false
-		for {
-			select {
-			case <-ctx.Done():
-				if lastEmoji != "" {
-					_ = s.MessageReactionRemove(pending.ChannelID, pending.MessageID, lastEmoji, "@me")
-				}
-				return
-			case _, ok := <-ptyCh:
-				if !ok {
-					return
-				}
-				hadActivity = true
-			case <-ticker.C:
-				if !hadActivity {
-					continue
-				}
-				hadActivity = false
-				next := workingEmojis[emojiIdx%len(workingEmojis)]
-				emojiIdx++
-				if lastEmoji != "" {
-					_ = s.MessageReactionRemove(pending.ChannelID, pending.MessageID, lastEmoji, "@me")
-				}
-				if err := s.MessageReactionAdd(pending.ChannelID, pending.MessageID, next); err != nil {
-					logger.Warn("Discord working reaction add failed", "emoji", next, "err", err)
-				}
-				lastEmoji = next
-			}
-		}
-	}()
-}
-
-// stopPTYWatcher cancels the running watcher (if any).
-func (sess *discordSession) stopPTYWatcher() {
-	sess.watcherMu.Lock()
-	if sess.watcherCancel != nil {
-		sess.watcherCancel()
-		sess.watcherCancel = nil
-	}
-	sess.watcherMu.Unlock()
-}
-
-func (sess *discordSession) startRuntimeFallbackReply(s *discordgo.Session, pending *discordPending, logger *slog.Logger) {
-	if sess.runtime.SupportsHooks || pending == nil || !pending.AutoReply {
-		return
-	}
-	go func() {
-		ch, unsub := sess.pty.subscribe()
-		defer unsub()
-		idle := time.NewTimer(20 * time.Second)
-		defer idle.Stop()
-		deadline := time.NewTimer(2 * time.Minute)
-		defer deadline.Stop()
-		for {
-			select {
-			case _, ok := <-ch:
-				if !ok {
-					return
-				}
-				if !idle.Stop() {
-					select {
-					case <-idle.C:
-					default:
-					}
-				}
-				idle.Reset(20 * time.Second)
-			case <-idle.C:
-				sess.sendRuntimeFallbackReply(s, pending, logger)
-				return
-			case <-deadline.C:
-				sess.sendRuntimeFallbackReply(s, pending, logger)
-				return
-			}
-		}
-	}()
-}
-
-func (sess *discordSession) sendRuntimeFallbackReply(s *discordgo.Session, pending *discordPending, logger *slog.Logger) {
-	if s == nil || pending == nil {
-		return
-	}
-	text := extractReplyFromSnapshot(string(sess.pty.snapshot()))
-	if text == "" {
-		text = "✓ OpenCode finished."
-	}
-	if err := s.MessageReactionRemove(pending.ChannelID, pending.MessageID, emojiEyes, "@me"); err != nil {
-		logger.Warn("Discord reaction remove failed", "emoji", emojiEyes, "err", err)
-	}
-	if err := s.MessageReactionAdd(pending.ChannelID, pending.MessageID, emojiSpeech); err != nil {
-		logger.Warn("Discord reaction add failed", "emoji", emojiSpeech, "err", err)
-	}
-	chunks := splitForDiscord(text)
-	for i, chunk := range chunks {
-		if i == 0 {
-			_, err := s.ChannelMessageSendComplex(pending.ChannelID, &discordgo.MessageSend{
-				Content:   chunk,
-				Reference: &discordgo.MessageReference{MessageID: pending.MessageID},
-			})
-			if err != nil {
-				logger.Warn("Discord send fallback reply failed", "channel", sess.channelID, "err", err)
-			}
-			continue
-		}
-		if _, err := s.ChannelMessageSend(pending.ChannelID, chunk); err != nil {
-			logger.Warn("Discord send fallback continuation failed", "channel", sess.channelID, "part", i, "err", err)
-		}
-	}
-	sess.mu.Lock()
-	if sess.last != nil && sess.last.MessageID == pending.MessageID {
-		sess.last = nil
-	}
-	sess.mu.Unlock()
-}
-
-func extractReplyFromSnapshot(snapshot string) string {
-	lines := strings.Split(snapshot, "\n")
-	collected := make([]string, 0, 12)
-	seen := make(map[string]struct{})
-	for i := len(lines) - 1; i >= 0; i-- {
-		line := strings.TrimSpace(stripANSIEscape(lines[i]))
-		if line == "" || strings.HasPrefix(line, "❯") || strings.Contains(line, "bypass permissions") {
-			continue
-		}
-		if _, ok := seen[line]; ok {
-			continue
-		}
-		seen[line] = struct{}{}
-		collected = append(collected, line)
-		if len(collected) == 12 {
-			break
-		}
-	}
-	for i, j := 0, len(collected)-1; i < j; i, j = i+1, j-1 {
-		collected[i], collected[j] = collected[j], collected[i]
-	}
-	return strings.TrimSpace(strings.Join(collected, "\n"))
-}
-
-var ansiRE = regexp.MustCompile(`\x1b\[[0-9;?]*[ -/]*[@-~]`)
-
-func stripANSIEscape(s string) string {
-	return ansiRE.ReplaceAllString(s, "")
-}
 
 type discordPending struct {
 	MessageID string
@@ -382,41 +220,23 @@ type discordPending struct {
 	AutoReply bool
 }
 
-// discordSession is one per Discord channel.
-// In ACP mode (acpProcess != nil), pty is nil; messages go via ACP JSON-RPC stdio.
-// In PTY mode (acpProcess == nil), pty holds the agent process.
+// discordSession is one per Discord channel; all sessions use ACP subprocess mode.
 type discordSession struct {
 	channelID   string
 	runtime     AgentRuntime
 	sessionUUID string
-	acpProcess  *ACPProcess // non-nil when ACP mode is active (lazy-started)
-	pty         *PTYManager // non-nil in PTY mode
+	acpProcess  *ACPProcess // lazy-started on first Prompt()
 
 	mu   sync.Mutex
 	last *discordPending
-	warm bool // PTY mode only: true after the first write to PTY
-
-	watcherMu     sync.Mutex
-	watcherCancel func() // PTY mode only: non-nil while watcher goroutine runs
 }
 
-func newDiscordSession(runtime AgentRuntime, channelID string, acpEnabled bool, executable, workdir string, logger *slog.Logger) *discordSession {
-	sess := &discordSession{
-		channelID: channelID,
-		runtime:   runtime,
+func newDiscordSession(runtime AgentRuntime, channelID string, executable, workdir string, logger *slog.Logger) *discordSession {
+	return &discordSession{
+		channelID:  channelID,
+		runtime:    runtime,
+		acpProcess: NewACPProcess(executable, workdir, logger),
 	}
-	if acpEnabled {
-		// ACP mode: subprocess is lazy-started on first Prompt().
-		sess.acpProcess = NewACPProcess(executable, workdir, logger)
-	} else {
-		// PTY mode: launch the agent process immediately.
-		pty := newPTYManager()
-		target := "discord:" + channelID
-		go pty.start(runtime.Command, runtime.SessionArgs(target), workdir, logger, runtime.DefaultEnv,
-			runtime.SessionEnv(target)...)
-		sess.pty = pty
-	}
-	return sess
 }
 
 // SessionView is the JSON representation of a live Discord session.
@@ -425,9 +245,7 @@ type SessionView struct {
 	SessionUUID string `json:"session_uuid"`
 }
 
-// DiscordSessionManager listens on Discord and routes each channel to its own session.
-// In ACP mode (acpEnabled true), each session owns an ACPProcess subprocess (claude-agent-acp).
-// In PTY mode (acpEnabled false), each session owns a PTY process running the agent CLI.
+// DiscordSessionManager listens on Discord and routes each channel to its own ACP session.
 type DiscordSessionManager struct {
 	runtime          AgentRuntime
 	token            string
@@ -437,7 +255,6 @@ type DiscordSessionManager struct {
 	workdir          string
 
 	mu             sync.Mutex
-	acpEnabled     bool   // true = ACP mode; false = PTY mode
 	acpExecutable  string // path to claude-agent-acp binary (default from ACP_EXECUTABLE / "claude-agent-acp")
 	dgo            *discordgo.Session
 	sessions       map[string]*discordSession // channelID → session
@@ -503,16 +320,7 @@ func (d *DiscordSessionManager) isPrivateChannel(s *discordgo.Session, channelID
 	return isPrivate
 }
 
-func (d *DiscordSessionManager) Start(cfg IMConfig) error {
-	d.mu.Lock()
-	d.acpEnabled = cfg.ACPEnabled
-	d.mu.Unlock()
-
-	// In PTY mode, pre-start the allowed channel session so the agent is warm.
-	if !cfg.ACPEnabled && d.allowedChannelID != "" {
-		d.getOrCreateSession(d.allowedChannelID)
-	}
-
+func (d *DiscordSessionManager) Start(_ IMConfig) error {
 	session, err := discordgo.New("Bot " + d.token)
 	if err != nil {
 		return err
@@ -525,11 +333,7 @@ func (d *DiscordSessionManager) Start(cfg IMConfig) error {
 	d.mu.Lock()
 	d.dgo = session
 	d.mu.Unlock()
-	if cfg.ACPEnabled {
-		d.logger.Info("Discord bot connected (ACP mode)")
-	} else {
-		d.logger.Info("Discord bot connected (PTY mode)")
-	}
+	d.logger.Info("Discord bot connected (ACP mode)")
 	return nil
 }
 
@@ -546,9 +350,6 @@ func (d *DiscordSessionManager) Stop() {
 		s.Close()
 	}
 	for _, sess := range sessions {
-		if sess.pty != nil {
-			sess.pty.stop()
-		}
 		if sess.acpProcess != nil {
 			sess.acpProcess.Stop()
 		}
@@ -608,126 +409,7 @@ func (d *DiscordSessionManager) onMessage(s *discordgo.Session, m *discordgo.Mes
 	}
 
 	sess := d.getOrCreateSession(m.ChannelID)
-
-	// ACP mode: handle via ACPProcess subprocess, no PTY involved.
-	if sess.acpProcess != nil {
-		go sess.handleWithACP(s, m.ChannelID, m.ID, content, d.logger)
-		return
-	}
-
-	sess.mu.Lock()
-	idle := sess.last == nil
-	sess.last = &discordPending{
-		MessageID: m.ID,
-		ChannelID: m.ChannelID,
-		GuildID:   m.GuildID,
-		AutoReply: !sess.runtime.SupportsHooks,
-	}
-	sess.mu.Unlock()
-
-	// If the session was idle, the previous sessionUUID may be stale (e.g.
-	// claude exited without firing a Stop hook).  Clear it so the new claude
-	// invocation can claim the session when its first hook event arrives.
-	if idle {
-		d.mu.Lock()
-		if sess.sessionUUID != "" {
-			d.logger.Info("Discord clearing stale sessionUUID", "channel", m.ChannelID, "uuid", sess.sessionUUID)
-			sess.sessionUUID = ""
-		}
-		d.mu.Unlock()
-	}
-
-	if err := s.MessageReactionAdd(m.ChannelID, m.ID, emojiEyes); err != nil {
-		d.logger.Warn("Discord add reaction failed", "emoji", emojiEyes, "err", err)
-	}
-
-	// If this is a brand-new PTY session (empty framebuffer), Claude Code has not
-	// If Claude Code is not yet warm (first message on this session), we must
-	// wait for it to finish initialising before writing.  Writing too early
-	// causes the welcome-screen TUI to consume the '\r' terminator, discarding
-	// the message.
-	//
-	// We use sess.warm (set after the first successful write) rather than
-	// checking framebuf length to avoid a race: the 👀 reaction Discord API
-	// call above takes ~100 ms, during which the PTY goroutine may already
-	// have produced output, making framebuf non-empty before we check it.
-	sess.mu.Lock()
-	needsWarm := !sess.warm
-	sess.mu.Unlock()
-
-	writeToPTY := func() {
-		if err := sess.pty.write([]byte(content + "\r")); err != nil {
-			d.logger.Warn("Discord PTY write failed", "channel", m.ChannelID, "msgID", m.ID, "err", err)
-			return
-		}
-		sess.mu.Lock()
-		sess.warm = true
-		pending := sess.last
-		sess.mu.Unlock()
-		if pending != nil {
-			sess.startPTYWatcher(s, pending, d.logger)
-			sess.startRuntimeFallbackReply(s, pending, d.logger)
-		}
-	}
-	if needsWarm {
-		go func() {
-			ch, unsub := sess.pty.subscribe()
-			defer unsub()
-			deadline := time.After(120 * time.Second)
-			chunks := 0
-
-			// Phase 1: wait for the Claude Code interactive TUI to be fully
-			// rendered.  "bypass permissions" appears in the status bar only
-			// after MCPs have loaded and the readline is active, making it a
-			// reliable marker that the PTY is ready for input.
-			// We also accept the raw ❯ prompt as a fallback for non-bypass modes.
-			foundPrompt := false
-			for !foundPrompt {
-				select {
-				case data := <-ch:
-					chunks++
-					s := string(data)
-					if strings.Contains(s, "bypass permissions") || strings.Contains(s, "❯") {
-						foundPrompt = true
-						d.logger.Debug("Discord needsWarm: prompt detected", "channel", m.ChannelID, "chunk", chunks, "bytes", len(data))
-					}
-				case <-deadline:
-					d.logger.Debug("Discord needsWarm: deadline before prompt", "channel", m.ChannelID, "chunks", chunks)
-					writeToPTY()
-					return
-				}
-			}
-
-			// Phase 2: wait for output to settle (no new PTY data for 2 s).
-			// This ensures any final rendering has finished before we inject
-			// the user's message.
-			stable := time.NewTimer(2 * time.Second)
-			defer stable.Stop()
-			for {
-				select {
-				case <-ch:
-					// More output arrived — reset the stability window.
-					if !stable.Stop() {
-						select {
-						case <-stable.C:
-						default:
-						}
-					}
-					stable.Reset(2 * time.Second)
-				case <-stable.C:
-					d.logger.Debug("Discord needsWarm: stable, writing", "channel", m.ChannelID)
-					writeToPTY()
-					return
-				case <-deadline:
-					d.logger.Debug("Discord needsWarm: deadline in phase2", "channel", m.ChannelID)
-					writeToPTY()
-					return
-				}
-			}
-		}()
-	} else {
-		writeToPTY()
-	}
+	go sess.handleWithACP(s, m.ChannelID, m.ID, content, d.logger)
 }
 
 // handleWithACP sends message to the claude-agent-acp subprocess and routes the reply to Discord.
@@ -815,184 +497,24 @@ func (d *DiscordSessionManager) getOrCreateSession(channelID string) *discordSes
 	if sess, ok := d.sessions[channelID]; ok {
 		return sess
 	}
-	sess := newDiscordSession(d.runtime, channelID, d.acpEnabled, d.acpExecutable, d.workdir, d.logger)
+	sess := newDiscordSession(d.runtime, channelID, d.acpExecutable, d.workdir, d.logger)
 	d.sessions[channelID] = sess
 	return sess
 }
 
-func (d *DiscordSessionManager) Notify(event HookEvent, lastText string) error {
-	d.mu.Lock()
-	var target *discordSession
-	for _, sess := range d.sessions {
-		// ACP sessions handle their own reply flow; skip hook routing for them.
-		if sess.acpProcess != nil {
-			continue
-		}
-		if sess.sessionUUID == event.SessionID {
-			target = sess
-			break
-		}
-		// Claim an unassigned session only when there is a pending message
-		// (user-triggered via Discord or scheduler-triggered via DispatchScheduled).
-		// This prevents main-PTY hook events from being routed to Discord.
-		if sess.sessionUUID == "" {
-			sess.mu.Lock()
-			hasPending := sess.last != nil
-			sess.mu.Unlock()
-			if hasPending {
-				sess.sessionUUID = event.SessionID
-				target = sess
-				break
-			}
-		}
-	}
-	dgo := d.dgo
-	d.mu.Unlock()
-	if target == nil {
-		d.logger.Debug("Discord Notify: no session matched, dropping event",
-			"event", event.EventName, "sessionID", event.SessionID)
-		return nil
-	}
-	err := target.notify(dgo, event, lastText, d.logger)
-	// After Stop, clear sessionUUID so the next conversation can be tracked.
-	if event.EventName == "Stop" {
-		d.mu.Lock()
-		target.sessionUUID = ""
-		d.mu.Unlock()
-	}
-	return err
-}
-
-func (sess *discordSession) notify(s *discordgo.Session, event HookEvent, lastText string, logger *slog.Logger) error {
-	sess.mu.Lock()
-	pending := sess.last
-	sess.mu.Unlock()
-	if s == nil {
-		return nil
-	}
-
-	// Scheduler-triggered (no pending user message): only handle Stop,
-	// send response directly to the channel without a reply reference.
-	if pending == nil {
-		if event.EventName != "Stop" {
-			return nil
-		}
-		text := lastText
-		if text == "" {
-			text = "✓ Claude finished."
-		}
-		var lastErr error
-		for _, chunk := range splitForDiscord(text) {
-			if _, err := s.ChannelMessageSend(sess.channelID, chunk); err != nil {
-				logger.Warn("Discord send autonomous reply failed", "err", err)
-				lastErr = err
-			}
-		}
-		return lastErr
-	}
-
-	switch event.EventName {
-	case "PreToolUse":
-		if err := s.MessageReactionAdd(pending.ChannelID, pending.MessageID, emojiGear); err != nil {
-			logger.Warn("Discord reaction add failed", "emoji", emojiGear, "err", err)
-		}
-
-	case "PostToolUse":
-		if err := s.MessageReactionRemove(pending.ChannelID, pending.MessageID, emojiGear, "@me"); err != nil {
-			logger.Warn("Discord reaction remove failed", "emoji", emojiGear, "err", err)
-		}
-		if event.IsError {
-			if err := s.MessageReactionAdd(pending.ChannelID, pending.MessageID, emojiCross); err != nil {
-				logger.Warn("Discord reaction add failed", "emoji", emojiCross, "err", err)
-			}
-		} else {
-			if err := s.MessageReactionAdd(pending.ChannelID, pending.MessageID, emojiCheck); err != nil {
-				logger.Warn("Discord reaction add failed", "emoji", emojiCheck, "err", err)
-			}
-		}
-
-	case "Stop":
-		sess.stopPTYWatcher()
-
-		if err := s.MessageReactionRemove(pending.ChannelID, pending.MessageID, emojiEyes, "@me"); err != nil {
-			logger.Warn("Discord reaction remove failed", "emoji", emojiEyes, "err", err)
-		}
-		if err := s.MessageReactionRemove(pending.ChannelID, pending.MessageID, emojiGear, "@me"); err != nil {
-			logger.Warn("Discord reaction remove failed", "emoji", emojiGear, "err", err)
-		}
-		if err := s.MessageReactionAdd(pending.ChannelID, pending.MessageID, emojiSpeech); err != nil {
-			logger.Warn("Discord reaction add failed", "emoji", emojiSpeech, "err", err)
-		}
-
-		text := lastText
-		if text == "" {
-			text = "✓ Claude finished."
-		}
-		chunks := splitForDiscord(text)
-		logger.Info("Discord sending Stop reply", "channel", sess.channelID, "replyTo", pending.MessageID, "chunks", len(chunks))
-		for i, chunk := range chunks {
-			if i == 0 {
-				_, err := s.ChannelMessageSendComplex(pending.ChannelID, &discordgo.MessageSend{
-					Content:   chunk,
-					Reference: &discordgo.MessageReference{MessageID: pending.MessageID},
-				})
-				if err != nil {
-					logger.Warn("Discord send reply failed", "channel", sess.channelID, "err", err)
-				}
-			} else {
-				if _, err := s.ChannelMessageSend(pending.ChannelID, chunk); err != nil {
-					logger.Warn("Discord send continuation failed", "channel", sess.channelID, "part", i, "err", err)
-				}
-			}
-		}
-
-		sess.mu.Lock()
-		sess.last = nil
-		sess.mu.Unlock()
-	}
+// ListSessions is a no-op since all Discord sessions are ACP (no viewable PTY stream).
+func (d *DiscordSessionManager) ListSessions() []SessionView {
 	return nil
 }
 
-// ListSessions returns active PTY-mode Discord sessions (implements SessionProvider).
-// ACP sessions (sess.pty == nil) are excluded — they have no web-viewable PTY stream.
-func (d *DiscordSessionManager) ListSessions() []SessionView {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	out := make([]SessionView, 0, len(d.sessions))
-	for _, sess := range d.sessions {
-		if sess.pty == nil {
-			continue
-		}
-		out = append(out, SessionView{
-			ChannelID:   sess.channelID,
-			SessionUUID: sess.sessionUUID,
-		})
-	}
-	return out
-}
-
-// SubscribeSession returns a read channel for the PTY output of channelID.
-// Returns false if the session is in ACP mode (no PTY) or does not exist.
-func (d *DiscordSessionManager) SubscribeSession(channelID string) (<-chan []byte, func(), bool) {
-	d.mu.Lock()
-	sess, ok := d.sessions[channelID]
-	d.mu.Unlock()
-	if !ok || sess.pty == nil {
-		return nil, nil, false
-	}
-	ch, unsub := sess.pty.subscribe()
-	return ch, unsub, true
+// SubscribeSession always returns false — Discord sessions use ACP, not PTY.
+func (d *DiscordSessionManager) SubscribeSession(_ string) (<-chan []byte, func(), bool) {
+	return nil, nil, false
 }
 
 // DispatchScheduled handles a scheduler-fired job for a Discord channel target.
-// It posts the visible "📅 local schedule > {message}" header, then routes the
-// prompt to either the ACP runtime (Claude reply threads back to the header) or
-// the session PTY (legacy mode, reply produced via PTY framebuffer + hooks).
-//
-// Returns true when the dispatch was handled (caller must skip its fallback
-// PTY write to avoid leaking the prompt into the main terminal). Returns false
-// only when the target is not a Discord session or the bot is not connected,
-// allowing the caller to fall back to default routing.
+// Posts a visible header then routes the prompt via the channel's ACP session.
+// Returns true when handled, false if the target is not a Discord channel.
 func (d *DiscordSessionManager) DispatchScheduled(target, message string) bool {
 	channelID, ok := parseDiscordTarget(target)
 	if !ok {
@@ -1013,50 +535,8 @@ func (d *DiscordSessionManager) DispatchScheduled(target, message string) bool {
 	}
 
 	sess := d.getOrCreateSession(channelID)
-
-	// ACP mode: dispatch via the ACP subprocess so Claude actually replies,
-	// threading the reply back to the header message ID. Without this, the
-	// scheduler's earlier behaviour silently leaked the prompt into the main
-	// PTY (T31/T32 spec violation).
-	if sess.acpProcess != nil {
-		go sess.handleWithACP(dgo, channelID, sent.ID, message, d.logger)
-		return true
-	}
-
-	// PTY mode: thread the eventual reply via sess.last (so PTY hook / autoreply
-	// code paths reply to the header), then write the prompt to the session PTY.
-	sess.mu.Lock()
-	sess.last = &discordPending{
-		MessageID: sent.ID,
-		ChannelID: channelID,
-		AutoReply: !sess.runtime.SupportsHooks,
-	}
-	pty := sess.pty
-	sess.mu.Unlock()
-	if pty == nil {
-		d.logger.Warn("Discord schedule: session has no PTY in non-ACP mode", "channel", channelID)
-		return true
-	}
-	if err := pty.write([]byte(message + "\r")); err != nil {
-		d.logger.Warn("Discord schedule PTY write failed", "channel", channelID, "err", err)
-	}
+	go sess.handleWithACP(dgo, channelID, sent.ID, message, d.logger)
 	return true
-}
-
-// PTYForTarget returns the PTYManager for a session target string (e.g. "discord:<channelID>").
-// Returns nil if the target is not a known Discord session or if the session is in ACP mode.
-func (d *DiscordSessionManager) PTYForTarget(target string) *PTYManager {
-	channelID, ok := parseDiscordTarget(target)
-	if !ok {
-		return nil
-	}
-	d.mu.Lock()
-	sess, found := d.sessions[channelID]
-	d.mu.Unlock()
-	if !found {
-		return nil
-	}
-	return sess.pty // nil in ACP mode
 }
 
 // parseDiscordTarget extracts the channel ID from a scheduler target string.
@@ -1075,15 +555,8 @@ func parseDiscordTarget(target string) (string, bool) {
 	return rest, true
 }
 
-// ResizeSession resizes the PTY for the given Discord channel (no-op in ACP mode).
-func (d *DiscordSessionManager) ResizeSession(channelID string, cols, rows uint16) {
-	d.mu.Lock()
-	sess, ok := d.sessions[channelID]
-	d.mu.Unlock()
-	if ok && sess.pty != nil {
-		sess.pty.resize(cols, rows)
-	}
-}
+// ResizeSession is a no-op (Discord sessions use ACP, not PTY).
+func (d *DiscordSessionManager) ResizeSession(_ string, _, _ uint16) {}
 
 // SendToChannel sends a plain-text message to a Discord channel by ID.
 // It is independent of allowedChannelID and intended for out-of-band notifications.
@@ -1098,17 +571,13 @@ func (d *DiscordSessionManager) SendToChannel(channelID string, msg string) erro
 	return err
 }
 
-// WriteSession writes data to the PTY stdin for the given Discord channel.
-// Returns an error if the session is in ACP mode (no PTY).
-func (d *DiscordSessionManager) WriteSession(channelID string, data []byte) error {
+// WriteSession always returns an error — Discord sessions use ACP, not PTY.
+func (d *DiscordSessionManager) WriteSession(channelID string, _ []byte) error {
 	d.mu.Lock()
-	sess, ok := d.sessions[channelID]
+	_, ok := d.sessions[channelID]
 	d.mu.Unlock()
 	if !ok {
 		return fmt.Errorf("session not found: %s", channelID)
 	}
-	if sess.pty == nil {
-		return fmt.Errorf("session %s is in ACP mode (no PTY)", channelID)
-	}
-	return sess.pty.write(data)
+	return fmt.Errorf("session %s uses ACP (no writable PTY)", channelID)
 }

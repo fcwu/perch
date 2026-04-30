@@ -41,7 +41,7 @@ export default function AdminAnalyticsPage() {
   useEffect(() => {
     const { from, to } = rangeToParams(range)
     setLoading(true)
-    fetch(`/api/admin/analytics?from=${from}&to=${to}`)
+    fetch(`/api/management/analytics?from=${from}&to=${to}`)
       .then(r => r.ok ? r.json() : null)
       .then(d => setStats(d))
       .finally(() => setLoading(false))

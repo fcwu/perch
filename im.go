@@ -1,35 +1,12 @@
 package main
 
 import (
-	"encoding/json"
 	"log/slog"
-	"strings"
 	"sync"
 )
 
-// HookEvent is the JSON payload Claude Code sends to hooks.
-type HookEvent struct {
-	EventName    string           `json:"hook_event_name"`
-	SessionID    string           `json:"session_id"`
-	ToolName     string           `json:"tool_name,omitempty"`
-	ToolInput    json.RawMessage  `json:"tool_input,omitempty"`
-	ToolResponse json.RawMessage  `json:"tool_response,omitempty"`
-	IsError      bool             `json:"is_error,omitempty"`
-	Transcript           []TranscriptMsg `json:"transcript,omitempty"`
-	LastAssistantMessage string          `json:"last_assistant_message,omitempty"`
-}
-
-// TranscriptMsg is one entry in a Stop hook transcript.
-type TranscriptMsg struct {
-	Role    string `json:"role"`
-	Content any    `json:"content"`
-}
-
-// IMConfig carries dependencies that IM adapters may need at startup.
-type IMConfig struct {
-	PTY        *PTYManager
-	ACPEnabled bool // true = Discord uses ACP stdio subprocess mode
-}
+// IMConfig carries optional startup configuration for IM adapters.
+type IMConfig struct{}
 
 // IMAdapter is implemented by each IM platform (Discord, Telegram, …).
 type IMAdapter interface {
@@ -37,9 +14,6 @@ type IMAdapter interface {
 	Start(cfg IMConfig) error
 	// Stop shuts down the adapter gracefully.
 	Stop()
-	// Notify dispatches a Claude hook event to the platform.
-	// lastText is the extracted assistant response (non-empty only on Stop).
-	Notify(event HookEvent, lastText string) error
 }
 
 // TextSender is implemented by IM adapters that can send an arbitrary text message
@@ -95,26 +69,6 @@ func (m *IMManager) stop() {
 	}
 }
 
-func (m *IMManager) notify(event HookEvent) {
-	lastText := ""
-	if event.EventName == "Stop" {
-		if event.LastAssistantMessage != "" {
-			lastText = event.LastAssistantMessage
-		} else {
-			lastText = extractLastAssistantText(event.Transcript)
-		}
-	}
-	m.mu.Lock()
-	adapters := make([]IMAdapter, len(m.adapters))
-	copy(adapters, m.adapters)
-	m.mu.Unlock()
-	for _, a := range adapters {
-		if err := a.Notify(event, lastText); err != nil {
-			m.logger.Warn("IM notify error", "err", err)
-		}
-	}
-}
-
 // SendText sends msg to channelID via the first adapter that implements TextSender.
 func (m *IMManager) SendText(channelID string, msg string) error {
 	m.mu.Lock()
@@ -139,30 +93,3 @@ func (m *IMManager) Sessions() SessionProvider {
 	return nil
 }
 
-// extractLastAssistantText pulls the last assistant message text from a transcript.
-func extractLastAssistantText(msgs []TranscriptMsg) string {
-	for i := len(msgs) - 1; i >= 0; i-- {
-		if msgs[i].Role == "assistant" {
-			return contentToString(msgs[i].Content)
-		}
-	}
-	return ""
-}
-
-func contentToString(content any) string {
-	switch v := content.(type) {
-	case string:
-		return v
-	case []any:
-		var parts []string
-		for _, block := range v {
-			if m, ok := block.(map[string]any); ok {
-				if t, ok := m["text"].(string); ok {
-					parts = append(parts, t)
-				}
-			}
-		}
-		return strings.Join(parts, "")
-	}
-	return ""
-}

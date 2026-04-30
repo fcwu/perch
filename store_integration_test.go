@@ -1,55 +1,43 @@
 package main
 
 import (
-	"encoding/json"
 	"testing"
 	"time"
 )
 
 // TestStoreIntegration verifies that a complete query flow correctly persists
-// session + tool events to SQLite.
+// session + tool events to SQLite via direct store calls (ACP-driven path).
 func TestStoreIntegration(t *testing.T) {
 	store := tempStore(t)
-	hub := newAdminHub()
-	rt := makeTestRuntime()
-	m := newUserSessionManager(rt, "", nil, store, hub)
 
-	// Start a session
-	if err := m.StartSession("u1", "alice", "what is HBS?", false, ""); err != nil {
-		t.Fatalf("StartSession: %v", err)
+	// Insert session (as ACPUserSessionManager does at prompt start)
+	if err := store.InsertSession("sess-1", "u1", "alice", "what is HBS?"); err != nil {
+		t.Fatalf("InsertSession: %v", err)
 	}
 
-	// Claim a UUID (simulates first hook arriving from OpenCode)
-	sess, ok := m.ClaimUUID("uuid-sess-1")
-	if !ok || sess == nil {
-		t.Fatal("ClaimUUID failed")
-	}
-
-	// Verify session was inserted in store
-	time.Sleep(10 * time.Millisecond)
-	detail, err := store.GetSession("uuid-sess-1")
+	// Verify session was inserted
+	detail, err := store.GetSession("sess-1")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if detail == nil {
-		t.Fatal("expected session in store after ClaimUUID")
+		t.Fatal("expected session in store after InsertSession")
 	}
 	if detail.Status != "running" {
 		t.Errorf("expected status='running', got %q", detail.Status)
 	}
 
-	// Simulate PreToolUse hook
-	inputJSON, _ := json.Marshal(map[string]string{"path": "wiki/hbs.md"})
-	m.NotifyHook(HookEvent{
-		EventName: "PreToolUse",
-		SessionID: "uuid-sess-1",
-		ToolName:  "Read",
-		ToolInput: inputJSON,
-	})
+	// Insert a tool event (as ACPUserSessionManager does on tool_call_started)
+	eventID, err := store.InsertToolEvent("sess-1", "Read", `{"path":"wiki/hbs.md"}`)
+	if err != nil {
+		t.Fatalf("InsertToolEvent: %v", err)
+	}
+	if eventID == 0 {
+		t.Fatal("expected non-zero tool event ID")
+	}
 
 	// Verify tool event was inserted
-	time.Sleep(10 * time.Millisecond)
-	detail, err = store.GetSession("uuid-sess-1")
+	detail, err = store.GetSession("sess-1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -60,25 +48,21 @@ func TestStoreIntegration(t *testing.T) {
 		t.Errorf("expected tool_name='Read', got %q", detail.ToolEvents[0].ToolName)
 	}
 
-	// Simulate PostToolUse hook
-	outputJSON, _ := json.Marshal("HBS content here")
-	m.NotifyHook(HookEvent{
-		EventName:    "PostToolUse",
-		SessionID:    "uuid-sess-1",
-		ToolName:     "Read",
-		ToolResponse: outputJSON,
-	})
+	// Update tool event end (as ACPUserSessionManager does on tool_call_completed)
+	if err := store.UpdateToolEventEnd(eventID, `"HBS content here"`); err != nil {
+		t.Fatalf("UpdateToolEventEnd: %v", err)
+	}
 
-	// Simulate Stop hook
-	m.NotifyHook(HookEvent{
-		EventName:            "Stop",
-		SessionID:            "uuid-sess-1",
-		LastAssistantMessage: "HBS is a backup solution.",
-	})
+	// Mark session done (as ACPUserSessionManager does on RunCompleted)
+	if err := store.UpdateSessionDone("sess-1", "HBS is a backup solution."); err != nil {
+		t.Fatalf("UpdateSessionDone: %v", err)
+	}
+
+	// Allow any async writes to settle
+	time.Sleep(5 * time.Millisecond)
 
 	// Verify session is marked done
-	time.Sleep(10 * time.Millisecond)
-	detail, err = store.GetSession("uuid-sess-1")
+	detail, err = store.GetSession("sess-1")
 	if err != nil {
 		t.Fatal(err)
 	}
