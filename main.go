@@ -423,5 +423,32 @@ func buildEnvSeed(runtime AgentRuntime) RuntimeSettings {
 		}
 	}
 
+	// Workspace
+	wsSyncEnabled := os.Getenv("WORKSPACE_GIT_SYNC_ENABLED")
+	wsSyncInterval := os.Getenv("WORKSPACE_GIT_SYNC_INTERVAL")
+	wsGitToken := os.Getenv("WORKSPACE_GIT_TOKEN")
+	wsNotifyChannel := os.Getenv("WORKSPACE_GIT_SYNC_NOTIFY_CHANNEL")
+	wsSubmodules := os.Getenv("WORKSPACE_GIT_SYNC_SUBMODULES")
+	if wsSyncEnabled != "" || wsSyncInterval != "" || wsGitToken != "" || wsNotifyChannel != "" || wsSubmodules != "" {
+		s.Workspace = &WorkspaceSettings{}
+		if wsSyncEnabled != "" {
+			b := wsSyncEnabled == "true" || wsSyncEnabled == "1"
+			s.Workspace.SyncEnabled = boolPtr(b)
+		}
+		if wsSyncInterval != "" {
+			s.Workspace.SyncInterval = strPtr(wsSyncInterval)
+		}
+		if wsGitToken != "" {
+			s.Workspace.GitToken = strPtr(wsGitToken)
+		}
+		if wsNotifyChannel != "" {
+			s.Workspace.NotifyChannel = strPtr(wsNotifyChannel)
+		}
+		if wsSubmodules != "" {
+			b := wsSubmodules == "true" || wsSubmodules == "1"
+			s.Workspace.SyncSubmodules = boolPtr(b)
+		}
+	}
+
 	return s
 }
