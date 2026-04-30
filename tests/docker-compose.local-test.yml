@@ -10,7 +10,6 @@ services:
       - ./test-workspace:/workspace
       - ./test-perchuser:/home/perchuser
       - ./test-data:/data
-      # T26 entrypoint skill 合併測試：把 host ~/.claude（不含 local-schedule）
-      # 掛進去，讓 entrypoint.sh 把 perch 內建的 skill 複製到 workspace
-      - ${HOME}/.claude:/home/perchuser/.claude:ro
+      # entrypoint.sh 啟動時會 cp -a 到容器 local ~/.claude（可寫副本）。
+      - ${HOME}/.claude:/etc/perch-claude-host:ro
     restart: "no"

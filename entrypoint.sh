@@ -21,6 +21,50 @@ if [ -n "$WORKDIR" ] && [ -n "$PUID" ]; then
     chown "${PUID}:${PGID}" "$WORKDIR/.perch"
 fi
 
+# Copy host ~/.claude to a writable local copy so Claude Code 2.1.x can
+# mutate plugins/*.bak and session-env/<uuid>/ without hitting EROFS on the
+# RO bind mount.  Mount convention: ${HOME}/.claude:/etc/perch-claude-host:ro
+if [ -d /etc/perch-claude-host ]; then
+    if mkdir -p /home/perchuser/.claude && \
+       cp -a /etc/perch-claude-host/. /home/perchuser/.claude/ 2>/dev/null; then
+        # Strip volatile / large / sensitive dirs that must not carry over from host.
+        rm -rf \
+            /home/perchuser/.claude/sessions \
+            /home/perchuser/.claude/projects \
+            /home/perchuser/.claude/cache \
+            /home/perchuser/.claude/debug \
+            /home/perchuser/.claude/backups \
+            /home/perchuser/.claude/shell-snapshots \
+            /home/perchuser/.claude/history.jsonl
+    else
+        echo "perch entrypoint: warning: cp /etc/perch-claude-host failed, continuing with empty ~/.claude" >&2
+        mkdir -p /home/perchuser/.claude
+    fi
+else
+    # No staging mount — start with an empty local dir; user will claude /login.
+    mkdir -p /home/perchuser/.claude
+fi
+
+# Seed ~/.claude.json with required onboarding flags for fresh containers.
+# Only fills missing/null fields; existing values (including false) are kept.
+CLAUDE_JSON="/home/perchuser/.claude.json"
+if [ ! -f "$CLAUDE_JSON" ]; then
+    echo '{}' > "$CLAUDE_JSON"
+fi
+if command -v jq >/dev/null 2>&1; then
+    _wd="${WORKDIR:-/workspace}"
+    jq --arg wd "$_wd" '
+        if .hasCompletedOnboarding == null then .hasCompletedOnboarding = true else . end |
+        if .theme == null then .theme = "dark-daltonized" else . end |
+        if .hasAcceptedAllTerms == null then .hasAcceptedAllTerms = true else . end |
+        if .projects[$wd].hasTrustDialogAccepted == null then
+            .projects[$wd].hasTrustDialogAccepted = true
+        else . end
+    ' "$CLAUDE_JSON" > "${CLAUDE_JSON}.tmp" && mv "${CLAUDE_JSON}.tmp" "$CLAUDE_JSON"
+else
+    echo "perch entrypoint: warning: jq not found, skipping .claude.json seed" >&2
+fi
+
 if [ -n "$WORKDIR" ]; then
     AGENT_RUNTIME="${AGENT_RUNTIME:-claude}"
     if [ "$AGENT_RUNTIME" = "opencode" ]; then
@@ -51,14 +95,6 @@ if [ -n "$WORKDIR" ]; then
             done
         fi
 
-        # Merge perch hooks into $WORKDIR/.claude/settings.json only when IM
-        # integration is configured, and only into the project-level config so the
-        # host-mounted ~/.claude/settings.json is never modified.
-        if [ -f /app/perch-claude/settings.json ] && \
-           [ -n "${DISCORD_BOT_TOKEN}${TELEGRAM_BOT_TOKEN}" ]; then
-            PERCH_MERGE_TARGET="$WORKDIR/.claude/settings.json" \
-            node /app/perch-claude/merge-settings.js
-        fi
 
         # Fix ownership of anything created above under .claude/ (mkdir/cp/node all
         # run as root).  Only applies when PUID is set; harmless if .claude/ doesn't
@@ -67,6 +103,12 @@ if [ -n "$WORKDIR" ]; then
             chown -R "${PUID}:${PGID}" "$WORKDIR/.claude"
         fi
     fi
+fi
+
+# Fix ownership of user-level claude config (cp and seed above ran as root).
+if [ -n "$PUID" ]; then
+    [ -d /home/perchuser/.claude ] && chown -R "${PUID}:${PGID}" /home/perchuser/.claude
+    [ -f "$CLAUDE_JSON" ] && chown "${PUID}:${PGID}" "$CLAUDE_JSON"
 fi
 
 AUTH_METHOD="${AUTH_METHOD:-${AUTH_MODE:-none}}"

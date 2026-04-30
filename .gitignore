@@ -16,3 +16,7 @@ data/
 tests/.chrome-agent/
 .perch/
 frontend/.mcp.json
+tests/test-data/
+tests/test-workspace/
+tests/test-perchuser/
+tests/test-claude-rw/

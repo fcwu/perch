@@ -53,6 +53,9 @@ docker inspect <container> | jq '.[0].Config.Env'
 # 查看 log
 docker logs <container> --tail 50 -f
 
+# 確認 entrypoint seed 是否成功（grep 關鍵字）
+docker logs <container> 2>&1 | grep "perch entrypoint:"
+
 # 確認 /tmp 空間（容器內 tmpfs 通常只有 128MB）
 docker exec <container> df -h /tmp
 # 若空間不足，用 host 上其他目錄中轉大檔案

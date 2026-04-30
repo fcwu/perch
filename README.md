@@ -85,8 +85,7 @@ Perch 是一個輕量的 web terminal server，讓你不需要 SSH，直接用�
 docker run -d \
   -p 127.0.0.1:8080:8080 \
   -e PUID=$(id -u) -e PGID=$(id -g) -e TZ=Asia/Taipei \
-  -v ~/.claude:/home/perchuser/.claude \
-  -v ~/.claude.json:/home/perchuser/.claude.json \
+  -v ~/.claude:/etc/perch-claude-host:ro \
   -v ./:/workspace \
   -v ./data:/data \
   ghcr.io/fcwu/perch:latest
@@ -98,10 +97,20 @@ docker run -d \
 
 | Mount | 用途 |
 |-------|------|
-| `-v ~/.claude:/home/perchuser/.claude` | Claude Code 設定、技能；含 `.credentials.json`（OAuth token） |
-| `-v ~/.claude.json:/home/perchuser/.claude.json` | 記錄 `hasCompletedOnboarding` 與 `userID`；缺少時 Claude Code 視為全新安裝，即使憑證存在也會要求重新登入 |
+| `-v ~/.claude:/etc/perch-claude-host:ro` | Claude Code 設定（credentials、plugins、skills）。entrypoint 啟動時自動 cp 成容器本地可寫副本，避免 Claude Code 2.1.x 寫入 `session-env/` 與 `plugins/*.bak` 時遇到 EROFS。 |
 | `-v ./:/workspace` | Claude Code 工作目錄（當前目錄）；排程資料也存於此 |
 | `-v ./data:/data` | 持久化 Settings 與對話歷史（`settings.json`、`perch.db`） |
+
+> **⚠️ Breaking change（升級自 v1.x）**：mount 路徑由 `~/.claude:/home/perchuser/.claude:ro` 改為 `~/.claude:/etc/perch-claude-host:ro`。升級時只需在 docker-compose / docker run 更新掛載路徑，不需要其他資料遷移。`~/.claude.json` 不再需要單獨掛載，entrypoint 會自動 seed 必要的 onboarding flag。
+
+### Container 第一次啟動
+
+Perch entrypoint 在每次容器啟動時自動完成以下初始化：
+
+1. **cp host claude config**：把 `/etc/perch-claude-host/`（RO staging）cp 成 `/home/perchuser/.claude/`（容器本地可寫副本），同時排除 `sessions/`、`projects/`、`cache/`、`debug/`、`backups/`、`shell-snapshots/`、`history.jsonl` 等 volatile/個資子目錄。
+2. **seed `.claude.json` onboarding flag**：對 `/home/perchuser/.claude.json` 補齊 `hasCompletedOnboarding`、`theme`、`hasAcceptedAllTerms`、`projects.<workdir>.hasTrustDialogAccepted`，只補缺漏欄位，不覆寫既有值（包含 `false`）。
+
+若未掛載 `/etc/perch-claude-host`（fresh container），entrypoint 建立空 `~/.claude/` 目錄，並 seed `.claude.json`；使用者首次進入 terminal 執行 `claude /login` 完成認證即可。
 
 ---
 
@@ -196,8 +205,7 @@ Perch 本身不做認證（`AUTH_METHOD=none`），存取控制交給 **Cloudfla
 docker run -d \
   -p 127.0.0.1:8080:8080 \
   -e PUID=$(id -u) -e PGID=$(id -g) -e TZ=Asia/Taipei \
-  -v ~/.claude:/home/perchuser/.claude \
-  -v ~/.claude.json:/home/perchuser/.claude.json \
+  -v ~/.claude:/etc/perch-claude-host:ro \
   -v ./:/workspace \
   -v ./data:/data \
   ghcr.io/fcwu/perch:latest
@@ -228,8 +236,7 @@ docker run -d \
   -e GITLAB_ALLOWED_IDS=* \
   -e COOKIE_SECRET=$(openssl rand -hex 32) \
   -e PUID=$(id -u) -e PGID=$(id -g) -e TZ=Asia/Taipei \
-  -v ~/.claude:/home/perchuser/.claude \
-  -v ~/.claude.json:/home/perchuser/.claude.json \
+  -v ~/.claude:/etc/perch-claude-host:ro \
   -v ./:/workspace \
   -v ./data:/data \
   ghcr.io/fcwu/perch:latest
