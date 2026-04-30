@@ -140,4 +140,4 @@
 - [x] 11.3 `entrypoint.sh` 不再呼叫 `merge-settings.js` — `grep merge-settings entrypoint.sh` 為空
 - [x] 11.4 全套 batch B QA cycle 全綠 — round 3 (`tests/test-report-2026-04-30-full-0032-round3.md`) 全綠收結；container-compat batch B 全綠 (`tests/test-report-2026-04-30-batchB-2236.md`)
 - [x] 11.5 README、CLAUDE.md 描述與 code 一致 — README 整段重寫 ACP-only / 新 Discord Reaction 表 / Breaking changes block；perch CLAUDE.md 加 `## 0. 架構速記` 段
-- [ ] 11.6 兩個 change（`fix-claude-code-container-compat` + `consolidate-acp-runtime`）archive 完成
+- [x] 11.6 兩個 change（`fix-claude-code-container-compat` + `consolidate-acp-runtime`）archive 完成 — 兩個 change dir 移到 `openspec/changes/archive/`，6 個 capability spec sync 到 `openspec/specs/`（claude-container-bootstrap / acp-tool-events / chat-api-acp / telegram-acp-session 直接 cp；management-realtime 加 multi-mode gating Requirement；management-history URL rename 已在 8.6 完成；discord-acp-session 重寫去除 PTY fallback 並加 pool conformance Requirement）
