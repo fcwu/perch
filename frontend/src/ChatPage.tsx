@@ -11,9 +11,12 @@ function SendIcon() {
 }
 
 // Strip ANSI/VT100 escape sequences applied to the FULL accumulated buffer.
-// OSC/DCS are tried before standalone Fe so \x1b] is not greedily consumed as a 2-char sequence.
-// Standalone Fe excludes ], ^, _, P which are string-sequence introducers (OSC/DCS/PM/APC).
-const ANSI_RE = /\x1B(?:\][^\x07\x1b]*(?:\x07|\x1B\\)|P[^\x1b]*(?:\x1b\\)?|\[(?:[0-9;:<=>?]|[ -/])*[@-~]|[@-OQ-Z\\])/g
+// OSC/DCS are tried before standalone forms so \x1b] is not greedily consumed.
+// The single-byte fallback covers Fe/Fp/Fs in 0x30-0x7E except the introducers
+// (P=DCS, [=CSI, ]=OSC, ^=PM, _=APC), so DEC private 2-byte escapes like
+// \x1b7 (DECSC) and \x1b8 (DECRC) — which claude emits when restoring the
+// terminal on print-mode exit — are stripped instead of leaking "78".
+const ANSI_RE = /\x1B(?:\][^\x07\x1b]*(?:\x07|\x1B\\)|P[^\x1b]*(?:\x1B\\)?|\[(?:[0-9;:<=>?]|[ -/])*[@-~]|[0-OQ-Z\\`a-z{|}~])/g
 function stripAnsi(s: string): string {
   return s.replace(ANSI_RE, '').replace(/\r\n/g, '\n').replace(/\r/g, '\n')
 }

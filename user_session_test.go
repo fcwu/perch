@@ -36,32 +36,33 @@ func TestSignalDoneOnPTYExitWhenHooksAbsent(t *testing.T) {
 	}
 }
 
-// TestSignalDoneIdempotentAcrossStopAndPTYExit guards against double
-// finalisation: once the Stop hook fires, the PTY-exit fallback must not
-// emit a second `done` event nor flip the in-memory state again.
-func TestSignalDoneIdempotentAcrossStopAndPTYExit(t *testing.T) {
+// TestStopHookDoesNotBroadcastDone confirms the Stop hook only marks the
+// session completed; the actual `done` event is the PTY-exit goroutine's
+// job so it lands after any trailing bytes claude writes between Stop
+// firing and the process exiting.
+func TestStopHookDoesNotBroadcastDone(t *testing.T) {
 	usm := newTestUserSessionManager()
 	sess := newUserSession("u1", "alice", "q")
-	sess.sessionUUID = "uuid-stop-then-exit"
+	sess.sessionUUID = "uuid-stop"
 	usm.sessions["u1"] = sess
-	usm.uuidMap["uuid-stop-then-exit"] = "u1"
+	usm.uuidMap["uuid-stop"] = "u1"
 
-	// Stop hook arrives first.
-	usm.NotifyHook(HookEvent{EventName: "Stop", SessionID: "uuid-stop-then-exit"})
-
-	// Drain the first done.
 	jsonCh, unsub := sess.subscribeJSON()
 	defer unsub()
 
-	// Fallback fires after PTY exits. It must be a no-op.
-	if usm.signalDoneIfRunning(sess) {
-		t.Error("PTY-exit fallback should be a no-op after Stop hook already ran")
-	}
+	usm.NotifyHook(HookEvent{EventName: "Stop", SessionID: "uuid-stop"})
+
 	select {
 	case msg := <-jsonCh:
-		t.Errorf("unexpected duplicate broadcast after Stop hook: %q", msg)
+		t.Errorf("Stop hook unexpectedly broadcast: %q", msg)
 	case <-time.After(50 * time.Millisecond):
-		// expected: no second event
+	}
+
+	sess.mu.Lock()
+	st := sess.status
+	sess.mu.Unlock()
+	if st != userSessionCompleted {
+		t.Errorf("expected session completed after Stop hook, got %d", st)
 	}
 }
 

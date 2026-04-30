@@ -74,13 +74,13 @@ func TestHookRouterStopMarksSessionCompleted(t *testing.T) {
 		t.Fatalf("expected 200, got %d", rr.Code)
 	}
 
+	// Stop hook must NOT broadcast `done` — the PTY-exit goroutine does
+	// that after the buffer drains, otherwise trailing assistant bytes get
+	// cut off before the SSE client renders them.
 	select {
 	case msg := <-jsonCh:
-		if msg != `{"type":"done"}` {
-			t.Errorf("expected done message, got %q", msg)
-		}
+		t.Fatalf("Stop hook unexpectedly broadcast: %q", msg)
 	default:
-		t.Fatal("expected done JSON message")
 	}
 
 	sess.mu.Lock()
