@@ -374,19 +374,17 @@ func (p *ACPProcess) readLoop(r io.Reader) {
 		case msg.Method == "session/update":
 			// Streaming update notification.
 			// claude-agent-acp 2.x sends:
-			//   sessionUpdate: "tool_call"        (status: "pending")  — tool start
-			//   sessionUpdate: "tool_call_update" (status: "completed")— tool end
+			//   sessionUpdate: "agent_message_chunk" — content is an OBJECT {type,text}
+			//   sessionUpdate: "tool_call"           — content is an ARRAY (status: pending)
+			//   sessionUpdate: "tool_call_update"    — content is an ARRAY (status: completed when done)
 			//   tool name lives at update._meta.claudeCode.toolName
+			// Content shape varies, so decode it as RawMessage and parse per-case.
 			var params struct {
 				Update struct {
-					SessionUpdate string `json:"sessionUpdate"`
-					Status        string `json:"status"`
-					// agent_message_chunk fields
-					Content struct {
-						Type string `json:"type"`
-						Text string `json:"text"`
-					} `json:"content"`
-					Meta struct {
+					SessionUpdate string          `json:"sessionUpdate"`
+					Status        string          `json:"status"`
+					Content       json.RawMessage `json:"content"`
+					Meta          struct {
 						ClaudeCode struct {
 							ToolName string `json:"toolName"`
 						} `json:"claudeCode"`
@@ -398,8 +396,15 @@ func (p *ACPProcess) readLoop(r io.Reader) {
 			}
 			switch params.Update.SessionUpdate {
 			case "agent_message_chunk":
-				if params.Update.Content.Type == "text" {
-					chunk := params.Update.Content.Text
+				var chunkContent struct {
+					Type string `json:"type"`
+					Text string `json:"text"`
+				}
+				if err := json.Unmarshal(params.Update.Content, &chunkContent); err != nil {
+					break
+				}
+				if chunkContent.Type == "text" {
+					chunk := chunkContent.Text
 					p.chunkMu.Lock()
 					p.chunkBuf.WriteString(chunk)
 					cb := p.chunkCb
