@@ -2,13 +2,6 @@
 
 通用除錯與部署方法。環境特定值（主機 IP、容器名稱、路徑）記錄在 `tests/.env.<device>.md`（本機專用，不進 git）。
 
-## 0. 架構速記
-
-- **ACP-only runtime**：chat-API、Discord、Telegram 全部走 ACP stdio (`@agentclientprotocol/claude-agent-acp` subprocess)。每個 IM target / chat-API conversation 對應 `acp_session_pool` 內一條 keyed session（idle timeout / per-user / global cap 由 pool 管控）。Admin observability (live + history + tool events) 全來自 ACP event handler。
-- **PTY 仍存在但獨立**：`PTYManager` 只服務 web `/ws` 主終端機（單一全域 PTY，使用者直接打 claude CLI），不再 wire 到 IM/chat-API。
-- **Hook 系統已退役**：`/hook` endpoint、`HookEvent`、`Notify(HookEvent,…)`、`UserSessionManager.NotifyHook`、`claude/settings.json`、`merge-settings.js` 全數移除。
-- **Management 路由**：`/api/management/*`、`/ws/management`（仅 `PERCH_MODE=multi`）、`/management` SPA。Single-user mode 下 `/ws/management` 顯式註冊 404 避免 fall through 到 SPA。
-
 ---
 
 ## 1. 編譯與部署
