@@ -130,14 +130,14 @@
   - **AT-E02**：ACP `tool_call_completed` → `tool_events` row 補完 `output_json` 與 `ended_at`
   - **AT-E03**：ACP `RunCompleted` → `session_removed` + `query_sessions` row status=done
   - **AT-E04**：ACP `RunFailed` / timeout → status=error，response 含錯誤訊息
-- [ ] 10.3 全套 QA cycle 跑：MT01-12、T07、T18、T19、T46、T52、T55、T56、TG-A01-05、AT-E01-04，期望 zero FAIL / zero env-fix-by-qa SKIP
-- [ ] 10.4 對比舊測試報告（`tests/test-report-2026-04-30-1236-summary.md`）確認無 regression
+- [x] 10.3 全套 QA cycle 跑：MT01-12、T07、T18、T19、T46、T52、T55、T56、TG-A01-05、AT-E01-04，期望 zero FAIL / zero env-fix-by-qa SKIP — round 1 (`tests/test-report-2026-04-30-full-2345-summary.md`) 5 FAIL → round 2 (`...-0024-round2.md`) 1 PASS / 4 FAIL → round 3 (`...-0032-round3.md`) 4 PASS / 0 FAIL，全綠收結
+- [x] 10.4 對比舊測試報告（`tests/test-report-2026-04-30-1236-summary.md`）確認無 regression — round 3 sanity check T19 / MT12 / T55-single 仍 PASS；T55 改 split 成 single/multi 兩個情境，皆 PASS
 
 ## 11. 結束條件
 
 - [x] 11.1 `grep -rn "hook\|HookEvent\|Notify.*HookEvent\|/hook" --include="*.go"` 結果僅剩文件 / 註解殘餘 — 殘留註解已盡量清理（im.go IMManager doc、main.go LISTEN_ADDR、user_session.go ClaimUUID dangling comment 等）；目前 `*.go` 內僅剩 MT07/T52 PTY 退場註解（仍有效，描述 web `/ws` 行為）
 - [x] 11.2 `grep -rn "DISCORD_ACP_ENABLED\|claude -p" --include="*.go" --include="*.sh"` 結果為空 — 僅 `user_session_test.go` 一個歷史註解，已重寫成 ACP-無關描述
 - [x] 11.3 `entrypoint.sh` 不再呼叫 `merge-settings.js` — `grep merge-settings entrypoint.sh` 為空
-- [ ] 11.4 全套 batch B QA cycle 全綠
+- [x] 11.4 全套 batch B QA cycle 全綠 — round 3 (`tests/test-report-2026-04-30-full-0032-round3.md`) 全綠收結；container-compat batch B 全綠 (`tests/test-report-2026-04-30-batchB-2236.md`)
 - [x] 11.5 README、CLAUDE.md 描述與 code 一致 — README 整段重寫 ACP-only / 新 Discord Reaction 表 / Breaking changes block；perch CLAUDE.md 加 `## 0. 架構速記` 段
 - [ ] 11.6 兩個 change（`fix-claude-code-container-compat` + `consolidate-acp-runtime`）archive 完成

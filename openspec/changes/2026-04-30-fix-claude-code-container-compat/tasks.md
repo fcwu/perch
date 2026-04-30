@@ -37,7 +37,7 @@
 - [x] 6.1 `tests/docker-compose.local-test.yml`：mount 改為 `${HOME}/.claude:/etc/perch-claude-host:ro`（與 2.5 同步）
 - [x] 6.2 確認 `tests/test-claude-rw/`、`tests/test-perchuser/`、`tests/test-data/`、`tests/test-workspace/` 不再被 docker-compose mount 引用
 - [x] 6.3 `.gitignore` 加 `tests/test-data/`、`tests/test-workspace/`（runtime artifact，與 B 無關但這次一併處理）
-- [ ] 6.4 commit message 引用本 change ID
+- [x] 6.4 commit message 引用本 change ID — commit `3037617` `feat(container): bootstrap host .claude cp + onboarding seed`（body 第一行 `OpenSpec change: 2026-04-30-fix-claude-code-container-compat`）
 
 ## 7. 文件
 
