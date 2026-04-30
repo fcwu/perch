@@ -11,7 +11,6 @@ Perch 是一個輕量的 web terminal server，讓你不需要 SSH，直接用�
 
 - [功能](#功能)
   - [Web Terminal 排程](#web-terminal-排程)
-  - [Web Terminal 監看 Discord](#web-terminal-監看-discord)
   - [Discord 排程觸發](#discord-排程觸發)
 - [快速開始](#快速開始)
   - [Mount 說明](#mount-說明)
@@ -65,12 +64,6 @@ Perch 是一個輕量的 web terminal server，讓你不需要 SSH，直接用�
 
 ![Web Terminal 排程設定](docs/images/schedule-setup.png)
 
-### Web Terminal 監看 Discord
-
-瀏覽器內切換 tab，即時觀看 Discord channel 的 Claude PTY 輸出。
-
-![Web Terminal 監看 Discord](docs/images/discord-tab.png)
-
 ### Discord 排程觸發
 
 排程在指定時間自動觸發，Discord channel 先出現來源提示，Claude 回覆以 thread 形式附在下方。
@@ -95,24 +88,9 @@ docker run -d \
 
 | Mount | 用途 |
 |-------|------|
-| `-v ~/.claude:/etc/perch-claude-host:ro` | Claude Code 設定（credentials、plugins、skills）。entrypoint 啟動時自動 cp 成容器本地可寫副本，避免 Claude Code 2.1.x 寫入 `session-env/` 與 `plugins/*.bak` 時遇到 EROFS。 |
+| `-v ~/.claude:/etc/perch-claude-host:ro` | （建議）把 host 上的 Claude Code 設定（credentials、plugins、skills）帶進來；不掛則需在 web terminal 跑一次 `claude /login` |
 | `-v ./:/workspace` | Claude Code 工作目錄（當前目錄）；排程資料也存於此 |
 | `-v ./data:/data` | 持久化 Settings 與對話歷史（`settings.json`、`perch.db`） |
-
-> **⚠️ Breaking changes（升級自 v1.x）**
->
-> 1. **Mount 路徑**：`~/.claude:/home/perchuser/.claude:ro` → `~/.claude:/etc/perch-claude-host:ro`。升級時只需更新掛載路徑，不需其他資料遷移。`~/.claude.json` 不再需要單獨掛載，entrypoint 會自動 seed 必要的 onboarding flag。
-> 2. **ACP-only 架構**：chat-API、Discord、Telegram 全部走 ACP（`@agentclientprotocol/claude-agent-acp`）；舊的 PTY 模式（`/hook` endpoint、`PreToolUse`/`PostToolUse`/`Stop` hooks、`claude/settings.json` 注入、`DISCORD_ACP_ENABLED` 環境變數）已全數移除。Web `/ws` 主終端機仍是 PTY，與 IM/chat-API 獨立。自製 webhook 客戶端需改接 ACP event 來源。
-> 3. **Admin → management 改名**：`/api/admin/*` → `/api/management/*`、`/ws/admin` → `/ws/management`、`/admin` SPA 路由 → `/management`。Live 監控 (`/ws/management`) 僅在 `PERCH_MODE=multi` 啟用，single-user mode 回 404。自製 admin UI 客戶端需更新 URL base path。
-
-### Container 第一次啟動
-
-Perch entrypoint 在每次容器啟動時自動完成以下初始化：
-
-1. **cp host claude config**：把 `/etc/perch-claude-host/`（RO staging）cp 成 `/home/perchuser/.claude/`（容器本地可寫副本），同時排除 `sessions/`、`projects/`、`cache/`、`debug/`、`backups/`、`shell-snapshots/`、`history.jsonl` 等 volatile/個資子目錄。
-2. **seed `.claude.json` onboarding flag**：對 `/home/perchuser/.claude.json` 補齊 `hasCompletedOnboarding`、`theme`、`hasAcceptedAllTerms`、`projects.<workdir>.hasTrustDialogAccepted`，只補缺漏欄位，不覆寫既有值（包含 `false`）。
-
-若未掛載 `/etc/perch-claude-host`（fresh container），entrypoint 建立空 `~/.claude/` 目錄，並 seed `.claude.json`；使用者首次進入 terminal 執行 `claude /login` 完成認證即可。
 
 ---
 
@@ -295,8 +273,8 @@ Chat UI 提供多輪對話支援，使用者可以追問後續問題，agent 會
 
 | Runtime | 設定值 | 預設 | 說明 |
 |---------|--------|------|------|
-| Claude Code | `claude` | yes | 透過 ACP stdio 連線 `@agentclientprotocol/claude-agent-acp`；支援 `.claude/skills/` 與 `CLAUDE_ARGS` |
-| OpenCode | `opencode` | no | 啟動 `opencode` CLI，使用 workspace 的 `.opencode/` |
+| Claude Code | `claude` | yes | 支援 `.claude/skills/` 與 `CLAUDE_ARGS` |
+| OpenCode | `opencode` | no | 使用 workspace 的 `.opencode/` 設定 |
 
 在啟動時以 `AGENT_RUNTIME` 指定；CLI 參數（`CLAUDE_ARGS` / `OPENCODE_ARGS`）可在 Settings 熱改。
 
@@ -320,14 +298,14 @@ Claude 會透過內建的 `local-schedule` skill 設定排程。排程資料存�
 
 ## Discord 整合
 
-設定 `DISCORD_BOT_TOKEN` 後（可在 Settings 直接填，不需重啟），每個 Discord channel 對應一個獨立的 ACP subprocess，多輪對話上下文由 ACP session 保留。Image 內已預裝 `@agentclientprotocol/claude-agent-acp`，無需額外安裝。
+設定 `DISCORD_BOT_TOKEN` 後（可在 Settings 直接填，不需重啟），即可在 Discord 與 Claude 對話。每個 channel 是獨立的對話，會記住前後文。
 
 ### Reaction 對應
 
-| ACP 事件 | Reaction |
-|----------|----------|
+| 狀態 | Reaction |
+|------|----------|
 | 收到訊息 | 👀 |
-| `RunCompleted`（回應完成） | 💬 + 文字訊息 |
+| 回應完成 | 💬 + 文字訊息 |
 | 回應超過 2000 字 | 📎 附件 |
 
 ### Discord Bot 設定
