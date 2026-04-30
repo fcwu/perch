@@ -10,7 +10,7 @@ The Live management WebSocket endpoint (`/ws/management`, formerly `/ws/admin`) 
 
 - **WHEN** the container starts with `PERCH_MODE=multi` (and the corresponding auth providers configured)
 - **THEN** `server.go` registers `/ws/management` with `managementMW`
-- **AND** authenticated admin clients can subscribe and receive snapshot + delta events
+- **AND** authenticated management clients can subscribe and receive snapshot + delta events
 
 #### Scenario: Single-user mode does not register the endpoint
 
@@ -34,7 +34,7 @@ When an authenticated admin connects to `/ws/management` (in multi-user mode), p
 
 #### Scenario: Initial snapshot
 
-- **WHEN** an admin client subscribes to `/ws/management`
+- **WHEN** a management client subscribes to `/ws/management`
 - **THEN** the first message is `{type: "session_snapshot", sessions: [...]}` listing all sessions currently in `ManagementHub`
 
 #### Scenario: New chat-API session appears

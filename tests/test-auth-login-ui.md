@@ -220,7 +220,7 @@
 
 **層級**：E2E-curl（無需 GitLab）
 
-**前置操作**：透過 `PATCH /api/settings` 將 `auth.method` 切為 `password`、`auth.password` 設為 `testpass123`，再 `POST /api/admin/restart` 重啟並等待 server 回來。**後置操作**：區段結束後統一切回。
+**前置操作**：透過 `PATCH /api/settings` 將 `auth.method` 切為 `password`、`auth.password` 設為 `testpass123`，再 `POST /api/management/restart` 重啟並等待 server 回來。**後置操作**：區段結束後統一切回。
 
 **Given** Perch 以 `AUTH_METHOD=password` 啟動
 **When** 使用者以正確的帳號密碼登入
@@ -309,7 +309,7 @@ curl -si http://localhost:8080/auth/gitlab
 
 **層級**：E2E-browser（無需 GitLab）
 
-**前置操作**：透過 `PATCH /api/settings` 將 `auth.method` 切為 `password`、`auth.password` 設為 `testpass123`，再 `POST /api/admin/restart` 重啟並等待 server 回來。**後置操作**：區段結束後統一切回。
+**前置操作**：透過 `PATCH /api/settings` 將 `auth.method` 切為 `password`、`auth.password` 設為 `testpass123`，再 `POST /api/management/restart` 重啟並等待 server 回來。**後置操作**：區段結束後統一切回。
 
 **Given** Perch 以 `AUTH_METHOD=password` 啟動
 **When** 未登入的使用者開啟 `/`

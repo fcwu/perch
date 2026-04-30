@@ -160,7 +160,7 @@ curl -i -N -H "Upgrade: websocket" -H "Connection: Upgrade" \
 **Given** 管理員已登入 `/admin`
 **When** 管理員點擊「History」tab、「Analytics」tab，再點回「Live」tab
 **Then**
-- 網址列隨之更新（如 `/admin/history`、`/admin/analytics`），但頁面不重新載入
+- 網址列隨之更新（如 `/management/history`、`/management/analytics`），但頁面不重新載入
 - 切換過程中，瀏覽器只發出 API 資料請求，不發出整頁 HTML 請求
 - 重新整理頁面時，仍顯示對應 tab 的內容
 

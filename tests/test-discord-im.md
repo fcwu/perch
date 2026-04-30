@@ -1,9 +1,9 @@
 # Discord IM 整合 測試案例
 
 > 功能：discord-im
-> 涵蓋範圍：單一 Channel 模式、Open-Channel 模式（per-channel PTY）、排程觸發回傳、Discord DM、@mention 過濾、backward compat、ACP 模式。
-> 相關 openspec：`im-integration`、`discord-dynamic-channel-support`、`discord-dm-allowlist`、`discord-acp`。
-> 撰寫日期：2026-04-20
+> 涵蓋範圍：單一 Channel 模式、Open-Channel 模式（per-channel ACP session）、排程觸發回傳、Discord DM、@mention 過濾、backward compat。**PTY 模式於 `2026-04-30-consolidate-acp-runtime` 移除**，所有 Discord 流量一律走 ACP；舊 PTY-only 測試（T28/T29/T46 等）標記 RETIRED。
+> 相關 openspec：`im-integration`、`discord-dynamic-channel-support`、`discord-dm-allowlist`、`discord-acp-session`。
+> 撰寫日期：2026-04-20（最後一次大幅修訂：2026-04-30 ACP-only 對齊）
 
 > **執行順序說明**：測試案例依 server 設定分組，減少 restart 次數。標注「共用一次 restart」的區段，前置操作只做一次，後置操作在整個區段結束後才執行。
 
@@ -15,25 +15,24 @@
 
 ## E2E-curl — 預設設定
 
-### T40 — ACP 模式啟動確認
+### T40 — ACP 啟動確認（Discord 流量無 PTY fallback）
 
 **層級**：E2E-curl
 
 **Given** 環境變數設定如下：
 ```
 DISCORD_BOT_TOKEN=<token>
-DISCORD_ACP_ENABLED=true
 ACP_EXECUTABLE=claude-agent-acp
 ACP_RUN_TIMEOUT=120
 LISTEN_ADDR=:18080
 ```
 **When** 啟動 Perch binary
 **Then**
-- 啟動 log 中出現 ACP 模式已啟用的訊息（包含 `acp` 或 `ACP` 關鍵字），而非 PTY 模式訊息
+- 啟動 log 顯示 Discord 模組以 ACP 模式連線（含 `acp` 或 `ACP` 關鍵字）
 - `curl http://localhost:18080/` 回傳 HTTP 200，服務正常運作
-- 啟動後瀏覽器 tab 列不出現 Discord channel terminal tab（ACP 模式無 web terminal）
+- 啟動後瀏覽器 tab 列不出現 Discord channel terminal tab（Discord 永遠走 ACP，沒有 PTY tab）
 
-**反向驗證**：移除 `DISCORD_ACP_ENABLED` 後重啟，log 顯示 PTY 模式，瀏覽器 tab 列出現 Discord channel tab。
+> 註：`DISCORD_ACP_ENABLED` 環境變數已於 `2026-04-30-consolidate-acp-runtime` 移除；設定它不會改變行為。
 
 ---
 
@@ -154,82 +153,51 @@ LISTEN_ADDR=:18080
 
 ---
 
-## E2E-browser — PTY 模式（共用一次 restart，acp_enabled=false）
+## E2E-browser — Discord ACP reaction 狀態機
 
-> 本區段所有測試共用一次 server 切換：區段開始時透過 `PATCH /api/settings` 將 `discord.acp_enabled` 設為 `false` 並重啟；區段結束後將 `discord.acp_enabled` 設回 `true` 並重啟。
-
-### T18 — Discord 訊息寫入 PTY
+### T18 — Discord 訊息收到 reaction（ACP）
 
 **層級**：E2E-browser（含 Discord 整合）
 
-**前置操作**：透過 `PATCH /api/settings` 將 `discord.acp_enabled` 設為 `false`，再 `POST /api/admin/restart` 重啟並等待 server 回來。
-
-**Given** Perch 已完成 Discord Bot 設定並以 PTY 模式啟動（`DISCORD_ACP_ENABLED=false`）
+**Given** Perch 以預設（ACP）模式啟動，Discord bot 已連線
 **When** 使用者在指定 Discord channel 傳送訊息：「你好，今天幾號？」
 **Then**
-- 訊息上出現 👀 reaction，表示 Bot 已收到
-- 瀏覽器 terminal 可看到該訊息的文字出現在畫面中
+- 訊息上出現 👀 reaction，表示 ACP subprocess 已收到並送出 prompt
+- ACP `RunCompleted` 後 👀 改為 💬，Discord 收到 reply 訊息
+- 瀏覽器主 terminal **不**出現該訊息的文字（ACP 不寫入 PTY，與 web `/ws` 主終端機獨立）
 
 ---
 
-### T19 — Discord Hook Reaction 狀態機
+### T19 — Discord Reaction 狀態機（ACP 兩階段）
 
 **層級**：E2E-browser（含 Discord 整合）
 
-**Given** Discord bot 已連線，Claude Code Hooks 已啟用，Perch 以 PTY 模式啟動（`DISCORD_ACP_ENABLED=false`）
+**Given** Discord bot 已連線，Perch 以預設（ACP）模式啟動
 **When** 使用者在 Discord 傳送會觸發工具的指令，例如：「列出 /workspace 下的所有檔案」
-**Then** 訊息上的 reaction 依序變化：
-- 傳送後 → 👀 出現（已接收）
-- Claude 使用工具時 → ⚙️ 出現（執行中）
-- 工具完成後 → ✅ 出現，⚙️ 消失
-- Claude 回應完畢 → 💬 出現，👀 消失，Discord 收到 reply 訊息
+**Then** 訊息上的 reaction 依序變化（ACP 兩階段，沒有 ⚙️/✅ 中間態 — Claude Code 2.1.x 在 ACP 路徑不發 PreToolUse/PostToolUse 給 perch）：
+- 傳送後 → 👀 出現（已接收，ACP prompt 已送出）
+- Claude 回應完畢（ACP `RunCompleted`） → 💬 出現，👀 消失，Discord 收到 reply 訊息
+- ACP 失敗或 timeout → ❌ 出現，👀 消失
+
+> 歷史備註：原本 PTY+hook 模型有 ⚙️（PreToolUse） / ✅（PostToolUse 成功） / ❌（PostToolUse 失敗）四階段；移除 hook 系統後僅剩這兩階段（成功）／三階段（失敗）。
 
 ---
 
-### T28 — Discord Session Web Viewer（分頁顯示）
+### T28 — Discord Session Web Viewer（分頁顯示） — RETIRED
 
-> **適用模式**：僅 PTY 模式（`DISCORD_ACP_ENABLED` 未設或為 false）。ACP 模式下無 terminal tab，此測試**不適用**。
-
-**層級**：E2E-browser（含 Discord 整合）
-
-**Given** Perch 以 Discord Bot 設定啟動（PTY 模式，未設 `DISCORD_ACP_ENABLED`）
-**When** 使用者在瀏覽器開啟 Perch，並點擊頁面上方 tab 列中的 Discord channel tab
-**Then**
-- terminal 畫面切換為該 Discord channel 的輸出
-- 從 Discord 傳送訊息後，web viewer 可即時看到 Claude 的回應
-- Discord tab 支援鍵盤輸入，輸入的文字會直接寫入對應的 session
-
-**反向驗證**：未設定 Discord 環境變數時，tab 列不顯示（只有主 terminal）。
+> **狀態**：RETIRED（`2026-04-30-consolidate-acp-runtime`）。Discord 已無 PTY 路徑，瀏覽器 tab 列只剩主 `/ws` terminal，沒有 per-channel terminal tab。
 
 ---
 
-### T29 — Discord Session PTY Resize
+### T29 — Discord Session PTY Resize — RETIRED
 
-> **適用模式**：僅 PTY 模式。ACP 模式下沒有 terminal tab，此測試**不適用**。
-
-**層級**：E2E-browser（含 Discord 整合）
-
-**Given** 使用者正在瀏覽器中檢視 Discord channel tab（PTY 模式）
-**When** 使用者調整瀏覽器視窗大小，然後在 Discord 傳送一個指令
-**Then**
-- terminal 畫面填滿調整後的視窗，無空白邊緣
-- 指令的輸出換行位置正確，符合新的視窗寬度
+> **狀態**：RETIRED（`2026-04-30-consolidate-acp-runtime`）。Discord 沒有 per-channel PTY，無 resize 行為可驗。
 
 ---
 
-### T46 — PTY Fallback（未設 DISCORD_ACP_ENABLED 維持原行為）
+### T46 — PTY Fallback — RETIRED
 
-**層級**：E2E-browser（含 Discord 整合）
-
-**後置操作**：`PATCH /api/settings` 將 `discord.acp_enabled` 設回 `true`，再重啟並等待 server 回來。
-
-**Given** Perch 啟動時設定 `DISCORD_BOT_TOKEN`，且 `DISCORD_ACP_ENABLED=false`（PTY 模式）
-**When** 使用者在 Discord channel 傳送訊息，並在瀏覽器開啟 Perch 首頁
-**Then**
-- Discord channel 訊息出現 👀 reaction，Claude 正常回應
-- 瀏覽器 tab 列出現對應的 Discord channel terminal tab
-- terminal tab 可看到 Claude 的輸出（PTY 模式行為維持不變）
-- 與 ACP 模式下的行為（無 terminal tab）明顯不同
+> **狀態**：RETIRED（`2026-04-30-consolidate-acp-runtime`）。`DISCORD_ACP_ENABLED` 環境變數已移除，Discord 永遠走 ACP，沒有 PTY fallback 路徑可驗。
 
 ---
 
@@ -241,7 +209,7 @@ LISTEN_ADDR=:18080
 
 **層級**：E2E-browser（含 Discord 整合）
 
-**前置操作**：透過 `PATCH /api/settings` 清空 `discord.channel_id`（設為空字串），再 `POST /api/admin/restart` 重啟並等待 server 回來。
+**前置操作**：透過 `PATCH /api/settings` 清空 `discord.channel_id`（設為空字串），再 `POST /api/management/restart` 重啟並等待 server 回來。
 
 **Given** Perch 以純 `DISCORD_BOT_TOKEN`（不帶 `DISCORD_CHANNEL_ID`）啟動，測試頻道為 public（#general）
 **When** 使用者在 public 頻道直接傳送訊息（不 @mention Bot）：「你好」
@@ -297,7 +265,7 @@ LISTEN_ADDR=:18080
 
 **層級**：E2E-browser（含 Discord 整合）
 
-**前置操作**：透過 `PATCH /api/settings` 將 `discord.channel_id` 設為 #myprivate 的 channel ID（見 `.env.*.md`），再 `POST /api/admin/restart` 重啟並等待 server 回來。**後置操作**：`PATCH /api/settings` 將 `discord.channel_id` 還原為 #myprivate2 的 channel ID（即 `DISCORD_CHANNEL_ID` 預設值，見 `.env.*.md`），再重啟並等待 server 回來。
+**前置操作**：透過 `PATCH /api/settings` 將 `discord.channel_id` 設為 #myprivate 的 channel ID（見 `.env.*.md`），再 `POST /api/management/restart` 重啟並等待 server 回來。**後置操作**：`PATCH /api/settings` 將 `discord.channel_id` 還原為 #myprivate2 的 channel ID（即 `DISCORD_CHANNEL_ID` 預設值，見 `.env.*.md`），再重啟並等待 server 回來。
 
 **Given** Perch 同時設定 `DISCORD_BOT_TOKEN` 與 `DISCORD_CHANNEL_ID` 指向 #myprivate（channel ID 見 `.env.*.md`）
 **When** 使用者在指定頻道（#myprivate）傳送訊息（不需 @mention）：「你好」

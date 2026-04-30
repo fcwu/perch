@@ -68,7 +68,7 @@
 
 **層級**：E2E-curl
 
-**前置操作**：透過 `PATCH /api/settings` 將 `auth.method` 切為 `password`、`auth.password` 設為 `testpass123`，再 `POST /api/admin/restart` 重啟並等待 server 回來。密碼為 `testpass123`。
+**前置操作**：透過 `PATCH /api/settings` 將 `auth.method` 切為 `password`、`auth.password` 設為 `testpass123`，再 `POST /api/management/restart` 重啟並等待 server 回來。密碼為 `testpass123`。
 
 **Given** Perch 以 `AUTH_METHOD=password` 及 `AUTH_PASSWORD=testpass123` 啟動
 **When** 使用者以正確密碼登入
@@ -101,7 +101,7 @@
 
 > **注意**：此模式有已知 Bug（generateClientP12 key mismatch），建議在 Bug 修復後執行。
 
-**前置操作**：透過 `PATCH /api/settings` 將 `auth.method` 切為 `mtls`，再 `POST /api/admin/restart` 重啟並等待 server 回來。
+**前置操作**：透過 `PATCH /api/settings` 將 `auth.method` 切為 `mtls`，再 `POST /api/management/restart` 重啟並等待 server 回來。
 
 **Given** Perch 以 `AUTH_METHOD=mtls` 啟動
 **When** 使用者首次造訪 `/bootstrap` 端點（不帶任何用戶端憑證）

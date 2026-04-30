@@ -1,6 +1,6 @@
 ## 0. Pre-flight
 
-- [ ] 0.1 確認 `fix-claude-code-container-compat` 已合併（容器 cp + onboarding seed 為前置條件）
+- [x] 0.1 確認 `fix-claude-code-container-compat` 已合併（容器 cp + onboarding seed 為前置條件） — commit `3037617`（2026-04-30）
 - [ ] 0.2 解 Open Questions Q1-Q6（見 design.md）— 至少 Q1 (rename) 與 Q2 (Live 取捨) 必須先決定，影響 spec 與 task 數量
 
 ## 1. ACP session pool（共用基礎建設）
@@ -89,15 +89,14 @@
 
 ## 7. Phase 6：Cleanup
 
-- [ ] 7.1 移除 `runtime.go` 中 chat-API 不再使用的 Claude `-p` mode args builder（保留 OpenCode 對應路徑）
-- [ ] 7.2 確認 `PTYManager` 對 IM 的 wiring 全部清乾淨；保留 `s.pty`（web `/ws` 用）
-- [ ] 7.3 移除 image `/app/perch-claude/settings.json`、`/app/perch-claude/merge-settings.js` 殘留
-- [ ] 7.4 README / CLAUDE.md 更新：
-  - 移除 hook env 設定段
-  - 移除「容器除錯」中 hook troubleshooting
-  - 新增「ACP-only 架構」段（chat-API、Discord、Telegram 都走 ACP；web `/ws` 仍是 PTY）
-  - 移除 `DISCORD_ACP_ENABLED` 文件
-- [ ] 7.5 release note 標 **Breaking changes**：
+- [x] 7.1 移除 `runtime.go` 中 chat-API 不再使用的 Claude `-p` mode args builder（保留 OpenCode 對應路徑） — `runtime.go` 已重寫成 ACP-only `RunAgent`，無 `-p` 殘留
+- [x] 7.2 確認 `PTYManager` 對 IM 的 wiring 全部清乾淨；保留 `s.pty`（web `/ws` 用） — `grep PTYManager im_*.go` 為空；剩餘 PTYManager 引用都在 `server.go`/`user_session.go`/`scheduler.go` 三處 web `/ws` + scheduler fallback 用途
+- [x] 7.3 移除 image `/app/perch-claude/settings.json`、`/app/perch-claude/merge-settings.js` 殘留 — `claude/` 只剩 `skills/`，Dockerfile `COPY claude/` 不再帶 settings/merge-settings；entrypoint.sh 無 merge-settings 呼叫
+- [x] 7.4 README / CLAUDE.md 更新：
+  - 移除 hook env 設定段（README TOC + Discord Hook Reaction 段已刪）
+  - 新增「ACP-only 架構」段（README breaking change block + CLAUDE.md `## 0. 架構速記`）
+  - 移除 `DISCORD_ACP_ENABLED` env var 表格 row + Discord 整合段內 PTY/ACP 模式分支
+- [x] 7.5 release note 標 **Breaking changes**（寫入 `README.md` Breaking changes block）：
   - `/hook` endpoint 移除（自製 webhook 失效）
   - `DISCORD_ACP_ENABLED` 環境變數移除
   - `claude/settings.json`、`claude/merge-settings.js` 不再 inject
@@ -109,10 +108,10 @@
 - [x] 8.3 Go struct rename：`AdminHub` → `ManagementHub`、`AdminSessionView` → `ManagementSessionView`、`adminEvent` → `managementEvent`
 - [x] 8.4 Handler rename：`handleAdminWS` → `handleManagementWS`、`handleAdminHistory(Detail)?` → `handleManagementHistory(Detail)?`
 - [x] 8.5 Frontend：`AdminPage` → `ManagementPage`、相關路由與導覽連結
-- [ ] 8.6 Capabilities rename：`admin-realtime` → `management-realtime`、`admin-history` → `management-history`（從 `openspec/specs/` 移到新名）
-- [ ] 8.7 spec.md 對應改名（本 change 的 specs/ 子目錄與內文）
-- [ ] 8.8 release note 列入 Breaking change（URL 改變、自製 management UI 客戶端要更新 base path）
-- [ ] 8.9 既有測試 ID 文字（T55、T56、MT12 等）對齊新名稱（不改 ID 編號）
+- [x] 8.6 Capabilities rename：`admin-realtime` → `management-realtime`、`admin-history` → `management-history`（從 `openspec/specs/` 移到新名） — 兩個 dir `git mv` + 內文文字 admin/Admin → management/Management
+- [x] 8.7 spec.md 對應改名（本 change 的 specs/ 子目錄與內文） — `specs/management-realtime/spec.md` 內 `admin clients` → `management clients`；新增 `specs/management-history/spec.md` 文件 URL rename diff
+- [x] 8.8 release note 列入 Breaking change（URL 改變、自製 management UI 客戶端要更新 base path） — 寫入 `README.md` Breaking changes block 第 3 條
+- [x] 8.9 既有測試 ID 文字（T55、T56、MT12 等）對齊新名稱（不改 ID 編號） — `tests/test-{auth-modes,settings,auth-login-ui,kb-chat-api,discord-im}.md` 的 `/api/admin/*` `/ws/admin` `/admin/{history,analytics}` 全部 sed 替換成 `/api/management/*` `/ws/management` `/management/{history,analytics}`
 
 ## 9. Live 限 multi-user mode（已決）
 
@@ -125,7 +124,7 @@
 
 ## 10. 文件與測試
 
-- [ ] 10.1 文件已在各 phase 中分配
+- [x] 10.1 文件已在各 phase 中分配（README/CLAUDE.md/specs/tests 全部對齊 ACP-only）
 - [ ] 10.2 撰寫 `tests/test-acp-tool-events.md`（新測試檔）：
   - **AT-E01**：ACP `tool_call_started` → AdminHub `session_update` event 帶正確 tool name
   - **AT-E02**：ACP `tool_call_completed` → query_log_store `tool_events` row 補完 output_json 與 ended_at
@@ -136,9 +135,9 @@
 
 ## 11. 結束條件
 
-- [ ] 11.1 `grep -rn "hook\|HookEvent\|Notify.*HookEvent\|/hook" --include="*.go"` 結果僅剩文件 / 註解殘餘
-- [ ] 11.2 `grep -rn "DISCORD_ACP_ENABLED\|claude -p" --include="*.go" --include="*.sh"` 結果為空
-- [ ] 11.3 `entrypoint.sh` 不再呼叫 `merge-settings.js`
+- [x] 11.1 `grep -rn "hook\|HookEvent\|Notify.*HookEvent\|/hook" --include="*.go"` 結果僅剩文件 / 註解殘餘 — 殘留註解已盡量清理（im.go IMManager doc、main.go LISTEN_ADDR、user_session.go ClaimUUID dangling comment 等）；目前 `*.go` 內僅剩 MT07/T52 PTY 退場註解（仍有效，描述 web `/ws` 行為）
+- [x] 11.2 `grep -rn "DISCORD_ACP_ENABLED\|claude -p" --include="*.go" --include="*.sh"` 結果為空 — 僅 `user_session_test.go` 一個歷史註解，已重寫成 ACP-無關描述
+- [x] 11.3 `entrypoint.sh` 不再呼叫 `merge-settings.js` — `grep merge-settings entrypoint.sh` 為空
 - [ ] 11.4 全套 batch B QA cycle 全綠
-- [ ] 11.5 README、CLAUDE.md 描述與 code 一致
+- [x] 11.5 README、CLAUDE.md 描述與 code 一致 — README 整段重寫 ACP-only / 新 Discord Reaction 表 / Breaking changes block；perch CLAUDE.md 加 `## 0. 架構速記` 段
 - [ ] 11.6 兩個 change（`fix-claude-code-container-compat` + `consolidate-acp-runtime`）archive 完成

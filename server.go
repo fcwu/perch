@@ -33,7 +33,7 @@ type Server struct {
 	auth            *AuthMiddleware
 	im              *IMManager
 	sessions        SessionProvider
-	userSessions    *UserSessionManager  // PTY session manager (also used for hook routing)
+	userSessions    *UserSessionManager  // per-user PTY session manager (web /ws only)
 	chatSessions    ChatSessionManager   // active chat session backend (PTY or ACP)
 	gitlabAuth      *gitLabAuth
 	adminAuth       *adminAuth

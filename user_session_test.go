@@ -6,13 +6,12 @@ import (
 	"time"
 )
 
-// TestSignalDoneOnPTYExitWhenHooksAbsent guards the MT07/T52 regression:
-// when an agent (e.g. `claude -p`) exits without firing the Stop hook
-// (because hooks aren't configured in the active settings.json), the
-// frontend must still receive a `done` JSON event so the textarea unlocks.
-// The fallback in StartSession's PTY-exit observer broadcasts that event.
-func TestSignalDoneOnPTYExitWhenHooksAbsent(t *testing.T) {
-	rt := makeTestRuntime() // command "true" — exits immediately, never fires hooks
+// TestSignalDoneOnPTYExit guards the MT07/T52 regression: when the PTY-backed
+// web `/ws` session exits, the frontend must receive a `done` JSON event so the
+// textarea unlocks. The fallback in StartSession's PTY-exit observer broadcasts
+// that event after the PTY drains.
+func TestSignalDoneOnPTYExit(t *testing.T) {
+	rt := makeTestRuntime() // command "true" — exits immediately
 	m := newUserSessionManager(rt, "", nil, nil, nil)
 	if err := m.StartSession("u1", "alice", "q", false, ""); err != nil {
 		t.Fatalf("StartSession: %v", err)

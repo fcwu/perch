@@ -30,7 +30,7 @@ type SessionProvider interface {
 	WriteSession(channelID string, data []byte) error
 }
 
-// IMManager owns all adapters and dispatches hook events.
+// IMManager owns all IM adapters.
 type IMManager struct {
 	mu       sync.Mutex
 	adapters []IMAdapter

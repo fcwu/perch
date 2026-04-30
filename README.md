@@ -36,9 +36,7 @@ Perch 是一個輕量的 web terminal server，讓你不需要 SSH，直接用�
 - [Agent Runtime](#agent-runtime)
 - [排程器](#排程器)
 - [Discord 整合](#discord-整合)
-  - [ACP 模式（推薦）](#acp-模式推薦)
-  - [PTY 模式（預設）](#pty-模式預設)
-  - [Hook 與 Reaction 對應](#hook-與-reaction-對應)
+  - [Reaction 對應](#reaction-對應)
   - [Discord Bot 設定](#discord-bot-設定)
 - [Workspace Git Sync](#workspace-git-sync-1)
 - [License](#license)
@@ -101,7 +99,11 @@ docker run -d \
 | `-v ./:/workspace` | Claude Code 工作目錄（當前目錄）；排程資料也存於此 |
 | `-v ./data:/data` | 持久化 Settings 與對話歷史（`settings.json`、`perch.db`） |
 
-> **⚠️ Breaking change（升級自 v1.x）**：mount 路徑由 `~/.claude:/home/perchuser/.claude:ro` 改為 `~/.claude:/etc/perch-claude-host:ro`。升級時只需在 docker-compose / docker run 更新掛載路徑，不需要其他資料遷移。`~/.claude.json` 不再需要單獨掛載，entrypoint 會自動 seed 必要的 onboarding flag。
+> **⚠️ Breaking changes（升級自 v1.x）**
+>
+> 1. **Mount 路徑**：`~/.claude:/home/perchuser/.claude:ro` → `~/.claude:/etc/perch-claude-host:ro`。升級時只需更新掛載路徑，不需其他資料遷移。`~/.claude.json` 不再需要單獨掛載，entrypoint 會自動 seed 必要的 onboarding flag。
+> 2. **ACP-only 架構**：chat-API、Discord、Telegram 全部走 ACP（`@agentclientprotocol/claude-agent-acp`）；舊的 PTY 模式（`/hook` endpoint、`PreToolUse`/`PostToolUse`/`Stop` hooks、`claude/settings.json` 注入、`DISCORD_ACP_ENABLED` 環境變數）已全數移除。Web `/ws` 主終端機仍是 PTY，與 IM/chat-API 獨立。自製 webhook 客戶端需改接 ACP event 來源。
+> 3. **Admin → management 改名**：`/api/admin/*` → `/api/management/*`、`/ws/admin` → `/ws/management`、`/admin` SPA 路由 → `/management`。Live 監控 (`/ws/management`) 僅在 `PERCH_MODE=multi` 啟用，single-user mode 回 404。自製 admin UI 客戶端需更新 URL base path。
 
 ### Container 第一次啟動
 
@@ -189,7 +191,6 @@ Settings 儲存在 `/data/settings.json`。需要重啟的設定，按 **Save & 
 | `DISCORD_BOT_TOKEN` | — | Discord bot token |
 | `DISCORD_CHANNEL_ID` | — | 限制只監聽指定 channel（不設則監聽所有） |
 | `DISCORD_ALLOWED_USER_IDS` | — | DM 白名單；**未設定時 DM 功能完全關閉** |
-| `DISCORD_ACP_ENABLED` | — | `true` 啟用 ACP stdio 模式 |
 | `TELEGRAM_BOT_TOKEN` | — | Telegram bot token |
 | `TELEGRAM_CHAT_ID` | — | Telegram chat ID |
 
@@ -294,7 +295,7 @@ Chat UI 提供多輪對話支援，使用者可以追問後續問題，agent 會
 
 | Runtime | 設定值 | 預設 | 說明 |
 |---------|--------|------|------|
-| Claude Code | `claude` | yes | 支援 Claude hooks、`.claude/skills/` 與 `CLAUDE_ARGS` |
+| Claude Code | `claude` | yes | 透過 ACP stdio 連線 `@agentclientprotocol/claude-agent-acp`；支援 `.claude/skills/` 與 `CLAUDE_ARGS` |
 | OpenCode | `opencode` | no | 啟動 `opencode` CLI，使用 workspace 的 `.opencode/` |
 
 在啟動時以 `AGENT_RUNTIME` 指定；CLI 參數（`CLAUDE_ARGS` / `OPENCODE_ARGS`）可在 Settings 熱改。
@@ -319,29 +320,14 @@ Claude 會透過內建的 `local-schedule` skill 設定排程。排程資料存�
 
 ## Discord 整合
 
-設定 `DISCORD_BOT_TOKEN` 後（可在 Settings 直接填，不需重啟），Perch 支援兩種模式：
+設定 `DISCORD_BOT_TOKEN` 後（可在 Settings 直接填，不需重啟），每個 Discord channel 對應一個獨立的 ACP subprocess，多輪對話上下文由 ACP session 保留。Image 內已預裝 `@agentclientprotocol/claude-agent-acp`，無需額外安裝。
 
-### ACP 模式（推薦）
+### Reaction 對應
 
-設定 `DISCORD_ACP_ENABLED=true`。每個 Discord channel 對應一個獨立的 subprocess，多輪對話上下文由 ACP session 保留。
-
-```bash
-npm install -g @agentclientprotocol/claude-agent-acp
-```
-
-### PTY 模式（預設）
-
-每個 Discord channel 持有一個獨立的 Claude Code CLI PTY 行程。
-
-### Hook 與 Reaction 對應
-
-| Claude Hook 事件 | 行為 |
-|------------------|------|
+| ACP 事件 | Reaction |
+|----------|----------|
 | 收到訊息 | 👀 |
-| `PreToolUse` | ⚙️ |
-| `PostToolUse` 成功 | ✅ |
-| `PostToolUse` 失敗 | ❌ |
-| `Stop`（回應完成）| 💬 + 文字訊息 |
+| `RunCompleted`（回應完成） | 💬 + 文字訊息 |
 | 回應超過 2000 字 | 📎 附件 |
 
 ### Discord Bot 設定

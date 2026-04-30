@@ -150,7 +150,7 @@ curl -s -X PATCH http://localhost:8081/api/settings \
 ```
 **Then** PATCH 回應的 `restart_required` 為 `true`；後續 GET 的 `restart_required` 也為 `true`
 
-**後置操作**：透過 `PATCH /api/settings` 將 `auth.method` 切回 `none`，再 `POST /api/admin/restart` 重啟並等待 server 回來以還原環境。
+**後置操作**：透過 `PATCH /api/settings` 將 `auth.method` 切回 `none`，再 `POST /api/management/restart` 重啟並等待 server 回來以還原環境。
 
 ---
 
@@ -184,14 +184,14 @@ curl -s -X PATCH http://localhost:8081/api/settings \
 
 ---
 
-### SP11 — POST /api/admin/restart 回傳 202 並觸發重啟
+### SP11 — POST /api/management/restart 回傳 202 並觸發重啟
 
 **層級**：E2E-curl
 
 **Given** Perch 正常啟動，且 Docker restart policy 設為 `always` 或 `unless-stopped`
 **When** 發送：
 ```bash
-curl -s -o /dev/null -w "%{http_code}" -X POST http://localhost:8081/api/admin/restart
+curl -s -o /dev/null -w "%{http_code}" -X POST http://localhost:8081/api/management/restart
 ```
 **Then** 收到 HTTP 202；約 3-10 秒後 Perch 自動重啟，`GET /api/settings` 再次回傳 200（容器重新上線）
 

@@ -184,12 +184,9 @@ func (m *UserSessionManager) StartSession(userID, username, query string, newCon
 
 		m.logger.Info("UserSession PTY exited", "userID", userID)
 
-		// Broadcast `done` only now that the PTY has fully drained, so any
-		// trailing bytes claude wrote between the Stop hook firing and the
-		// process exiting reach SSE/WS clients before the stream closes.
-		// The Stop hook handler intentionally does not emit `done`; it just
-		// records completion state. This also covers the no-hooks case
-		// (MT07/T52) where Stop never arrives — the frontend still unblocks.
+		// Broadcast `done` after the PTY has fully drained, so any trailing
+		// bytes claude wrote before exiting reach SSE/WS clients before the
+		// stream closes (MT07/T52 regression).
 		sess.mu.Lock()
 		alreadyCompleted := sess.status == userSessionCompleted
 		sess.status = userSessionCompleted
@@ -227,8 +224,6 @@ func (m *UserSessionManager) StartSession(userID, username, query string, newCon
 	return nil
 }
 
-// ClaimUUID associates a session_uuid with a user session.
-// Called by the hook handler when the first hook event arrives for a new session.
 // SubscribeJSON returns a JSON event channel for the given userID session.
 func (m *UserSessionManager) SubscribeJSON(userID string) (<-chan string, func(), bool) {
 	m.mu.Lock()
