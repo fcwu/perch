@@ -172,6 +172,9 @@ func (m *ACPUserSessionManager) runPrompt(sess *acpChatSession, prompt string) {
 		if m.adminHub != nil {
 			m.adminHub.SessionRemoved(sess.sessionID, "error")
 		}
+		if m.store != nil {
+			_ = m.store.UpdateSessionError(sess.sessionID, err.Error())
+		}
 		return
 	}
 	defer m.pool.Release(sess.poolKey)
@@ -180,9 +183,17 @@ func (m *ACPUserSessionManager) runPrompt(sess *acpChatSession, prompt string) {
 		msg, _ := json.Marshal(map[string]string{"type": "chunk", "text": chunk})
 		sess.broadcastJSON(string(msg))
 	}
+	var currentToolEventID int64
 	onToolStart := func(toolName string) {
 		if m.adminHub != nil {
 			m.adminHub.SessionUpdated(sess.sessionID, toolName)
+		}
+		if m.store != nil {
+			if id, err := m.store.InsertToolEvent(sess.sessionID, toolName, ""); err == nil {
+				currentToolEventID = id
+			} else {
+				m.logger.Warn("ACP chat: insert tool event", "err", err)
+			}
 		}
 		toolMsg, _ := json.Marshal(map[string]string{"type": "tool_start", "tool": toolName})
 		sess.broadcastJSON(string(toolMsg))
@@ -191,24 +202,35 @@ func (m *ACPUserSessionManager) runPrompt(sess *acpChatSession, prompt string) {
 		if m.adminHub != nil {
 			m.adminHub.SessionUpdated(sess.sessionID, "")
 		}
+		if m.store != nil && currentToolEventID > 0 {
+			if err := m.store.UpdateToolEventEnd(currentToolEventID, ""); err != nil {
+				m.logger.Warn("ACP chat: update tool event", "err", err)
+			}
+			currentToolEventID = 0
+		}
 	}
 
 	response, err := proc.PromptWithChunks(ctx, prompt, onChunk, onToolStart, onToolEnd)
 	if err != nil {
 		errMsg, _ := json.Marshal(map[string]string{"type": "error", "message": err.Error()})
 		sess.broadcastJSON(string(errMsg))
-	}
-
-	// Record session completion.
-	if m.store != nil {
-		if sess.conversationID != "" {
-			_ = m.store.UpdateSessionDoneAndTouch(sess.sessionID, response, sess.conversationID)
-		} else {
-			_ = m.store.UpdateSessionDone(sess.sessionID, response)
+		if m.store != nil {
+			_ = m.store.UpdateSessionError(sess.sessionID, err.Error())
 		}
-	}
-	if m.adminHub != nil {
-		m.adminHub.SessionRemoved(sess.sessionID, "done")
+		if m.adminHub != nil {
+			m.adminHub.SessionRemoved(sess.sessionID, "error")
+		}
+	} else {
+		if m.store != nil {
+			if sess.conversationID != "" {
+				_ = m.store.UpdateSessionDoneAndTouch(sess.sessionID, response, sess.conversationID)
+			} else {
+				_ = m.store.UpdateSessionDone(sess.sessionID, response)
+			}
+		}
+		if m.adminHub != nil {
+			m.adminHub.SessionRemoved(sess.sessionID, "done")
+		}
 	}
 
 	doneMsg, _ := json.Marshal(map[string]string{"type": "done"})

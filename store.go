@@ -142,6 +142,14 @@ func (s *Store) UpdateSessionTimeout(id string) error {
 	return err
 }
 
+func (s *Store) UpdateSessionError(id, errMsg string) error {
+	_, err := s.db.Exec(
+		`UPDATE query_sessions SET response=?,ended_at=?,status='error' WHERE id=?`,
+		errMsg, nowMs(), id,
+	)
+	return err
+}
+
 func (s *Store) InsertToolEvent(sessionID, toolName, inputJSON string) (int64, error) {
 	res, err := s.db.Exec(
 		`INSERT INTO tool_events(session_id,tool_name,input_json,started_at) VALUES(?,?,?,?)`,

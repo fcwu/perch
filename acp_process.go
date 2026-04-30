@@ -41,8 +41,8 @@ type ACPProcess struct {
 	chunkMu     sync.Mutex
 	chunkBuf    strings.Builder
 	chunkCb     func(string)      // optional per-prompt callback; called from readLoop goroutine
-	toolStartCb func(string)      // called with tool name on tool_call_started
-	toolEndCb   func()            // called on tool_call_completed
+	toolStartCb func(string)      // called with tool name on session/update tool_call (pending)
+	toolEndCb   func()            // called on session/update tool_call_update with status=completed
 }
 
 // acpMsg is the wire format for ACP JSON-RPC 2.0 messages.
@@ -189,8 +189,8 @@ func (p *ACPProcess) Prompt(ctx context.Context, text string) (string, error) {
 
 // PromptWithChunks is like Prompt but calls onChunk for each agent_message_chunk as it
 // arrives (before the full response is available). onChunk may be nil.
-// onToolStart is called with the tool name when a tool_call_started event arrives.
-// onToolEnd is called when a tool_call_completed event arrives.
+// onToolStart is called with the tool name when a session/update tool_call event arrives.
+// onToolEnd is called when a session/update tool_call_update with status=completed arrives.
 func (p *ACPProcess) PromptWithChunks(ctx context.Context, text string, onChunk func(string), onToolStart func(string), onToolEnd func()) (string, error) {
 	// Reset chunk accumulator and register callbacks before sending the prompt.
 	p.chunkMu.Lock()
@@ -373,18 +373,24 @@ func (p *ACPProcess) readLoop(r io.Reader) {
 
 		case msg.Method == "session/update":
 			// Streaming update notification.
+			// claude-agent-acp 2.x sends:
+			//   sessionUpdate: "tool_call"        (status: "pending")  — tool start
+			//   sessionUpdate: "tool_call_update" (status: "completed")— tool end
+			//   tool name lives at update._meta.claudeCode.toolName
 			var params struct {
 				Update struct {
 					SessionUpdate string `json:"sessionUpdate"`
+					Status        string `json:"status"`
 					// agent_message_chunk fields
 					Content struct {
 						Type string `json:"type"`
 						Text string `json:"text"`
 					} `json:"content"`
-					// tool_call_started fields
-					ToolUse struct {
-						Name string `json:"name"`
-					} `json:"tool_use"`
+					Meta struct {
+						ClaudeCode struct {
+							ToolName string `json:"toolName"`
+						} `json:"claudeCode"`
+					} `json:"_meta"`
 				} `json:"update"`
 			}
 			if err := json.Unmarshal(msg.Params, &params); err != nil {
@@ -402,14 +408,17 @@ func (p *ACPProcess) readLoop(r io.Reader) {
 						cb(chunk)
 					}
 				}
-			case "tool_call_started":
+			case "tool_call":
 				p.chunkMu.Lock()
 				cb := p.toolStartCb
 				p.chunkMu.Unlock()
 				if cb != nil {
-					cb(params.Update.ToolUse.Name)
+					cb(params.Update.Meta.ClaudeCode.ToolName)
 				}
-			case "tool_call_completed":
+			case "tool_call_update":
+				if params.Update.Status != "completed" {
+					break
+				}
 				p.chunkMu.Lock()
 				cb := p.toolEndCb
 				p.chunkMu.Unlock()
