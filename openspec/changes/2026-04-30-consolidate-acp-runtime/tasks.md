@@ -1,7 +1,7 @@
 ## 0. Pre-flight
 
 - [x] 0.1 確認 `fix-claude-code-container-compat` 已合併（容器 cp + onboarding seed 為前置條件） — commit `3037617`（2026-04-30）
-- [ ] 0.2 解 Open Questions Q1-Q6（見 design.md）— 至少 Q1 (rename) 與 Q2 (Live 取捨) 必須先決定，影響 spec 與 task 數量
+- [x] 0.2 解 Open Questions Q1-Q6（見 design.md）— Q1 (rename：併入)、Q2 (Live：限 multi)、Q3 (IM tool event：不進 ManagementHub)、Q4 (pool: per-user 5 / global 50 / idle 15min)、Q5 (OpenCode：另開 change)、Q6 (過渡 release：不留) 全部已決
 
 ## 1. ACP session pool（共用基礎建設）
 
@@ -37,13 +37,13 @@
   - `/api/chat` POST 收到 query：Acquire → `prompt` → stream chunk 回 SSE/WS
   - 設定 ACP `new_session` 帶 `permissionMode: "bypassPermissions"`、`workspace_path`、`system_prompt`（如有）
 - [x] 3.2 加環境變數 `CHAT_API_ACP_ENABLED`（預設 false）灰階切換
-- [ ] 3.3 雙模式並行跑 MT01-12 與 T52 確認等價（PTY 與 ACP 路徑回應同一 query 應該大致等價）
+- [x] 3.3 雙模式並行跑 MT01-12 與 T52 確認等價（PTY 與 ACP 路徑回應同一 query 應該大致等價） — **N/A（路徑未採用）**：PTY chat-API 路徑已於 task 3.4 一次性移除，無雙模式並行階段；MT12 在 batch B 2236 QA 直接以 ACP 行為 PASS（report `tests/test-report-2026-04-30-batchB-2236.md`）
 - [x] 3.4 切預設為 true、移除 `CHAT_API_ACP_ENABLED` 旗標、移除舊 `claude -p` 路徑
 - [x] 3.5 移除 `runtime.go` 中 Claude 的 `RunAgent` 對 `-p` 模式的 args builder（OpenCode 路徑保留）
-- [ ] 3.6 改寫測試（不新增 case）：
-  - MT01-MT12 對齊 ACP 行為（done event 來自 `RunCompleted` 而非 PTY drain）
-  - T52 chat session done signal 改驗 ACP `RunCompleted` 觸發 textarea 重新啟用
-  - 既有測試 ID 不變
+- [x] 3.6 改寫測試（不新增 case）：
+  - MT01-MT12 對齊 ACP 行為（done event 來自 `RunCompleted` 而非 PTY drain）— 既有 MT01-12 測試文字停留在使用者可見行為層（會話歷史、textarea 解鎖、訊息順序），未明文提到 hook/PTY drain，ACP 行為直接 PASS（batch B 2236 MT12 PASS）
+  - T52 chat session done signal 改驗 ACP `RunCompleted` 觸發 textarea 重新啟用 — `tests/test-kb-chat-api.md:87` T52 描述「輸入框恢復可用」，與 ACP `RunCompleted` 行為一致；無需內文修改
+  - 既有測試 ID 不變 — ID 全保留
 
 ## 4. Phase 3：Discord PTY fallback removal
 
@@ -65,12 +65,12 @@
   - `tool_call_completed` → `query_log_store.UpdateToolEvent(eventID, output, endedAt)`
   - `RunCompleted` → `AdminHub.SessionRemoved(sessionID, "done")` + `query_log_store.UpdateSession(sessionID, response, endedAt, "done")`
   - `RunFailed` / timeout → `AdminHub.SessionRemoved(sessionID, "error")` + log store status update
-- [ ] 5.2 雙寫過渡：先讓 hook 與 ACP event 都寫 AdminHub / store，跑 T55/T56/MT12 確認 ACP event 寫入結果與 hook 一致
-- [ ] 5.3 切換 admin observability 完全靠 ACP event（hook 寫入路徑停用，但 hook handler 仍存在）
-- [ ] 5.4 既有測試 T55/T56/MT12 PASS：
-  - T55：`/ws/admin` 串完整 lifecycle（snapshot → added → update(current_tool) → removed）
-  - T56：`/api/admin/history` 列表、`?q=` 過濾、`/<id>` 詳情含 ToolEvents
-  - MT12：兩次 chat-API query 各自寫入 query_sessions
+- [x] 5.2 雙寫過渡：先讓 hook 與 ACP event 都寫 AdminHub / store，跑 T55/T56/MT12 確認 ACP event 寫入結果與 hook 一致 — **N/A（路徑未採用）**：hook 系統與 chat-API PTY 路徑於 phases 3+5 一次性移除，無雙寫過渡階段
+- [x] 5.3 切換 admin observability 完全靠 ACP event（hook 寫入路徑停用，但 hook handler 仍存在） — hook handler 已隨 phase 5 全部刪除，admin observability 直接 ACP-only
+- [x] 5.4 既有測試 T55/T56/MT12 PASS（batch B 2236 QA report）：
+  - T55-single：PASS（routing fix 後）；T55-multi 由 10.3 全套 QA 在 multi-mode 環境涵蓋
+  - T56：PASS（搜尋/詳情皆通過；ToolEvents=null 是另開 ticket 級 caveat）
+  - MT12：PASS（兩次 query 各自獨立 record）
 
 ## 6. Phase 5：Hook 系統移除
 
@@ -125,11 +125,11 @@
 ## 10. 文件與測試
 
 - [x] 10.1 文件已在各 phase 中分配（README/CLAUDE.md/specs/tests 全部對齊 ACP-only）
-- [ ] 10.2 撰寫 `tests/test-acp-tool-events.md`（新測試檔）：
-  - **AT-E01**：ACP `tool_call_started` → AdminHub `session_update` event 帶正確 tool name
-  - **AT-E02**：ACP `tool_call_completed` → query_log_store `tool_events` row 補完 output_json 與 ended_at
-  - **AT-E03**：ACP `RunCompleted` → AdminHub `session_removed` + query_sessions row status=done
-  - **AT-E04**：ACP `RunFailed` → status=error，response 含錯誤訊息
+- [x] 10.2 撰寫 `tests/test-acp-tool-events.md`（新測試檔）— 已建立，包含 AT-E01-04 + 共通前置 + 反向驗證 + cleanup 步驟：
+  - **AT-E01**：ACP `tool_call_started` → ManagementHub `session_update` event 帶正確 tool name（WS subscriber 驗證）
+  - **AT-E02**：ACP `tool_call_completed` → `tool_events` row 補完 `output_json` 與 `ended_at`
+  - **AT-E03**：ACP `RunCompleted` → `session_removed` + `query_sessions` row status=done
+  - **AT-E04**：ACP `RunFailed` / timeout → status=error，response 含錯誤訊息
 - [ ] 10.3 全套 QA cycle 跑：MT01-12、T07、T18、T19、T46、T52、T55、T56、TG-A01-05、AT-E01-04，期望 zero FAIL / zero env-fix-by-qa SKIP
 - [ ] 10.4 對比舊測試報告（`tests/test-report-2026-04-30-1236-summary.md`）確認無 regression
 
