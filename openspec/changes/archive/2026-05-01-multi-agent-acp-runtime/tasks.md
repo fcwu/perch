@@ -27,8 +27,8 @@
 
 - [x] 4.1 換 `anomalyco/opencode` → `sst/opencode` GitHub releases
 - [x] 4.2 `dpkg --print-architecture`：amd64 → `opencode-linux-x64.tar.gz`、arm64 → `opencode-linux-arm64.tar.gz`、其他 → `exit 1`
-- [ ] 4.3 build image 在 amd64 host 確認 `docker exec ... opencode --version` 不再 EXEC error — 留 phase 6 QA 驗
-- [ ] 4.4 build image 在 arm64 host（QNAP / Graviton）— 留後續驗（不 block 本 change）
+- [x] 4.3 build image 在 amd64 host 確認 `docker exec ... opencode --version` 不再 EXEC error — QA report `tests/test-report-2026-05-01-multi-agent-runtime-1318.md`：`opencode --version` 回 `1.14.30`（pre-rebuild 是 `exec format error`）
+- [ ] 4.4 build image 在 arm64 host（QNAP / Graviton）— 留後續驗（amd64 已驗，dpkg arch detect 邏輯通用）
 
 ## 5. Settings UI / 文件
 
@@ -39,11 +39,11 @@
 ## 6. 測試
 
 - [x] 6.1 `tests/test-multi-agent-runtime.md` 建立：MR01（claude default baseline）/ MR02（opencode subprocess switch）/ MR03（opencode + image upload）/ MR04（ACP_EXECUTABLE env override precedence）+ Sanity 段
-- [ ] 6.2 全套 QA cycle 跑 MR01-04 + MT12 / T55-multi / T56 / T19 / CU01 sanity
-- [ ] 6.3 對比 `tests/test-report-2026-05-01-image-upload-round2-1022.md` 確認 claude path 無 regression
+- [x] 6.2 全套 QA cycle MR01-04 + MT12 / T55-multi / T56 / T19 / CU01 sanity — `tests/test-report-2026-05-01-multi-agent-runtime-1318.md`：MR01/02/04 PASS，MR03 protocol-path PASS（model 不支援 vision = needs-user-action），AT-E03 / CU01 / MT12 / T56 / T55-multi 全 PASS，T19 indirect PASS（chrome-cdp Slate-Enter platform 限制，legal MANUAL）
+- [x] 6.3 對比 `tests/test-report-2026-05-01-image-upload-round2-1022.md` 確認 claude path 無 regression — round 2 五個 dimensions 全部完整重現
 
 ## 7. 結束條件
 
-- [ ] 7.1 全套 QA cycle zero FAIL / zero env-fix-by-qa SKIP（OpenCode image incompatibility 算 needs-user-action 不算 env-fix）
-- [ ] 7.2 README、Settings UI、code 三方一致
-- [ ] 7.3 archive 完成
+- [x] 7.1 全套 QA cycle zero FAIL / zero env-fix-by-qa SKIP — MR03 needs-user-action（OpenCode default model 不吃 image，model 層級限制）+ T19 MANUAL（Slate-Enter platform 限制）皆非 env-fix-by-qa
+- [x] 7.2 README、Settings UI、code 三方一致 — README Agent Runtime 段含 runtime 影響範圍 / OpenCode 額外注意 / Advanced overrides 三段；SettingsPanel 既有 RadioGroup 沒誤導文字；code 與文件對齊
+- [x] 7.3 archive 完成 — 詳見後續 commit
