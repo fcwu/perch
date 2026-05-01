@@ -80,7 +80,9 @@ case "opencode":
     return AgentRuntime{
         // ...
         ACPExecutable: "opencode",
-        ACPArgs:       []string{"acp"},
+        // --log-level WARN：opencode acp 預設 INFO logs 寫到 stdout，會污染
+        // ACP JSON-RPC 流；用 WARN 把 logs 壓到 stderr 之外（pre-flight 實測必備）。
+        ACPArgs:       []string{"acp", "--log-level", "WARN"},
     }, nil
 ```
 
@@ -205,7 +207,13 @@ Release note 標：
 ## Open Questions
 
 - ~~**Q1：是否在本 change 同時加 codex CLI？**~~ **已決**：不加。先確保 OpenCode 與架構抽象 OK，codex 另開 change（runtime 結構應該已經夠表達）。
-- **Q2：OpenCode ACP server 是否接受 `permissionMode: "bypassPermissions"` + `workspace_path`？** Phase 0 實測決定；若不支援，本 change 加最小映射（per-runtime `new_session` template），否則 D3 假設成立。
+- ~~**Q2：OpenCode ACP server 是否接受 claude 的 `new_session` payload？**~~ **已決（pre-flight 實測 2026-05-01）**：
+  - `opencode acp` 是 stdio JSON-RPC（與 claude-agent-acp 同 transport），但 stdout 預設帶 INFO logs，必須加 `--log-level WARN` 不污染協定流。
+  - `initialize` 回 `protocolVersion:1, promptCapabilities.image:true, authMethods:[opencode-login]`。
+  - `session/new {cwd, mcpServers:[]}` ✅ accepts（perch 既有 payload 不變，`cwd` 是兩個 runtime 共通的）。
+  - `session/set_mode "bypassPermissions"` ❌ opencode 只認 `build`/`plan` mode；**好消息：perch 既有 code 已 graceful warning-and-continue**（acp_process.go:189）— default `build` mode 也能跑 tools，不影響功能。
+  - 認證：`opencode/*` 系列免費模型 credential-less 可用；付費（Anthropic/OpenAI）需 `opencode auth login` 互動式登入。Headless 部署需 mount `~/.local/share/opencode/auth.json`（類比 `~/.claude/.credentials.json` 的 pattern），或限定免費模型。
+  - 因此 D3 假設「兩個 agent 都接受相同 `new_session` 參數」**成立**，不需 per-runtime template；`set_mode` 失敗的 warning 對 opencode 屬預期行為，可考慮 `if runtime.Name=="opencode" skip set_mode` 但非必要。
 - **Q3：是否要在 Settings UI 顯示「目前實際執行的 ACP binary」（debug info）？** 暫不加，落到 startup log 即可（`ACP process started executable=...` 已存在）。
 - **Q4：image 是否該透過 build flag 砍 runtime（compile-time pick）？** 不加，runtime-time 切換的彈性 > image 大小節省。
 - **Q5：`ACP_EXECUTABLE_ARGS` 命名是否好？** 可以；如果有更好的名字以 D6 為準再調。

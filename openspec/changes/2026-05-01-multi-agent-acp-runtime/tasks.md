@@ -1,8 +1,8 @@
 ## 0. Pre-flight
 
-- [ ] 0.1 實測 `opencode acp` 在 image 內可啟動：`docker exec ... sh -lc 'echo {} | opencode acp'` 能進入 ACP JSON-RPC 模式並接受 `initialize`。記下 opencode 版本與 ACP capability flags
-- [ ] 0.2 實測 `new_session` 對 OpenCode 的接受度（D3 假設驗證）：送 `{"permissionMode":"bypassPermissions","workspace_path":"/workspace"}` 看是否 accept；若 reject 記下 minimal viable params 並回頭修 design
-- [ ] 0.3 解 Open Questions Q2-Q5（Q1 已決）
+- [x] 0.1 實測 `opencode acp` stdio JSON-RPC：sst/opencode 1.14.30 正常回 `initialize` response；**stdout 預設帶 INFO logs**，必須 `--log-level WARN` 才能跟 ACP 協定共存。`promptCapabilities.image: true`、`authMethods: [opencode-login]`
+- [x] 0.2 實測 `session/new` payload：perch 既有 `{cwd, mcpServers:[]}` ✅ accepts；`session/set_mode "bypassPermissions"` ❌ opencode 只認 `build`/`plan` mode（acp_process.go:189 已 graceful warning-and-continue，default `build` mode 也跑 tools）。免費 `opencode/*` 模型 credential-less，付費需 `opencode auth login` 互動式登入或 mount `~/.local/share/opencode/auth.json`
+- [x] 0.3 Q1（不加 codex） / Q2（pre-flight 已驗）已決；Q3-Q5 留 design.md 內以 D6 / startup log 為準，本 change 不另拍板
 
 ## 1. Runtime abstraction：擴 ACP 欄位
 
