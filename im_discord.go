@@ -3,8 +3,11 @@ package main
 import (
 	"context"
 	"crypto/sha1"
+	"encoding/base64"
 	"fmt"
+	"io"
 	"log/slog"
+	"net/http"
 	"os"
 	"regexp"
 	"strconv"
@@ -253,6 +256,7 @@ type DiscordSessionManager struct {
 	allowedDMUserIDs map[string]struct{} // nil/empty = DM disabled
 	logger           *slog.Logger
 	workdir          string
+	settings         *SettingsManager // optional; nil = use built-in defaults
 
 	mu             sync.Mutex
 	acpExecutable  string // path to claude-agent-acp binary (default from ACP_EXECUTABLE / "claude-agent-acp")
@@ -276,6 +280,21 @@ func newDiscordSessionManager(runtime AgentRuntime, token, channelID string, all
 		sessions:         make(map[string]*discordSession),
 		channelPrivate:   make(map[string]bool),
 	}
+}
+
+// SetSettings wires the settings manager so the adapter can read attachment
+// limits at request time. Safe to call before or after Start.
+func (d *DiscordSessionManager) SetSettings(sm *SettingsManager) {
+	d.settings = sm
+}
+
+// attachmentLimits returns the effective limits (or built-in defaults if no
+// settings manager is wired).
+func (d *DiscordSessionManager) attachmentLimits() AttachmentLimits {
+	if d.settings == nil {
+		return EffectiveAttachmentLimits(nil)
+	}
+	return EffectiveAttachmentLimits(d.settings.GetEffective().Chat)
 }
 
 // acpRunTimeout reads ACP_RUN_TIMEOUT (seconds) or returns the default 5 minutes.
@@ -409,12 +428,95 @@ func (d *DiscordSessionManager) onMessage(s *discordgo.Session, m *discordgo.Mes
 	}
 
 	sess := d.getOrCreateSession(m.ChannelID)
-	go sess.handleWithACP(s, m.ChannelID, m.ID, content, d.logger)
+	imageBlocks, fetchFailed := d.fetchImageAttachments(m.Attachments)
+	go sess.handleWithACP(s, m.ChannelID, m.ID, content, imageBlocks, fetchFailed, d.logger)
+}
+
+// fetchImageAttachments downloads image attachments (per allow-list and size
+// limit), base64-encodes them, and returns ACP image blocks plus the names of
+// any images that failed to fetch (so the reply can mention them).
+// Non-image attachments are silently dropped (per design Q2).
+func (d *DiscordSessionManager) fetchImageAttachments(atts []*discordgo.MessageAttachment) ([]ACPContent, []string) {
+	if len(atts) == 0 {
+		return nil, nil
+	}
+	lim := d.attachmentLimits()
+	allow := map[string]bool{}
+	for _, m := range lim.AllowedMime {
+		allow[m] = true
+	}
+
+	var blocks []ACPContent
+	var failed []string
+	totalKept := 0
+	for _, a := range atts {
+		if a == nil {
+			continue
+		}
+		if !allow[a.ContentType] {
+			d.logger.Debug("Discord ACP: drop non-image attachment", "filename", a.Filename, "ct", a.ContentType)
+			continue
+		}
+		if int64(a.Size) > lim.MaxBytes {
+			d.logger.Warn("Discord ACP: drop oversized attachment", "filename", a.Filename, "size", a.Size, "limit", lim.MaxBytes)
+			continue
+		}
+		if lim.MaxFiles > 0 && totalKept >= lim.MaxFiles {
+			d.logger.Warn("Discord ACP: drop attachment over max-files", "filename", a.Filename, "limit", lim.MaxFiles)
+			continue
+		}
+		data, err := fetchURLBytes(a.URL, lim.MaxBytes+1)
+		if err != nil {
+			d.logger.Warn("Discord ACP: fetch attachment failed", "filename", a.Filename, "err", err)
+			failed = append(failed, a.Filename)
+			continue
+		}
+		if int64(len(data)) > lim.MaxBytes {
+			d.logger.Warn("Discord ACP: drop oversized attachment after fetch", "filename", a.Filename, "size", len(data), "limit", lim.MaxBytes)
+			continue
+		}
+		got := MagicMime(data)
+		if got != a.ContentType {
+			d.logger.Warn("Discord ACP: drop attachment with mime/magic mismatch", "filename", a.Filename, "claimed", a.ContentType, "magic", got)
+			continue
+		}
+		blocks = append(blocks, ACPContent{
+			Type:   "image",
+			Source: &ACPImageSource{Type: "base64", MediaType: got, Data: base64.StdEncoding.EncodeToString(data)},
+		})
+		totalKept++
+	}
+	if len(blocks) > 0 || len(failed) > 0 {
+		d.logger.Info("Discord ACP: attachments processed", "kept", len(blocks), "failed", len(failed))
+	}
+	return blocks, failed
+}
+
+// fetchURLBytes performs a GET on url with a hard byte limit (response body
+// truncated/aborted at maxBytes+1 to detect oversized payloads cheaply).
+func fetchURLBytes(url string, maxBytes int64) ([]byte, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode/100 != 2 {
+		return nil, fmt.Errorf("status %d", resp.StatusCode)
+	}
+	return io.ReadAll(io.LimitReader(resp.Body, maxBytes))
 }
 
 // handleWithACP sends message to the claude-agent-acp subprocess and routes the reply to Discord.
 // It runs in its own goroutine and never returns an error (logs instead).
-func (sess *discordSession) handleWithACP(s *discordgo.Session, channelID, messageID, content string, logger *slog.Logger) {
+// imageBlocks are pre-fetched image content blocks; fetchFailed lists filenames
+// of attachments that failed to download (for the user-visible reply suffix).
+func (sess *discordSession) handleWithACP(s *discordgo.Session, channelID, messageID, content string, imageBlocks []ACPContent, fetchFailed []string, logger *slog.Logger) {
 	// One message at a time per session — drop concurrent duplicates.
 	sess.mu.Lock()
 	if sess.last != nil {
@@ -451,7 +553,16 @@ func (sess *discordSession) handleWithACP(s *discordgo.Session, channelID, messa
 		return
 	}
 
-	text, err := sess.acpProcess.Prompt(ctx, content)
+	blocks := make([]ACPContent, 0, 1+len(imageBlocks))
+	if content != "" {
+		blocks = append(blocks, ACPContent{Type: "text", Text: content})
+	} else if len(imageBlocks) > 0 {
+		// ACP requires at least one block; keep an empty text block as the
+		// implicit "describe these images" prompt so claude-agent-acp accepts the call.
+		blocks = append(blocks, ACPContent{Type: "text", Text: ""})
+	}
+	blocks = append(blocks, imageBlocks...)
+	text, err := sess.acpProcess.PromptWithContent(ctx, blocks, nil, nil, nil)
 	_ = s.MessageReactionRemove(channelID, messageID, emojiEyes, "@me")
 
 	if err != nil {
@@ -469,6 +580,11 @@ func (sess *discordSession) handleWithACP(s *discordgo.Session, channelID, messa
 	}
 
 	_ = s.MessageReactionAdd(channelID, messageID, emojiSpeech)
+	if len(fetchFailed) > 0 {
+		// Append a soft warning so the user knows some attachments didn't reach Claude.
+		warn := "\n\n> 附件 " + strings.Join(fetchFailed, ", ") + " 下載失敗，未送進 Claude"
+		text = text + warn
+	}
 	if text == "" {
 		return // nothing to send
 	}
@@ -535,7 +651,7 @@ func (d *DiscordSessionManager) DispatchScheduled(target, message string) bool {
 	}
 
 	sess := d.getOrCreateSession(channelID)
-	go sess.handleWithACP(dgo, channelID, sent.ID, message, d.logger)
+	go sess.handleWithACP(dgo, channelID, sent.ID, message, nil, nil, d.logger)
 	return true
 }
 

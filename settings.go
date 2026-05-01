@@ -19,6 +19,13 @@ type RuntimeSettings struct {
 	GitLab    *GitLabSettings    `json:"gitlab,omitempty"`
 	Workspace *WorkspaceSettings `json:"workspace,omitempty"`
 	Log       *LogSettings       `json:"log,omitempty"`
+	Chat      *ChatSettings      `json:"chat,omitempty"`
+}
+
+type ChatSettings struct {
+	UploadMaxBytes   *int64   `json:"upload_max_bytes,omitempty"`   // immediate
+	UploadMaxFiles   *int     `json:"upload_max_files,omitempty"`   // immediate
+	UploadAllowedMime []string `json:"upload_allowed_mime,omitempty"` // immediate
 }
 
 type AgentSettings struct {
@@ -269,11 +276,29 @@ func mergeSettings(base, override RuntimeSettings) RuntimeSettings {
 		r.Log = &l
 	}
 
+	if override.Chat != nil {
+		if r.Chat == nil {
+			r.Chat = &ChatSettings{}
+		}
+		c := *r.Chat
+		if override.Chat.UploadMaxBytes != nil {
+			c.UploadMaxBytes = override.Chat.UploadMaxBytes
+		}
+		if override.Chat.UploadMaxFiles != nil {
+			c.UploadMaxFiles = override.Chat.UploadMaxFiles
+		}
+		if override.Chat.UploadAllowedMime != nil {
+			c.UploadAllowedMime = override.Chat.UploadAllowedMime
+		}
+		r.Chat = &c
+	}
+
 	return r
 }
 
 func strPtr(s string) *string { return &s }
 func intPtr(i int) *int       { return &i }
+func int64Ptr(i int64) *int64 { return &i }
 func boolPtr(b bool) *bool    { return &b }
 
 // Patch merges delta into current settings, saves atomically, and returns
@@ -428,6 +453,21 @@ func (sm *SettingsManager) Patch(delta RuntimeSettings) (restartRequired bool, e
 		}
 		if delta.Log.Format != nil {
 			sm.current.Log.Format = delta.Log.Format
+		}
+	}
+
+	if delta.Chat != nil {
+		if sm.current.Chat == nil {
+			sm.current.Chat = &ChatSettings{}
+		}
+		if delta.Chat.UploadMaxBytes != nil {
+			sm.current.Chat.UploadMaxBytes = delta.Chat.UploadMaxBytes
+		}
+		if delta.Chat.UploadMaxFiles != nil {
+			sm.current.Chat.UploadMaxFiles = delta.Chat.UploadMaxFiles
+		}
+		if delta.Chat.UploadAllowedMime != nil {
+			sm.current.Chat.UploadAllowedMime = delta.Chat.UploadAllowedMime
 		}
 	}
 

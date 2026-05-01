@@ -125,6 +125,7 @@ func main() {
 	}
 	if im != nil && discordToken != "" {
 		discordSess = newDiscordSessionManager(runtime, discordToken, discordChannel, discordAllowedDMUsers, workdir, logger.Logger)
+		discordSess.SetSettings(sm)
 		im.addAdapter(discordSess)
 	}
 	if im != nil && telegramToken != "" && telegramChatStr != "" {
@@ -332,6 +333,40 @@ func buildEnvSeed(runtime AgentRuntime) RuntimeSettings {
 		logFormat = "json"
 	}
 	s.Log = &LogSettings{Format: strPtr(logFormat)}
+
+	// Chat upload limits — defaults from attachments.go
+	chat := ChatSettings{
+		UploadMaxBytes: int64Ptr(int64(defaultUploadMaxBytes)),
+		UploadMaxFiles: intPtr(defaultUploadMaxFiles),
+		UploadAllowedMime: append([]string{}, defaultUploadAllowedMime...),
+	}
+	if v := os.Getenv("CHAT_UPLOAD_MAX_BYTES"); v != "" {
+		var n int64
+		fmt.Sscanf(v, "%d", &n)
+		if n > 0 {
+			chat.UploadMaxBytes = int64Ptr(n)
+		}
+	}
+	if v := os.Getenv("CHAT_UPLOAD_MAX_FILES"); v != "" {
+		var n int
+		fmt.Sscanf(v, "%d", &n)
+		if n > 0 {
+			chat.UploadMaxFiles = intPtr(n)
+		}
+	}
+	if v := os.Getenv("CHAT_UPLOAD_ALLOWED_MIME"); v != "" {
+		var mimes []string
+		for _, m := range strings.Split(v, ",") {
+			m = strings.TrimSpace(m)
+			if m != "" {
+				mimes = append(mimes, m)
+			}
+		}
+		if len(mimes) > 0 {
+			chat.UploadAllowedMime = mimes
+		}
+	}
+	s.Chat = &chat
 
 	// Network
 	if v := os.Getenv("BLOCK_IPS"); v != "" {

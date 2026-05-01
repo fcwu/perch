@@ -12,6 +12,7 @@ interface Settings {
   gitlab?: { url?: string; client_id?: string; client_secret?: string; redirect_uri?: string; allowed_ids?: string[]; admin_ids?: string[] }
   workspace?: { sync_enabled?: boolean; sync_interval?: string; git_token?: string; notify_channel?: string; sync_submodules?: boolean }
   log?: { format?: string }
+  chat?: { upload_max_bytes?: number; upload_max_files?: number; upload_allowed_mime?: string[] }
 }
 
 interface SettingsResponse {
@@ -107,12 +108,18 @@ function GeneralTab({ settings, registerDelta }: TabProps) {
   const [args, setArgs] = useState(settings.agent?.args ?? '')
   const [rpm, setRpm] = useState(String(settings.rate_limit?.rpm ?? ''))
   const [blockIPs, setBlockIPs] = useState((settings.network?.block_ips ?? []).join('\n'))
+  const [uploadMaxBytes, setUploadMaxBytes] = useState(String(settings.chat?.upload_max_bytes ?? ''))
+  const [uploadMaxFiles, setUploadMaxFiles] = useState(String(settings.chat?.upload_max_files ?? ''))
+  const [uploadAllowedMime, setUploadAllowedMime] = useState((settings.chat?.upload_allowed_mime ?? []).join(','))
 
   useEffect(() => {
     setRuntime(settings.agent?.runtime ?? '')
     setArgs(settings.agent?.args ?? '')
     setRpm(String(settings.rate_limit?.rpm ?? ''))
     setBlockIPs((settings.network?.block_ips ?? []).join('\n'))
+    setUploadMaxBytes(String(settings.chat?.upload_max_bytes ?? ''))
+    setUploadMaxFiles(String(settings.chat?.upload_max_files ?? ''))
+    setUploadAllowedMime((settings.chat?.upload_allowed_mime ?? []).join(','))
   }, [settings])
 
   useEffect(() => {
@@ -120,8 +127,13 @@ function GeneralTab({ settings, registerDelta }: TabProps) {
       agent: { runtime: runtime || undefined, args: args || undefined },
       rate_limit: { rpm: rpm ? Number(rpm) : undefined },
       network: { block_ips: blockIPs.split('\n').map(s => s.trim()).filter(Boolean) },
+      chat: {
+        upload_max_bytes: uploadMaxBytes ? Number(uploadMaxBytes) : undefined,
+        upload_max_files: uploadMaxFiles ? Number(uploadMaxFiles) : undefined,
+        upload_allowed_mime: uploadAllowedMime ? uploadAllowedMime.split(',').map(s => s.trim()).filter(Boolean) : undefined,
+      },
     }))
-  }, [runtime, args, rpm, blockIPs, registerDelta])
+  }, [runtime, args, rpm, blockIPs, uploadMaxBytes, uploadMaxFiles, uploadAllowedMime, registerDelta])
 
   return (
     <>
@@ -141,6 +153,15 @@ function GeneralTab({ settings, registerDelta }: TabProps) {
           rows={3}
           style={{ width: '100%', background: '#1a1a1a', color: '#e0e0e0', border: '1px solid #2e2e2e', borderRadius: 7, padding: '8px 10px', fontSize: 13, fontFamily: FONT, boxSizing: 'border-box' as const, resize: 'vertical' as const, outline: 'none' }}
         />
+      </Field>
+      <Field label="Chat Upload — Max Bytes per file">
+        <TextInput value={uploadMaxBytes} onChange={setUploadMaxBytes} placeholder="10485760 (10MB)" />
+      </Field>
+      <Field label="Chat Upload — Max Files per query">
+        <TextInput value={uploadMaxFiles} onChange={setUploadMaxFiles} placeholder="4" />
+      </Field>
+      <Field label="Chat Upload — Allowed MIME (comma)">
+        <TextInput value={uploadAllowedMime} onChange={setUploadAllowedMime} placeholder="image/png,image/jpeg,image/gif,image/webp" />
       </Field>
     </>
   )

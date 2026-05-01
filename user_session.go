@@ -140,8 +140,11 @@ func newUserSessionManager(runtime AgentRuntime, workdir string, logger *slog.Lo
 // StartSession creates a new OpenCode session for the user.
 // When newConversation is false, recent history is prepended to the query.
 // conversationID links the session to an existing conversation (may be empty).
+// attachments are accepted to satisfy the ChatSessionManager interface but are
+// dropped here — the legacy PTY chat-API path is text-only.
 // Returns error with HTTP 409 status hint if a session is already running.
-func (m *UserSessionManager) StartSession(userID, username, query string, newConversation bool, conversationID string) error {
+func (m *UserSessionManager) StartSession(userID, username, query string, newConversation bool, conversationID string, attachments []Attachment) error {
+	_ = attachments
 	m.mu.Lock()
 	existing, ok := m.sessions[userID]
 	if ok {

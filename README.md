@@ -268,6 +268,7 @@ Chat UI 提供多輪對話支援，使用者可以追問後續問題，agent 會
 - **多輪對話**：對話歷史從 SQLite 自動重建，24 小時內的問答會作為上下文附在新查詢前方
 - **自動過期**：超過 24 小時無活動，下一次查詢自動以空白歷史重新開始（上限 20 輪）
 - **新對話按鈕**：可隨時點擊「New conversation」立即清除歷史
+- **上傳圖片**：textarea 旁的 📎 開啟 file picker；也支援把圖片**拖進**輸入框，或按 Cmd/Ctrl+V **貼**剪貼簿截圖。預設可附最多 4 張、單檔 10MB；支援格式：PNG / JPEG / GIF / WebP。Discord 直接 attach 圖片給 bot 也會跟著訊息一起送進 Claude。
 
 ## Agent Runtime
 

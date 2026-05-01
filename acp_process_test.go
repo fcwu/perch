@@ -396,6 +396,59 @@ func TestACPProcess_RequestFormat(t *testing.T) {
 	}
 }
 
+// TestACPProcess_PromptWithContent_ImageBlock asserts that PromptWithContent serialises
+// a [text, image] content slice into the session/prompt body as the spec requires.
+func TestACPProcess_PromptWithContent_ImageBlock(t *testing.T) {
+	proc, srv := newFakeACPServer(t)
+	defer srv.close()
+
+	proc.running = true
+	proc.sessionID = "sess-img-001"
+
+	ctx := context.Background()
+
+	go func() {
+		req := srv.readRequest(t)
+
+		if req.Method != "session/prompt" {
+			t.Errorf("method = %q, want %q", req.Method, "session/prompt")
+		}
+
+		var params struct {
+			SessionID string       `json:"sessionId"`
+			Prompt    []ACPContent `json:"prompt"`
+		}
+		if err := json.Unmarshal(req.Params, &params); err != nil {
+			t.Errorf("unmarshal params: %v", err)
+		}
+		if params.SessionID != "sess-img-001" {
+			t.Errorf("sessionId = %q, want %q", params.SessionID, "sess-img-001")
+		}
+		if len(params.Prompt) != 2 {
+			t.Fatalf("len(prompt) = %d, want 2", len(params.Prompt))
+		}
+		if params.Prompt[0].Type != "text" || params.Prompt[0].Text != "what's wrong?" {
+			t.Errorf("block[0] = %+v, want text/'what's wrong?'", params.Prompt[0])
+		}
+		if params.Prompt[1].Type != "image" || params.Prompt[1].Source == nil {
+			t.Errorf("block[1] = %+v, want image with Source", params.Prompt[1])
+		}
+		if params.Prompt[1].Source.Type != "base64" || params.Prompt[1].Source.MediaType != "image/png" || params.Prompt[1].Source.Data != "AAAA" {
+			t.Errorf("block[1].Source = %+v, want base64/image-png/AAAA", params.Prompt[1].Source)
+		}
+
+		srv.sendResponse(*req.ID, map[string]any{"status": "completed"})
+	}()
+
+	blocks := []ACPContent{
+		{Type: "text", Text: "what's wrong?"},
+		{Type: "image", Source: &ACPImageSource{Type: "base64", MediaType: "image/png", Data: "AAAA"}},
+	}
+	if _, err := proc.PromptWithContent(ctx, blocks, nil, nil, nil); err != nil {
+		_ = fmt.Sprintf("prompt err (expected): %v", err)
+	}
+}
+
 // TestACPProcess_EnsureRunning_NoDeadlock is a regression test for the deadlock where
 // Start() held p.mu via defer while calling call(), which also needs p.mu.
 // It runs a real subprocess (the test binary itself in helper mode) to exercise

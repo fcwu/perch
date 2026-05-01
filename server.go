@@ -428,13 +428,30 @@ func (s *Server) handleChatAPI(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		Query           string `json:"query"`
-		ConversationID  string `json:"conversation_id,omitempty"`
-		NewConversation bool   `json:"new_conversation,omitempty"`
+		Query           string       `json:"query"`
+		ConversationID  string       `json:"conversation_id,omitempty"`
+		NewConversation bool         `json:"new_conversation,omitempty"`
+		Attachments     []Attachment `json:"attachments,omitempty"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Query == "" {
-		http.Error(w, "bad request: missing query", http.StatusBadRequest)
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "bad request: invalid JSON", http.StatusBadRequest)
 		return
+	}
+	if req.Query == "" && len(req.Attachments) == 0 {
+		http.Error(w, "bad request: query or attachments required", http.StatusBadRequest)
+		return
+	}
+	if len(req.Attachments) > 0 {
+		var lim AttachmentLimits
+		if s.sm != nil {
+			lim = EffectiveAttachmentLimits(s.sm.GetEffective().Chat)
+		} else {
+			lim = EffectiveAttachmentLimits(nil)
+		}
+		if err := ValidateAttachments(req.Attachments, lim); err != nil {
+			http.Error(w, "bad request: "+err.Error(), http.StatusBadRequest)
+			return
+		}
 	}
 
 	// Create a new conversation if no conversation_id was supplied.
@@ -461,7 +478,7 @@ func (s *Server) handleChatAPI(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if err := s.chatSessions.StartSession(userID, username, req.Query, req.NewConversation, conversationID); err != nil {
+	if err := s.chatSessions.StartSession(userID, username, req.Query, req.NewConversation, conversationID, req.Attachments); err != nil {
 		if ce, ok := err.(interface{ IsConflict() bool }); ok && ce.IsConflict() {
 			http.Error(w, "session already in progress", http.StatusConflict)
 			return

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 )
@@ -12,7 +13,9 @@ import (
 type acpChatSession struct {
 	userID         string
 	username       string
-	query          string
+	query          string // display form (with [image:filename] placeholders for management history)
+	rawText        string // raw user text (without placeholders), used for prompt building
+	attachments    []Attachment
 	conversationID string
 	sessionID      string // store session UUID (set after InsertSession)
 	poolKey        string
@@ -22,7 +25,7 @@ type acpChatSession struct {
 	done   bool
 }
 
-func newACPChatSession(userID, username, query, conversationID string) *acpChatSession {
+func newACPChatSession(userID, username, query, conversationID string, attachments []Attachment) *acpChatSession {
 	convID := conversationID
 	if convID == "" {
 		convID = "default"
@@ -30,12 +33,31 @@ func newACPChatSession(userID, username, query, conversationID string) *acpChatS
 	return &acpChatSession{
 		userID:         userID,
 		username:       username,
-		query:          query,
+		query:          formatQueryForHistory(query, attachments),
+		rawText:        query,
+		attachments:    attachments,
 		conversationID: conversationID,
 		sessionID:      newUUID(),
 		poolKey:        "chat-api:" + userID + ":" + convID,
 		jsonCh:         make(chan string, 256),
 	}
+}
+
+// formatQueryForHistory builds the placeholder-prefixed string stored in
+// query_sessions.query so the management history list does not embed base64
+// data. Per design D4: "[image:foo.png] [image:bar.jpg] <text>".
+func formatQueryForHistory(text string, atts []Attachment) string {
+	if len(atts) == 0 {
+		return text
+	}
+	var b strings.Builder
+	for _, a := range atts {
+		b.WriteString("[image:")
+		b.WriteString(a.Filename)
+		b.WriteString("] ")
+	}
+	b.WriteString(text)
+	return b.String()
 }
 
 func (s *acpChatSession) broadcastJSON(msg string) {
@@ -59,10 +81,9 @@ func (s *acpChatSession) close() {
 	}
 }
 
-// ChatSessionManager is the interface shared by PTY-based and ACP-based session managers.
-// The server's chat handlers depend only on this interface.
+// ChatSessionManager is the interface used by the chat handlers in server.go.
 type ChatSessionManager interface {
-	StartSession(userID, username, query string, newConversation bool, conversationID string) error
+	StartSession(userID, username, query string, newConversation bool, conversationID string, attachments []Attachment) error
 	SubscribeSession(userID string) (<-chan []byte, func(), bool)
 	SubscribeJSON(userID string) (<-chan string, func(), bool)
 }
@@ -96,7 +117,7 @@ func newACPUserSessionManager(workdir string, store *Store, adminHub *Management
 }
 
 // StartSession starts an ACP prompt for userID. Returns 409-alike error if busy.
-func (m *ACPUserSessionManager) StartSession(userID, username, query string, newConversation bool, conversationID string) error {
+func (m *ACPUserSessionManager) StartSession(userID, username, query string, newConversation bool, conversationID string, attachments []Attachment) error {
 	m.mu.Lock()
 	existing, ok := m.sessions[userID]
 	if ok {
@@ -110,22 +131,31 @@ func (m *ACPUserSessionManager) StartSession(userID, username, query string, new
 		delete(m.sessions, userID)
 	}
 
-	sess := newACPChatSession(userID, username, query, conversationID)
+	sess := newACPChatSession(userID, username, query, conversationID, attachments)
 	m.sessions[userID] = sess
 	m.mu.Unlock()
 
-	// Build prompt with history if continuing a conversation.
-	prompt := query
+	// Build text prompt with history if continuing a conversation. History
+	// expansion only touches text; attachments are appended as image blocks
+	// after the (possibly expanded) text block.
+	promptText := query
 	if !newConversation && m.store != nil {
 		since := time.Now().UnixMilli() - conversationWindow.Milliseconds()
 		if history, err := m.store.GetRecentHistory(userID, since, conversationMaxTurns); err != nil {
 			m.logger.Warn("ACP chat: GetRecentHistory failed", "err", err)
 		} else {
-			prompt = buildPrompt(history, query)
+			promptText = buildPrompt(history, query)
 		}
 	}
 
-	go m.runPrompt(sess, prompt)
+	if len(attachments) > 0 {
+		var total int
+		for _, a := range attachments {
+			total += len(a.DataBase64)
+		}
+		m.logger.Info("ACP chat: attachments accepted", "userID", userID, "count", len(attachments), "total_b64_bytes", total)
+	}
+	go m.runPrompt(sess, promptText)
 	return nil
 }
 
@@ -210,7 +240,9 @@ func (m *ACPUserSessionManager) runPrompt(sess *acpChatSession, prompt string) {
 		}
 	}
 
-	response, err := proc.PromptWithChunks(ctx, prompt, onChunk, onToolStart, onToolEnd)
+	blocks := []ACPContent{{Type: "text", Text: prompt}}
+	blocks = append(blocks, AttachmentsToACPBlocks(sess.attachments)...)
+	response, err := proc.PromptWithContent(ctx, blocks, onChunk, onToolStart, onToolEnd)
 	if err != nil {
 		errMsg, _ := json.Marshal(map[string]string{"type": "error", "message": err.Error()})
 		sess.broadcastJSON(string(errMsg))

@@ -15,6 +15,21 @@ import (
 	"time"
 )
 
+// ACPContent is a single content block in an ACP session/prompt request.
+// Either Text (for type="text") or Source (for type="image") is set, not both.
+type ACPContent struct {
+	Type   string          `json:"type"`             // "text" | "image"
+	Text   string          `json:"text,omitempty"`   // when Type=="text"
+	Source *ACPImageSource `json:"source,omitempty"` // when Type=="image"
+}
+
+// ACPImageSource describes an inline base64 image attached to a prompt.
+type ACPImageSource struct {
+	Type      string `json:"type"`       // "base64"
+	MediaType string `json:"media_type"` // e.g. "image/png"
+	Data      string `json:"data"`       // raw base64, no "data:" prefix
+}
+
 // ACPProcess manages a long-lived claude-agent-acp subprocess per Discord channel.
 // Communication is ACP JSON-RPC 2.0 over stdin/stdout (line-delimited JSON).
 // Multi-turn conversation context is preserved across Prompt() calls within one session.
@@ -192,6 +207,13 @@ func (p *ACPProcess) Prompt(ctx context.Context, text string) (string, error) {
 // onToolStart is called with the tool name when a session/update tool_call event arrives.
 // onToolEnd is called when a session/update tool_call_update with status=completed arrives.
 func (p *ACPProcess) PromptWithChunks(ctx context.Context, text string, onChunk func(string), onToolStart func(string), onToolEnd func()) (string, error) {
+	return p.PromptWithContent(ctx, []ACPContent{{Type: "text", Text: text}}, onChunk, onToolStart, onToolEnd)
+}
+
+// PromptWithContent sends a multi-block prompt (text + optional image blocks) to the agent
+// and returns the accumulated response text. Use this for vision queries; for text-only see
+// Prompt or PromptWithChunks.
+func (p *ACPProcess) PromptWithContent(ctx context.Context, blocks []ACPContent, onChunk func(string), onToolStart func(string), onToolEnd func()) (string, error) {
 	// Reset chunk accumulator and register callbacks before sending the prompt.
 	p.chunkMu.Lock()
 	p.chunkBuf.Reset()
@@ -214,7 +236,7 @@ func (p *ACPProcess) PromptWithChunks(ctx context.Context, text string, onChunk 
 	tPrompt := time.Now()
 	if _, err := p.call(ctx, "session/prompt", map[string]any{
 		"sessionId": sessionID,
-		"prompt":    []map[string]any{{"type": "text", "text": text}},
+		"prompt":    blocks,
 	}); err != nil {
 		if ctx.Err() != nil {
 			p.mu.Lock()
@@ -223,7 +245,7 @@ func (p *ACPProcess) PromptWithChunks(ctx context.Context, text string, onChunk 
 		}
 		return "", err
 	}
-	p.logger.Debug("ACP prompt done", "elapsed", time.Since(tPrompt).Round(time.Millisecond))
+	p.logger.Debug("ACP prompt done", "elapsed", time.Since(tPrompt).Round(time.Millisecond), "blocks", len(blocks))
 
 	p.chunkMu.Lock()
 	out := p.chunkBuf.String()
