@@ -7,7 +7,7 @@ When a Discord message arrives with image attachments (`ContentType` ∈ allow-l
 #### Scenario: Image attachment + message text
 
 - **WHEN** a Discord message arrives with `m.Content="diagnose this"` and one PNG attachment
-- **THEN** the adapter calls `acp_session_pool.Acquire("discord:channel:<id>")` and issues `PromptWithContent(ctx, [{type:"text",text:"diagnose this"}, {type:"image",source:{type:"base64",media_type:"image/png",data:"<b64>"}}], ...)`
+- **THEN** the adapter calls `acp_session_pool.Acquire("discord:channel:<id>")` and issues `PromptWithContent(ctx, [{type:"text",text:"diagnose this"}, {type:"image",data:"<b64>",mimeType:"image/png"}], ...)` (flat ACP `ImageContent` schema)
 
 #### Scenario: Attachment fetch failure falls back to text-only
 

@@ -1,6 +1,6 @@
 ## 0. Pre-flight
 
-- [ ] 0.1 驗證 claude-agent-acp 2.x 對 `session/prompt` image content block 的支援：手動跑一個含 image 的 prompt，確認 RunCompleted 不報錯。記下實測 ACP 版本與 Claude model — **由 Phase 8.2 QA 涵蓋**（CU01 真實 ACP run 帶 PNG，PASS = 確認支援）
+- [x] 0.1 驗證 claude-agent-acp 對 `session/prompt` image content block 的支援 — round 1 QA 抓到 perch 用錯 wire format（Anthropic nested vs ACP flat）；round 2 (`tests/test-report-2026-05-01-image-upload-round2-1022.md`) 全綠，實測版本 `claude-agent-acp 0.31.4`（promptCapabilities.image=true），flat shape `{type:"image",data:"<b64>",mimeType:"image/png"}` 正確
 - [x] 0.2 解 Open Questions Q1-Q4（見 design.md）— Q1 (允許 image+tool，Phase 0 實測 confirm) / Q2 (Discord 非圖 attachment 靜默 drop) / Q3 (image 不入 tool_events) / Q4 (反向不在本 change) 全部按 design.md 預設值定案
 
 ## 1. 共用：ACP content blocks 抽象
@@ -61,11 +61,11 @@
 
 - [x] 8.1 `tests/test-chat-upload.md` 建立，含 CU01（純文字+1 PNG）/ CU02（限制四種：超量/超大/MIME/magic mismatch）/ CU03（drag-drop）/ CU04（paste）/ CU05（Discord 收圖）/ CU06（Discord fetch fail fallback），加共通前置 + 備註
 - [x] 8.1.5 對應 phase 3.5/3.6/4.7/4.8/5.6/5.7 全部由本 test 檔涵蓋
-- [ ] 8.2 全套 QA cycle 跑：MT01-12（純文字回歸）、CU01-CU06（新功能）、AT-E01-04（observability 不受影響）
-- [ ] 8.3 對比 archive 後的舊報告確認無 regression（`tests/test-report-2026-04-30-full-0032-round3.md`）
+- [x] 8.2 全套 QA cycle — round 1 (`tests/test-report-2026-05-01-image-upload-1009.md`) 抓到 ACP wire format bug；round 2 (`tests/test-report-2026-05-01-image-upload-round2-1022.md`) 6/6 PASS（CU01-06）+ sanity (MT12/T55-multi/T56/T19/AT-E01/AT-E03) 全 PASS
+- [x] 8.3 對比 archive 後的舊報告確認無 regression — round 2 sanity 涵蓋 MT12 / T55-multi / T56 / T19 / AT-E03，全 PASS；模型回覆內容正確（black/dark 描述 1×1 PNG）證明 image bytes 完整 round-trip
 
 ## 9. 結束條件
 
-- [ ] 9.1 全套 QA cycle zero FAIL / zero env-fix-by-qa SKIP
+- [x] 9.1 全套 QA cycle zero FAIL / zero env-fix-by-qa SKIP — round 2 達成
 - [x] 9.2 README、Settings UI 與 code 行為一致 — README Chat UI 段加 bullet；SettingsPanel General Tab 加 Chat Upload 三個 field；前後端對齊 chat 設定 schema
-- [ ] 9.3 archive 完成
+- [x] 9.3 archive 完成 — change dir 移到 `openspec/changes/archive/`，2 個 capability delta 合併進 `openspec/specs/{chat-api-acp,discord-acp-session}/spec.md`（各加 1 個 ADDED Requirement）

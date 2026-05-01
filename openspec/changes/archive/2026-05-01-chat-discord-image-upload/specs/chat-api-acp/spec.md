@@ -12,7 +12,7 @@
 #### Scenario: Query with one image is forwarded to ACP
 
 - **WHEN** the client posts `{"query":"what's wrong here?","attachments":[{"filename":"err.png","mime_type":"image/png","data_base64":"<b64>"}]}`
-- **THEN** the server SHALL call `PromptWithContent(ctx, [{type:"text",text:"what's wrong here?"}, {type:"image",source:{type:"base64",media_type:"image/png",data:"<b64>"}}], ...)`
+- **THEN** the server SHALL call `PromptWithContent(ctx, [{type:"text",text:"what's wrong here?"}, {type:"image",data:"<b64>",mimeType:"image/png"}], ...)` (flat ACP `ImageContent` schema, NOT Anthropic-style nested `source`)
 
 #### Scenario: Server validates MIME, size, and count
 
