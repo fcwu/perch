@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/base64"
+	"encoding/json"
 	"strings"
 	"testing"
 )
@@ -141,11 +142,36 @@ func TestAttachmentsToACPBlocks(t *testing.T) {
 	if len(blocks) != 2 {
 		t.Fatalf("len = %d, want 2", len(blocks))
 	}
-	if blocks[0].Type != "image" || blocks[0].Source.MediaType != "image/png" || blocks[0].Source.Data != "AAAA" {
+	if blocks[0].Type != "image" || blocks[0].MimeType != "image/png" || blocks[0].Data != "AAAA" {
 		t.Errorf("block[0] = %+v", blocks[0])
 	}
-	if blocks[1].Source.MediaType != "image/jpeg" || blocks[1].Source.Data != "BBBB" {
+	if blocks[1].MimeType != "image/jpeg" || blocks[1].Data != "BBBB" {
 		t.Errorf("block[1] = %+v", blocks[1])
+	}
+}
+
+// TestACPContent_WireFormat asserts the JSON shape on the wire matches the
+// ACP ImageContent / TextContent schema (flat shape, NOT Anthropic-style
+// nested source). This is a regression guard against the bug found by QA on
+// 2026-05-01 where perch shipped Anthropic-style {source:{type,media_type,data}}
+// and claude-agent-acp 0.31.4 rejected the prompt with "Invalid params".
+func TestACPContent_WireFormat(t *testing.T) {
+	tBlock := ACPContent{Type: "text", Text: "hi"}
+	gotText, _ := json.Marshal(tBlock)
+	wantText := `{"type":"text","text":"hi"}`
+	if string(gotText) != wantText {
+		t.Errorf("text wire = %s, want %s", gotText, wantText)
+	}
+
+	iBlock := ACPContent{Type: "image", Data: "AAAA", MimeType: "image/png"}
+	gotImg, _ := json.Marshal(iBlock)
+	wantImg := `{"type":"image","data":"AAAA","mimeType":"image/png"}`
+	if string(gotImg) != wantImg {
+		t.Errorf("image wire = %s, want %s", gotImg, wantImg)
+	}
+	// Negative assertion: must NOT contain Anthropic-style "source" or "media_type".
+	if strings.Contains(string(gotImg), "source") || strings.Contains(string(gotImg), "media_type") {
+		t.Errorf("image wire should not contain Anthropic-style fields, got: %s", gotImg)
 	}
 }
 

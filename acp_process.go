@@ -16,18 +16,15 @@ import (
 )
 
 // ACPContent is a single content block in an ACP session/prompt request.
-// Either Text (for type="text") or Source (for type="image") is set, not both.
+// The on-the-wire shape is flat per ACP schema's ImageContent / TextContent
+// (NOT Anthropic API's nested {source:{...}} shape):
+//   text:  {"type":"text","text":"..."}
+//   image: {"type":"image","data":"<base64>","mimeType":"image/png"}
 type ACPContent struct {
-	Type   string          `json:"type"`             // "text" | "image"
-	Text   string          `json:"text,omitempty"`   // when Type=="text"
-	Source *ACPImageSource `json:"source,omitempty"` // when Type=="image"
-}
-
-// ACPImageSource describes an inline base64 image attached to a prompt.
-type ACPImageSource struct {
-	Type      string `json:"type"`       // "base64"
-	MediaType string `json:"media_type"` // e.g. "image/png"
-	Data      string `json:"data"`       // raw base64, no "data:" prefix
+	Type     string `json:"type"`               // "text" | "image"
+	Text     string `json:"text,omitempty"`     // when Type=="text"
+	Data     string `json:"data,omitempty"`     // raw base64 (no data: prefix), when Type=="image"
+	MimeType string `json:"mimeType,omitempty"` // e.g. "image/png", when Type=="image"
 }
 
 // ACPProcess manages a long-lived claude-agent-acp subprocess per Discord channel.

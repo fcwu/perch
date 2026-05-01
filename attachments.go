@@ -111,8 +111,9 @@ func AttachmentsToACPBlocks(atts []Attachment) []ACPContent {
 	blocks := make([]ACPContent, 0, len(atts))
 	for _, a := range atts {
 		blocks = append(blocks, ACPContent{
-			Type:   "image",
-			Source: &ACPImageSource{Type: "base64", MediaType: a.MimeType, Data: a.DataBase64},
+			Type:     "image",
+			Data:     a.DataBase64,
+			MimeType: a.MimeType,
 		})
 	}
 	return blocks

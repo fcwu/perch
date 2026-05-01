@@ -481,8 +481,9 @@ func (d *DiscordSessionManager) fetchImageAttachments(atts []*discordgo.MessageA
 			continue
 		}
 		blocks = append(blocks, ACPContent{
-			Type:   "image",
-			Source: &ACPImageSource{Type: "base64", MediaType: got, Data: base64.StdEncoding.EncodeToString(data)},
+			Type:     "image",
+			Data:     base64.StdEncoding.EncodeToString(data),
+			MimeType: got,
 		})
 		totalKept++
 	}

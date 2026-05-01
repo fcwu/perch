@@ -430,11 +430,8 @@ func TestACPProcess_PromptWithContent_ImageBlock(t *testing.T) {
 		if params.Prompt[0].Type != "text" || params.Prompt[0].Text != "what's wrong?" {
 			t.Errorf("block[0] = %+v, want text/'what's wrong?'", params.Prompt[0])
 		}
-		if params.Prompt[1].Type != "image" || params.Prompt[1].Source == nil {
-			t.Errorf("block[1] = %+v, want image with Source", params.Prompt[1])
-		}
-		if params.Prompt[1].Source.Type != "base64" || params.Prompt[1].Source.MediaType != "image/png" || params.Prompt[1].Source.Data != "AAAA" {
-			t.Errorf("block[1].Source = %+v, want base64/image-png/AAAA", params.Prompt[1].Source)
+		if params.Prompt[1].Type != "image" || params.Prompt[1].Data != "AAAA" || params.Prompt[1].MimeType != "image/png" {
+			t.Errorf("block[1] = %+v, want flat image-png/AAAA", params.Prompt[1])
 		}
 
 		srv.sendResponse(*req.ID, map[string]any{"status": "completed"})
@@ -442,7 +439,7 @@ func TestACPProcess_PromptWithContent_ImageBlock(t *testing.T) {
 
 	blocks := []ACPContent{
 		{Type: "text", Text: "what's wrong?"},
-		{Type: "image", Source: &ACPImageSource{Type: "base64", MediaType: "image/png", Data: "AAAA"}},
+		{Type: "image", Data: "AAAA", MimeType: "image/png"},
 	}
 	if _, err := proc.PromptWithContent(ctx, blocks, nil, nil, nil); err != nil {
 		_ = fmt.Sprintf("prompt err (expected): %v", err)

@@ -1,6 +1,7 @@
 ---
 name: deployer
 description: Builds and deploys the perch Docker image to a target environment. Reads environment config from tests/.env.<name>.md. Supports building from local repo, GitHub latest, or a pre-built image tag. Use when you need to deploy a new version to staging or production.
+model: sonnet
 ---
 
 將 perch 建置並部署到指定環境。
