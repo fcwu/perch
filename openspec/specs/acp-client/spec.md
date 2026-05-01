@@ -33,13 +33,26 @@ The system SHALL cancel the ACP run stream when the caller's context is cancelle
 - **WHEN** the caller cancels the context while a run is streaming
 - **THEN** the client stops reading the SSE stream and returns a context cancellation error
 
-### Requirement: ACP base URL is configurable via environment variable
-The system SHALL read the ACP server URL from the `ACP_BASE_URL` environment variable at startup.
+### Requirement: ACP subprocess executable is selected by the active runtime
 
-#### Scenario: ACP_BASE_URL is set
-- **WHEN** `ACP_BASE_URL=http://localhost:8080` is set in the environment
-- **THEN** all ACP client requests are sent to that base URL
+The ACP subprocess executable + args SHALL be selected by the active `AgentRuntime` (`runtime.ACPExecutable`, `runtime.ACPArgs`). The legacy `ACP_EXECUTABLE` env var SHALL act as a developer override of the executable only; a new `ACP_EXECUTABLE_ARGS` (JSON array) MAY override the args.
 
-#### Scenario: ACP_BASE_URL is not set
-- **WHEN** `ACP_BASE_URL` is absent from the environment
-- **THEN** the ACP client is not initialized and Discord falls back to PTY mode (if available) or returns a configuration error
+> Replaces the prior `ACP_BASE_URL` Requirement (HTTP-based ACP placeholder), which was never wired and predates the stdio JSON-RPC subprocess model.
+
+#### Scenario: Default executable comes from runtime
+
+- **WHEN** the chat-API or IM adapter starts an ACP session
+- **AND** neither `ACP_EXECUTABLE` nor `ACP_EXECUTABLE_ARGS` is set
+- **THEN** the subprocess is `runtime.ACPExecutable runtime.ACPArgs...`
+- **AND** for `AGENT_RUNTIME=claude` that is `claude-agent-acp` (no extra args)
+- **AND** for `AGENT_RUNTIME=opencode` that is `opencode acp --log-level WARN`
+
+#### Scenario: Env override of executable only
+
+- **WHEN** `ACP_EXECUTABLE=/opt/my-fork/claude-agent-acp` is set
+- **THEN** the spawned binary is `/opt/my-fork/claude-agent-acp` with `runtime.ACPArgs` unchanged
+
+#### Scenario: Env override of both executable and args
+
+- **WHEN** `ACP_EXECUTABLE=opencode` and `ACP_EXECUTABLE_ARGS=["acp","--log-level","DEBUG"]` are set
+- **THEN** the spawned binary is `opencode acp --log-level DEBUG`
