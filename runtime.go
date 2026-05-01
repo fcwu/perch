@@ -16,6 +16,13 @@ type AgentRuntime struct {
 	ProjectConfigFile string
 	AssetDir          string
 	SupportsHooks     bool
+
+	// ACPExecutable is the binary spawned for chat-API / Discord / Telegram
+	// ACP sessions when this runtime is active. ACPArgs are passed before any
+	// runtime-level ACP_EXECUTABLE_ARGS override; together they form the
+	// argv used by exec.Command.
+	ACPExecutable string
+	ACPArgs       []string
 }
 
 func loadAgentRuntime() (AgentRuntime, error) {
@@ -35,6 +42,8 @@ func loadAgentRuntime() (AgentRuntime, error) {
 			ProjectConfigFile: "settings.json",
 			AssetDir:          "/app/perch-claude",
 			SupportsHooks:     true,
+			ACPExecutable:     "claude-agent-acp",
+			ACPArgs:           nil,
 		}, nil
 	case "opencode":
 		return AgentRuntime{
@@ -45,6 +54,10 @@ func loadAgentRuntime() (AgentRuntime, error) {
 			ProjectConfigFile: ".opencode.json",
 			AssetDir:          "/app/perch-opencode",
 			SupportsHooks:     false,
+			ACPExecutable:     "opencode",
+			// --log-level WARN: opencode acp writes INFO logs to stdout by
+			// default, which corrupts the JSON-RPC stream perch reads.
+			ACPArgs: []string{"acp", "--log-level", "WARN"},
 		}, nil
 	default:
 		return AgentRuntime{}, fmt.Errorf("unsupported AGENT_RUNTIME %q", name)

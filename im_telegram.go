@@ -29,8 +29,8 @@ type TelegramAdapter struct {
 	bot *telebot.Bot
 }
 
-func newTelegramAdapter(token string, chatID int64, workdir string, logger *slog.Logger) *TelegramAdapter {
-	pool := newACPSessionPool("", workdir, logger)
+func newTelegramAdapter(runtime AgentRuntime, token string, chatID int64, workdir string, logger *slog.Logger) *TelegramAdapter {
+	pool := newACPSessionPool(runtime.ACPExecutable, runtime.ACPArgs, workdir, logger)
 	return &TelegramAdapter{
 		token:  token,
 		chatID: chatID,

@@ -192,7 +192,7 @@ func TestACPRunTimeout(t *testing.T) {
 // ============================================================
 
 func TestDiscordACPMode(t *testing.T) {
-	sess := newDiscordSession(AgentRuntime{}, "ch-acp", "fake-agent-acp", "", slog.Default())
+	sess := newDiscordSession(AgentRuntime{ACPExecutable: "fake-agent-acp"}, "ch-acp", "", slog.Default())
 	if sess.acpProcess == nil {
 		t.Error("ACP mode: acpProcess should be non-nil")
 	}
@@ -295,7 +295,7 @@ func TestDiscordACPServerUnreachable(t *testing.T) {
 
 	// Session with a process that is not running (needs to EnsureRunning) but
 	// will fail because the executable doesn't exist.
-	proc := NewACPProcess("/nonexistent-binary-xyz", t.TempDir(), slog.Default())
+	proc := NewACPProcess("/nonexistent-binary-xyz", nil, t.TempDir(), slog.Default())
 	sess := &discordSession{channelID: "ch-err", acpProcess: proc}
 
 	rt := &mockDiscordRT{}
@@ -481,10 +481,9 @@ func TestDiscordACPDMAllowlist(t *testing.T) {
 	dgo.State.User = &discordgo.User{ID: "bot-001"}
 
 	mgr := &DiscordSessionManager{
-		runtime:          AgentRuntime{},
+		runtime:          AgentRuntime{ACPExecutable: "/nonexistent-binary-xyz"}, // fails if actually invoked
 		sessions:         make(map[string]*discordSession),
 		channelPrivate:   make(map[string]bool),
-		acpExecutable:    "/nonexistent-binary-xyz", // will fail if actually invoked
 		allowedDMUserIDs: map[string]struct{}{"111": {}},
 		logger:           slog.Default(),
 		dgo:              dgo,

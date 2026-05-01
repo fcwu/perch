@@ -23,8 +23,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     apt-get install -y --no-install-recommends nodejs && \
     rm -rf /var/lib/apt/lists/*
 RUN npm install -g @anthropic-ai/claude-code @agentclientprotocol/claude-agent-acp
-RUN curl -fsSL https://api.github.com/repos/anomalyco/opencode/releases/latest | \
-    jq -r '(.assets[] | select(.name=="opencode-linux-arm64.tar.gz") | .browser_download_url)' | \
+RUN ARCH=$(dpkg --print-architecture) && \
+    case "$ARCH" in \
+      amd64) OC_ASSET="opencode-linux-x64.tar.gz" ;; \
+      arm64) OC_ASSET="opencode-linux-arm64.tar.gz" ;; \
+      *) echo "unsupported architecture for opencode: $ARCH" && exit 1 ;; \
+    esac && \
+    curl -fsSL https://api.github.com/repos/sst/opencode/releases/latest | \
+    jq -r --arg n "$OC_ASSET" '(.assets[] | select(.name==$n) | .browser_download_url)' | \
     xargs -I {} sh -lc 'tmp=$(mktemp -d) && curl -fsSL "{}" -o "$tmp/opencode.tgz" && tar -xzf "$tmp/opencode.tgz" -C /usr/local/bin && chmod +x /usr/local/bin/opencode && rm -rf "$tmp"'
 
 WORKDIR /app

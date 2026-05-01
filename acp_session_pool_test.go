@@ -37,7 +37,7 @@ func newPreRunningACPProcess(t *testing.T) *ACPProcess {
 // "already running" ACPProcess instances, so no real subprocess is needed.
 func newPoolWithFakeProcs(t *testing.T) *ACPSessionPool {
 	t.Helper()
-	pool := newACPSessionPool("", t.TempDir(), slog.Default())
+	pool := newACPSessionPool("", nil, t.TempDir(), slog.Default())
 	var callCount atomic.Int32
 	pool.processFactory = func() *ACPProcess {
 		callCount.Add(1)

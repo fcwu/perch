@@ -134,7 +134,7 @@ func main() {
 			logger.Error("invalid TELEGRAM_CHAT_ID", "value", telegramChatStr, "err", err)
 			os.Exit(1)
 		}
-		im.addAdapter(newTelegramAdapter(telegramToken, chatID, workdir, logger.Logger))
+		im.addAdapter(newTelegramAdapter(runtime, telegramToken, chatID, workdir, logger.Logger))
 	}
 	if im != nil {
 		im.start(IMConfig{})
@@ -187,7 +187,7 @@ func main() {
 	}
 
 	srv := newServerWithMode(pm, auth, im, sessProvider, userSessions, gitlabAuth, adminAuth, adminHub, store, userRL, sm, mode, logger.Logger)
-	srv.chatSessions = newACPUserSessionManager(workdir, store, adminHub, logger.Logger)
+	srv.chatSessions = newACPUserSessionManager(runtime, workdir, store, adminHub, logger.Logger)
 
 	// Apply rate limiting to sensitive endpoints only
 	sensitivePaths := map[string]bool{"/login": true, "/bootstrap": true}

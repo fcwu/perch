@@ -6,45 +6,41 @@
 
 ## 1. Runtime abstraction：擴 ACP 欄位
 
-- [ ] 1.1 `runtime.go::AgentRuntime` 加 `ACPExecutable string` + `ACPArgs []string`
-- [ ] 1.2 `loadAgentRuntime`：`claude` case 填 `ACPExecutable:"claude-agent-acp"`、`opencode` case 填 `ACPExecutable:"opencode", ACPArgs:[]string{"acp"}`
-- [ ] 1.3 `runtime_test.go` 新增 case：`TestLoadAgentRuntime_ACPFields` 驗 `claude` / `opencode` 兩個 runtime 各自正確；missing AGENT_RUNTIME 預設 claude
+- [x] 1.1 `runtime.go::AgentRuntime` 加 `ACPExecutable string` + `ACPArgs []string`
+- [x] 1.2 `loadAgentRuntime`：`claude` → `ACPExecutable:"claude-agent-acp"`；`opencode` → `ACPExecutable:"opencode", ACPArgs:["acp","--log-level","WARN"]`
+- [x] 1.3 `runtime_test.go::TestLoadAgentRuntime_ACPFields` 三個 sub-case（default-claude / claude-explicit / opencode）全 PASS
 
 ## 2. ACP path：吃 runtime 而非 hardcode
 
-- [ ] 2.1 `acp_process.go::NewACPProcess` 簽名加 `args []string`，`exec.Command(executable, args...)`
-- [ ] 2.2 `ACP_EXECUTABLE` env var 改成 override（在 `NewACPProcess` 開頭：env 設了則覆蓋 args 與 executable 兩者，分別由 `ACP_EXECUTABLE` 與新增的 `ACP_EXECUTABLE_ARGS` 控制；若只設 executable，args 沿用 caller 傳入）
-- [ ] 2.3 `acp_session_pool.go::newACPSessionPool` 簽名加 `extraArgs []string`，forward 給 `NewACPProcess`
-- [ ] 2.4 `chat_api_acp.go::newACPUserSessionManager` 簽名加 `runtime AgentRuntime`；起 pool 時傳 `runtime.ACPExecutable, runtime.ACPArgs`
-- [ ] 2.5 `im_discord.go::DiscordSessionManager` 把 `acpExecutable string` 換成持有 `runtime AgentRuntime`（`runtime` 已在 struct 內），起 session 時把兩個欄位傳給 pool
+- [x] 2.1 `acp_process.go::NewACPProcess(executable, args, workdir, logger)` 接受 args slice；`exec.Command(p.executable, p.args...)`
+- [x] 2.2 `ACP_EXECUTABLE` env var 仍可覆蓋 executable；新增 `ACP_EXECUTABLE_ARGS`（JSON array）覆蓋 args；invalid JSON warns 並沿用 caller args
+- [x] 2.3 `acp_session_pool.go::newACPSessionPool(executable, args, workdir, logger)` 接 args 並 forward 給 `NewACPProcess`
+- [x] 2.4 `chat_api_acp.go::newACPUserSessionManager(runtime, ...)` + `im_telegram.go::newTelegramAdapter(runtime, ...)` 接受 runtime；pool 收 `runtime.ACPExecutable + runtime.ACPArgs`
+- [x] 2.5 `im_discord.go`：移除 dead `acpExecutable` 欄位；`newDiscordSession(runtime, channelID, workdir, logger)` 直接走 runtime ACP path
 
 ## 3. main.go：wire runtime 進去
 
-- [ ] 3.1 `main.go` 把 `runtime` 傳進 `newACPUserSessionManager(workdir, store, adminHub, logger, runtime)`
-- [ ] 3.2 Discord/Telegram constructor 已經吃 runtime — 確認沒漏
+- [x] 3.1 `srv.chatSessions = newACPUserSessionManager(runtime, workdir, store, adminHub, logger.Logger)`
+- [x] 3.2 `im.addAdapter(newTelegramAdapter(runtime, telegramToken, chatID, workdir, logger.Logger))`；Discord 已持有 runtime（既有）
 
 ## 4. Dockerfile：multi-arch + sst/opencode
 
-- [ ] 4.1 把 `anomalyco/opencode` 換成 `sst/opencode` GitHub releases
-- [ ] 4.2 `dpkg --print-architecture` 對 amd64 → `linux-x64.tar.gz`，arm64 → `linux-arm64.tar.gz`，其他 → `exit 1`
-- [ ] 4.3 build image 在 amd64 host 確認 `docker exec ... opencode --version` 不再 EXEC error
-- [ ] 4.4 build image 在 arm64 host（QNAP / Graviton 模擬）也試一次
+- [x] 4.1 換 `anomalyco/opencode` → `sst/opencode` GitHub releases
+- [x] 4.2 `dpkg --print-architecture`：amd64 → `opencode-linux-x64.tar.gz`、arm64 → `opencode-linux-arm64.tar.gz`、其他 → `exit 1`
+- [ ] 4.3 build image 在 amd64 host 確認 `docker exec ... opencode --version` 不再 EXEC error — 留 phase 6 QA 驗
+- [ ] 4.4 build image 在 arm64 host（QNAP / Graviton）— 留後續驗（不 block 本 change）
 
 ## 5. Settings UI / 文件
 
-- [ ] 5.1 `frontend/src/SettingsPanel.tsx` Agent Runtime 描述刪除「OpenCode 限 web /ws」誤導文字（如果有；目前是 RadioGroup 沒 description，可能只需 README 改）
-- [ ] 5.2 README.md「Agent Runtime」段落補 bullet：「`AGENT_RUNTIME=opencode` 後 chat-API、Discord、Telegram 也會跟著切；切換需重啟」
-- [ ] 5.3 README.md `ACP_EXECUTABLE` / `ACP_EXECUTABLE_ARGS` 在「環境變數」段下「可在 Settings UI 調整」**之外**新增「Advanced overrides」小段（dev 才用）
+- [x] 5.1 `SettingsPanel.tsx` 既有 RadioGroup 沒 description text，無需改動（沒誤導文字可砍）
+- [x] 5.2 README.md「Agent Runtime」段補 「runtime 影響範圍」note + 「OpenCode 額外注意」段（免費 vs 付費、auth login 流程、mode 差異 + 對應行為）
+- [x] 5.3 README.md「Advanced overrides」表格涵蓋 `ACP_EXECUTABLE` + `ACP_EXECUTABLE_ARGS`
 
 ## 6. 測試
 
-- [ ] 6.1 撰寫 `tests/test-multi-agent-runtime.md`：
-  - **MR01**：`AGENT_RUNTIME` 未設 → 預設 claude；chat-API + Discord 走 `claude-agent-acp`（同既有 baseline）
-  - **MR02**：`AGENT_RUNTIME=opencode` 重啟 → web `/ws` PTY 跑 `opencode` CLI；chat-API ACP subprocess 是 `opencode acp`
-  - **MR03**：`AGENT_RUNTIME=opencode` 下跑 CU01（純文字 + image）→ OpenCode ACP 接受並回應（接受度由 phase 0 決定的 baseline；若 OpenCode image 不接受可在本 case 標 SKIP-as-needs-user-action）
-  - **MR04**：`ACP_EXECUTABLE=claude-agent-acp` + `AGENT_RUNTIME=opencode` 同設 → executable override 生效，subprocess 是 claude（驗 D6 precedence）
-- [ ] 6.2 全套 QA cycle 跑：MR01-04（新功能）+ MT12 / T55-multi / T56 / T19 / CU01 sanity（regression）
-- [ ] 6.3 對比 archive 後的 `tests/test-report-2026-05-01-image-upload-round2-1022.md` 確認 claude path 無 regression
+- [x] 6.1 `tests/test-multi-agent-runtime.md` 建立：MR01（claude default baseline）/ MR02（opencode subprocess switch）/ MR03（opencode + image upload）/ MR04（ACP_EXECUTABLE env override precedence）+ Sanity 段
+- [ ] 6.2 全套 QA cycle 跑 MR01-04 + MT12 / T55-multi / T56 / T19 / CU01 sanity
+- [ ] 6.3 對比 `tests/test-report-2026-05-01-image-upload-round2-1022.md` 確認 claude path 無 regression
 
 ## 7. 結束條件
 

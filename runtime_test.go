@@ -1,6 +1,9 @@
 package main
 
-import "testing"
+import (
+	"reflect"
+	"testing"
+)
 
 func TestAgentRuntimeDefaultIsClaude(t *testing.T) {
 	t.Setenv("AGENT_RUNTIME", "")
@@ -58,6 +61,37 @@ func TestRunAgentReturnsOpenCodeCommand(t *testing.T) {
 	}
 	if len(args) != 4 || args[0] != "run" || args[1] != "--agent" || args[2] != "as-query" || args[3] != "what is X?" {
 		t.Errorf("unexpected args: %v", args)
+	}
+}
+
+// TestLoadAgentRuntime_ACPFields asserts that ACPExecutable + ACPArgs are
+// populated correctly per AGENT_RUNTIME so the chat-API / IM ACP path picks
+// the right binary instead of always spawning claude-agent-acp.
+func TestLoadAgentRuntime_ACPFields(t *testing.T) {
+	cases := []struct {
+		name        string
+		envValue    string
+		wantExe     string
+		wantArgs    []string
+	}{
+		{"default-claude", "", "claude-agent-acp", nil},
+		{"claude-explicit", "claude", "claude-agent-acp", nil},
+		{"opencode", "opencode", "opencode", []string{"acp", "--log-level", "WARN"}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			t.Setenv("AGENT_RUNTIME", c.envValue)
+			rt, err := loadAgentRuntime()
+			if err != nil {
+				t.Fatalf("loadAgentRuntime: %v", err)
+			}
+			if rt.ACPExecutable != c.wantExe {
+				t.Errorf("ACPExecutable = %q, want %q", rt.ACPExecutable, c.wantExe)
+			}
+			if !reflect.DeepEqual(rt.ACPArgs, c.wantArgs) {
+				t.Errorf("ACPArgs = %v, want %v", rt.ACPArgs, c.wantArgs)
+			}
+		})
 	}
 }
 

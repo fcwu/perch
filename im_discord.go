@@ -234,11 +234,11 @@ type discordSession struct {
 	last *discordPending
 }
 
-func newDiscordSession(runtime AgentRuntime, channelID string, executable, workdir string, logger *slog.Logger) *discordSession {
+func newDiscordSession(runtime AgentRuntime, channelID, workdir string, logger *slog.Logger) *discordSession {
 	return &discordSession{
 		channelID:  channelID,
 		runtime:    runtime,
-		acpProcess: NewACPProcess(executable, workdir, logger),
+		acpProcess: NewACPProcess(runtime.ACPExecutable, runtime.ACPArgs, workdir, logger),
 	}
 }
 
@@ -259,7 +259,6 @@ type DiscordSessionManager struct {
 	settings         *SettingsManager // optional; nil = use built-in defaults
 
 	mu             sync.Mutex
-	acpExecutable  string // path to claude-agent-acp binary (default from ACP_EXECUTABLE / "claude-agent-acp")
 	dgo            *discordgo.Session
 	sessions       map[string]*discordSession // channelID → session
 	channelPrivate map[string]bool            // channelID → isPrivate, cached
@@ -614,7 +613,7 @@ func (d *DiscordSessionManager) getOrCreateSession(channelID string) *discordSes
 	if sess, ok := d.sessions[channelID]; ok {
 		return sess
 	}
-	sess := newDiscordSession(d.runtime, channelID, d.acpExecutable, d.workdir, d.logger)
+	sess := newDiscordSession(d.runtime, channelID, d.workdir, d.logger)
 	d.sessions[channelID] = sess
 	return sess
 }

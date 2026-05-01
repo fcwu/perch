@@ -275,9 +275,11 @@ Chat UI 提供多輪對話支援，使用者可以追問後續問題，agent 會
 | Runtime | 設定值 | 預設 | 說明 |
 |---------|--------|------|------|
 | Claude Code | `claude` | yes | 支援 `.claude/skills/` 與 `CLAUDE_ARGS` |
-| OpenCode | `opencode` | no | 使用 workspace 的 `.opencode/` 設定 |
+| OpenCode | `opencode` | no | 使用 workspace 的 `.opencode/` 設定；ACP 透過 `opencode acp` |
 
-在啟動時以 `AGENT_RUNTIME` 指定；CLI 參數（`CLAUDE_ARGS` / `OPENCODE_ARGS`）可在 Settings 熱改。
+啟動時以 `AGENT_RUNTIME` 指定；切換需重啟（`AGENT_RUNTIME` 在啟動才讀，runtime-time 不變）。CLI 參數（`CLAUDE_ARGS` / `OPENCODE_ARGS`）可在 Settings 熱改。
+
+> **runtime 影響範圍**：選定後 web `/ws` 主終端機、chat-API（`/chat`）、Discord、Telegram **全部**走該 runtime 的 ACP subprocess。Image 內預裝兩個 binary（`claude-agent-acp` 與 `opencode`），由 `AGENT_RUNTIME` 在 startup 決定哪個活。
 
 ```bash
 # Claude Code 跳過權限確認（在 Settings → Agent → Args 設定即可，不需重啟）
@@ -286,6 +288,19 @@ CLAUDE_ARGS=--dangerously-skip-permissions
 # 使用 OpenCode
 docker run -d -e AGENT_RUNTIME=opencode ...
 ```
+
+### OpenCode 額外注意
+
+- **免費模型 credential-less**：`opencode/gpt-5-nano`、`opencode/hy3-preview-free` 等可直接用，不需登入
+- **付費模型（Anthropic、OpenAI、Google 等）需登入**：在 host 跑一次 `opencode auth login`，將 `~/.local/share/opencode` 掛進容器；或直接在容器內以 `docker exec -it ... opencode auth login` 完成 OAuth flow（auth.json 寫進掛載 volume 才會持久）
+- **mode 差異**：OpenCode 用 `build`/`plan` mode（不是 Claude 的 `bypassPermissions`/`acceptEdits`）。perch 仍會嘗試 set `bypassPermissions`，opencode 會 reject 並 warning，但 default `build` mode 已能執行 tools，**不影響功能**
+
+### Advanced overrides（dev / debugging）
+
+| 變數 | 用途 |
+|------|------|
+| `ACP_EXECUTABLE` | 覆蓋 `runtime.ACPExecutable`（指 fork 路徑或 mock subprocess）|
+| `ACP_EXECUTABLE_ARGS` | 覆蓋 `runtime.ACPArgs`（JSON array，如 `["acp","--log-level","DEBUG"]`）|
 
 ## 排程器
 

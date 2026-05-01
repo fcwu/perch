@@ -102,12 +102,12 @@ type ACPUserSessionManager struct {
 	sessions map[string]*acpChatSession // userID → active session
 }
 
-func newACPUserSessionManager(workdir string, store *Store, adminHub *ManagementHub, logger *slog.Logger) *ACPUserSessionManager {
+func newACPUserSessionManager(runtime AgentRuntime, workdir string, store *Store, adminHub *ManagementHub, logger *slog.Logger) *ACPUserSessionManager {
 	if logger == nil {
 		logger = slog.Default()
 	}
 	return &ACPUserSessionManager{
-		pool:     newACPSessionPool("", workdir, logger),
+		pool:     newACPSessionPool(runtime.ACPExecutable, runtime.ACPArgs, workdir, logger),
 		store:    store,
 		adminHub: adminHub,
 		logger:   logger,

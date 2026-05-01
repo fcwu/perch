@@ -27,12 +27,14 @@ type ACPContent struct {
 	MimeType string `json:"mimeType,omitempty"` // e.g. "image/png", when Type=="image"
 }
 
-// ACPProcess manages a long-lived claude-agent-acp subprocess per Discord channel.
+// ACPProcess manages a long-lived ACP subprocess (claude-agent-acp, opencode acp,
+// or any other ACP-compatible binary) per session key.
 // Communication is ACP JSON-RPC 2.0 over stdin/stdout (line-delimited JSON).
 // Multi-turn conversation context is preserved across Prompt() calls within one session.
 // All exported methods are safe for concurrent use.
 type ACPProcess struct {
 	executable string
+	args       []string // extra args before any user-supplied prompt args (e.g. ["acp","--log-level","WARN"] for opencode)
 	workdir    string
 	logger     *slog.Logger
 
@@ -72,17 +74,32 @@ type acpRPCError struct {
 	Message string `json:"message"`
 }
 
-// NewACPProcess creates an ACPProcess that will fork executable (default from
-// ACP_EXECUTABLE env var, then "claude-agent-acp").
-func NewACPProcess(executable, workdir string, logger *slog.Logger) *ACPProcess {
-	if executable == "" {
-		executable = os.Getenv("ACP_EXECUTABLE")
+// NewACPProcess creates an ACPProcess for the given executable + args.
+// The ACP_EXECUTABLE env var (and optional ACP_EXECUTABLE_ARGS JSON array)
+// is honoured as a developer override — useful for pointing perch at a fork
+// or a mock subprocess in tests. Caller (typically chat-API or IM adapter)
+// should pass runtime.ACPExecutable + runtime.ACPArgs to drive selection
+// from AGENT_RUNTIME.
+func NewACPProcess(executable string, args []string, workdir string, logger *slog.Logger) *ACPProcess {
+	if v := os.Getenv("ACP_EXECUTABLE"); v != "" {
+		executable = v
 	}
 	if executable == "" {
+		// Last-resort default: behave as before to keep dev workflows working
+		// when neither runtime nor env is set (e.g. unit tests).
 		executable = "claude-agent-acp"
+	}
+	if v := os.Getenv("ACP_EXECUTABLE_ARGS"); v != "" {
+		var parsed []string
+		if err := json.Unmarshal([]byte(v), &parsed); err == nil {
+			args = parsed
+		} else if logger != nil {
+			logger.Warn("ACP_EXECUTABLE_ARGS is not a JSON array; ignoring", "value", v, "err", err)
+		}
 	}
 	return &ACPProcess{
 		executable: executable,
+		args:       args,
 		workdir:    workdir,
 		logger:     logger,
 		pending:    make(map[int64]chan acpMsg),
@@ -117,7 +134,7 @@ func (p *ACPProcess) Start(ctx context.Context) error {
 		return nil
 	}
 
-	cmd := exec.Command(p.executable) // lifecycle managed explicitly; not ctx-bound
+	cmd := exec.Command(p.executable, p.args...) // lifecycle managed explicitly; not ctx-bound
 	if p.workdir != "" {
 		cmd.Dir = p.workdir
 	}

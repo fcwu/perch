@@ -38,6 +38,7 @@ type acpPoolEntry struct {
 // All methods are safe for concurrent use.
 type ACPSessionPool struct {
 	executable      string
+	args            []string
 	workdir         string
 	logger          *slog.Logger
 	idleTimeout     time.Duration
@@ -50,9 +51,10 @@ type ACPSessionPool struct {
 	lru      *list.List // front = most recently used
 }
 
-func newACPSessionPool(executable, workdir string, logger *slog.Logger) *ACPSessionPool {
+func newACPSessionPool(executable string, args []string, workdir string, logger *slog.Logger) *ACPSessionPool {
 	return &ACPSessionPool{
 		executable:  executable,
+		args:        args,
 		workdir:     workdir,
 		logger:      logger,
 		idleTimeout: defaultPoolIdleTimeout,
@@ -67,7 +69,7 @@ func (p *ACPSessionPool) newProcess() *ACPProcess {
 	if p.processFactory != nil {
 		return p.processFactory()
 	}
-	return NewACPProcess(p.executable, p.workdir, p.logger)
+	return NewACPProcess(p.executable, p.args, p.workdir, p.logger)
 }
 
 // Acquire returns the ACPProcess for key, starting one if it does not exist or

@@ -157,7 +157,7 @@ func TestWriteSessionNotFound(t *testing.T) {
 func TestWriteSessionExistsACP(t *testing.T) {
 	mgr := newDiscordSessionManager(AgentRuntime{}, "tok", "", nil, t.TempDir(), slog.Default())
 	mgr.mu.Lock()
-	mgr.sessions["ch1"] = &discordSession{channelID: "ch1", acpProcess: NewACPProcess("", "", slog.Default())}
+	mgr.sessions["ch1"] = &discordSession{channelID: "ch1", acpProcess: NewACPProcess("", nil, "", slog.Default())}
 	mgr.mu.Unlock()
 	// ACP session always returns an error (no writable PTY).
 	err := mgr.WriteSession("ch1", []byte("hello"))
