@@ -146,7 +146,7 @@ func servePromptSuccess(t *testing.T, srv *fakeACPServer, sessionID, text string
 				"content":       map[string]any{"type": "text", "text": text},
 			},
 		})
-		srv.sendResponse(*req.ID, map[string]any{"status": "completed"})
+		srv.sendResponse(rawIDToInt64(req.ID), map[string]any{"status": "completed"})
 	}()
 }
 
@@ -155,7 +155,7 @@ func servePromptError(t *testing.T, srv *fakeACPServer, errMsg string) {
 	t.Helper()
 	go func() {
 		req := srv.readRequest(t)
-		srv.sendError(*req.ID, errMsg)
+		srv.sendError(rawIDToInt64(req.ID), errMsg)
 	}()
 }
 
@@ -250,7 +250,7 @@ func TestDiscordACPHappyPath(t *testing.T) {
 
 	rt := &mockDiscordRT{}
 	dgo := newMockDiscordSession(rt)
-	sess.handleWithACP(dgo, "ch-ok", "msg-001", "ping", nil, nil, slog.Default())
+	sess.handleWithACP(dgo, "ch-ok", "msg-001", "ping", nil, nil, nil, nil, slog.Default())
 
 	added := rt.reactions("ADD_REACTION")
 	removed := rt.reactions("REMOVE_REACTION")
@@ -300,7 +300,7 @@ func TestDiscordACPServerUnreachable(t *testing.T) {
 
 	rt := &mockDiscordRT{}
 	dgo := newMockDiscordSession(rt)
-	sess.handleWithACP(dgo, "ch-err", "msg-002", "ping", nil, nil, slog.Default())
+	sess.handleWithACP(dgo, "ch-err", "msg-002", "ping", nil, nil, nil, nil, slog.Default())
 
 	added := rt.reactions("ADD_REACTION")
 	removed := rt.reactions("REMOVE_REACTION")
@@ -347,7 +347,7 @@ func TestDiscordACPServerError(t *testing.T) {
 
 	rt := &mockDiscordRT{}
 	dgo := newMockDiscordSession(rt)
-	sess.handleWithACP(dgo, "ch-5xx", "msg-003", "ping", nil, nil, slog.Default())
+	sess.handleWithACP(dgo, "ch-5xx", "msg-003", "ping", nil, nil, nil, nil, slog.Default())
 
 	msgs := rt.messages()
 	if len(msgs) == 0 {
@@ -370,7 +370,7 @@ func TestDiscordACPRunFailed(t *testing.T) {
 
 	rt := &mockDiscordRT{}
 	dgo := newMockDiscordSession(rt)
-	sess.handleWithACP(dgo, "ch-fail", "msg-004", "ping", nil, nil, slog.Default())
+	sess.handleWithACP(dgo, "ch-fail", "msg-004", "ping", nil, nil, nil, nil, slog.Default())
 
 	added := rt.reactions("ADD_REACTION")
 	hasCross, hasSpeech := false, false
@@ -415,7 +415,7 @@ func TestDiscordACPRunTimeout(t *testing.T) {
 	dgo := newMockDiscordSession(rt)
 
 	start := time.Now()
-	sess.handleWithACP(dgo, "ch-timeout", "msg-005", "ping", nil, nil, slog.Default())
+	sess.handleWithACP(dgo, "ch-timeout", "msg-005", "ping", nil, nil, nil, nil, slog.Default())
 	if time.Since(start) > 5*time.Second {
 		t.Errorf("should have timed out in ~1s, took %v", time.Since(start))
 	}
@@ -455,7 +455,7 @@ func TestDiscordACPLongReply(t *testing.T) {
 
 	rt := &mockDiscordRT{}
 	dgo := newMockDiscordSession(rt)
-	sess.handleWithACP(dgo, "ch-long", "msg-006", "ping", nil, nil, slog.Default())
+	sess.handleWithACP(dgo, "ch-long", "msg-006", "ping", nil, nil, nil, nil, slog.Default())
 
 	msgs := rt.messages()
 	if len(msgs) < 2 {
@@ -565,12 +565,12 @@ func TestDiscordACPSessionIDMatchesChannelID(t *testing.T) {
 				"content":       map[string]any{"type": "text", "text": "ok"},
 			},
 		})
-		srv.sendResponse(*req.ID, map[string]any{"status": "completed"})
+		srv.sendResponse(rawIDToInt64(req.ID), map[string]any{"status": "completed"})
 	}()
 
 	rt := &mockDiscordRT{}
 	dgo := newMockDiscordSession(rt)
-	sess.handleWithACP(dgo, "ch-session-check", "msg-sid", "ping", nil, nil, slog.Default())
+	sess.handleWithACP(dgo, "ch-session-check", "msg-sid", "ping", nil, nil, nil, nil, slog.Default())
 
 	if gotSessionID != wantSessionID {
 		t.Errorf("prompt session_id = %q, want %q", gotSessionID, wantSessionID)

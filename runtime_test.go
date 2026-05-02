@@ -77,6 +77,7 @@ func TestLoadAgentRuntime_ACPFields(t *testing.T) {
 		{"default-claude", "", "claude-agent-acp", nil},
 		{"claude-explicit", "claude", "claude-agent-acp", nil},
 		{"opencode", "opencode", "opencode", []string{"acp", "--log-level", "WARN"}},
+		{"codex", "codex", "codex-acp", nil},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -92,6 +93,32 @@ func TestLoadAgentRuntime_ACPFields(t *testing.T) {
 				t.Errorf("ACPArgs = %v, want %v", rt.ACPArgs, c.wantArgs)
 			}
 		})
+	}
+}
+
+func TestAgentRuntimeCanSelectCodex(t *testing.T) {
+	t.Setenv("AGENT_RUNTIME", "codex")
+	t.Setenv("CODEX_ARGS", "-c model=\"o3\"")
+
+	rt, err := loadAgentRuntime()
+	if err != nil {
+		t.Fatalf("loadAgentRuntime returned error: %v", err)
+	}
+	if rt.Name != "codex" {
+		t.Fatalf("expected runtime codex, got %q", rt.Name)
+	}
+	if rt.Command != "codex" {
+		t.Fatalf("expected codex command, got %q", rt.Command)
+	}
+	if rt.ProjectConfigDir != ".codex" || rt.ProjectConfigFile != "config.toml" {
+		t.Fatalf("unexpected project config: %s/%s", rt.ProjectConfigDir, rt.ProjectConfigFile)
+	}
+	if rt.AssetDir != "/app/perch-codex" {
+		t.Fatalf("unexpected AssetDir: %s", rt.AssetDir)
+	}
+	args := rt.MainArgs()
+	if len(args) != 2 || args[0] != "-c" || args[1] != "model=\"o3\"" {
+		t.Fatalf("expected Codex args from CODEX_ARGS, got %v", args)
 	}
 }
 

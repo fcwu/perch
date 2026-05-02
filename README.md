@@ -127,7 +127,7 @@ Settings 儲存在 `/data/settings.json`。需要重啟的設定，按 **Save & 
 | `TZ` | `UTC` | 容器時區，影響排程觸發時間，例如 `Asia/Taipei` |
 | `LISTEN_ADDR` | `:8080` | 監聽位址；mTLS 模式需改為 `:8443` |
 | `PERCH_MODE` | `single` | `single`（單使用者）/ `multi`（多使用者） |
-| `AGENT_RUNTIME` | `claude` | `claude` / `opencode` |
+| `AGENT_RUNTIME` | `claude` | `claude` / `opencode` / `codex` |
 | `CLAUDE_WORKDIR` | `/workspace`（若存在） | Claude Code 的起始工作目錄 |
 
 ### GitLab OAuth（多使用者或 GitLab 認證）
@@ -279,18 +279,23 @@ Chat UI 提供多輪對話支援，使用者可以追問後續問題，agent 會
 - **多輪對話**：對話歷史從 SQLite 自動重建，24 小時內的問答會作為上下文附在新查詢前方
 - **自動過期**：超過 24 小時無活動，下一次查詢自動以空白歷史重新開始（上限 20 輪）
 - **新對話按鈕**：可隨時點擊「New conversation」立即清除歷史
-- **上傳圖片**：textarea 旁的 📎 開啟 file picker；也支援把圖片**拖進**輸入框，或按 Cmd/Ctrl+V **貼**剪貼簿截圖。預設可附最多 4 張、單檔 10MB；支援格式：PNG / JPEG / GIF / WebP。Discord 直接 attach 圖片給 bot 也會跟著訊息一起送進 Claude。
+- **上傳附件**：textarea 旁的 📎 開啟 file picker；也支援把檔案**拖進**輸入框，圖片還可以 Cmd/Ctrl+V **貼**剪貼簿截圖。支援圖片（PNG/JPEG/GIF/WebP）與文件（TXT/Markdown/CSV/JSON/PDF 等），預設最多 4 個、單檔 10MB。Discord 直接 attach 檔案給 bot 也支援。
 
 ## Agent Runtime
 
 | Runtime | 設定值 | 預設 | 說明 |
 |---------|--------|------|------|
 | Claude Code | `claude` | yes | 支援 `.claude/skills/` 與 `CLAUDE_ARGS` |
-| OpenCode | `opencode` | no | 使用 workspace 的 `.opencode/` 設定；ACP 透過 `opencode acp` |
+| OpenCode | `opencode` | no | 支援 `.opencode/skills/` 與 `OPENCODE_ARGS` |
+| Codex | `codex` | no | 支援 `.codex/skills/` 與 `CODEX_ARGS`；auth 走 `OPENAI_API_KEY` 或 ChatGPT OAuth |
 
-啟動時以 `AGENT_RUNTIME` 指定；切換需重啟（`AGENT_RUNTIME` 在啟動才讀，runtime-time 不變）。CLI 參數（`CLAUDE_ARGS` / `OPENCODE_ARGS`）可在 Settings 熱改。
+啟動時以 `AGENT_RUNTIME` 指定；切換需重啟（`AGENT_RUNTIME` 在啟動才讀，runtime-time 不變）。CLI 參數（`CLAUDE_ARGS` / `OPENCODE_ARGS` / `CODEX_ARGS`）可在 Settings 熱改。
 
-> **runtime 影響範圍**：選定後 web `/ws` 主終端機、chat-API（`/chat`）、Discord、Telegram **全部**走該 runtime 的 ACP subprocess。Image 內預裝兩個 binary（`claude-agent-acp` 與 `opencode`），由 `AGENT_RUNTIME` 在 startup 決定哪個活。
+> **runtime 影響範圍**
+> - **Web terminal（`/ws`）**：直接 spawn 對應的互動式 CLI（PTY）
+> - **Chat API（`/chat`）、Discord、Telegram**：透過 ACP subprocess 處理對話
+>
+> 切換 runtime 兩者都會跟著變。
 
 ```bash
 # Claude Code 跳過權限確認（在 Settings → Agent → Args 設定即可，不需重啟）
@@ -298,6 +303,9 @@ CLAUDE_ARGS=--dangerously-skip-permissions
 
 # 使用 OpenCode
 docker run -d -e AGENT_RUNTIME=opencode ...
+
+# 使用 Codex（OpenAI）
+docker run -d -e AGENT_RUNTIME=codex -e OPENAI_API_KEY=sk-... ...
 ```
 
 ### OpenCode 額外注意
@@ -305,6 +313,13 @@ docker run -d -e AGENT_RUNTIME=opencode ...
 - **免費模型 credential-less**：`opencode/gpt-5-nano`、`opencode/hy3-preview-free` 等可直接用，不需登入
 - **付費模型（Anthropic、OpenAI、Google 等）需登入**：在 host 跑一次 `opencode auth login`，將 `~/.local/share/opencode` 掛進容器；或直接在容器內以 `docker exec -it ... opencode auth login` 完成 OAuth flow（auth.json 寫進掛載 volume 才會持久）
 - **mode 差異**：OpenCode 用 `build`/`plan` mode（不是 Claude 的 `bypassPermissions`/`acceptEdits`）。perch 仍會嘗試 set `bypassPermissions`，opencode 會 reject 並 warning，但 default `build` mode 已能執行 tools，**不影響功能**
+
+### Codex 額外注意
+
+- **API Key 認證**：設 `OPENAI_API_KEY`（或 `CODEX_API_KEY`）即可，無需登入
+- **ChatGPT OAuth 認證**：在 host 跑一次 `codex login`，將 `~/.codex` 掛進容器；或直接在容器內以 `docker exec -it ... codex login` 完成 OAuth flow（認證檔案需寫進掛載 volume 才會持久）
+- **預設 read-only**：Codex 預設只能讀取檔案；要修改檔案或執行指令，Codex 會逐步詢問每個操作的授權
+- **認證錯誤會顯示在 chat**：若 API Key 無效或認證未完成，錯誤訊息會顯示在 chat 視窗
 
 ### Advanced overrides（dev / debugging）
 

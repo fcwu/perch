@@ -57,9 +57,17 @@ func runFakeACPHelper() {
 		default:
 			result = map[string]any{}
 		}
-		resp, _ := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": *msg.ID, "result": result})
+		resp, _ := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": rawIDToInt64(msg.ID), "result": result})
 		fmt.Fprintf(os.Stdout, "%s\n", resp)
 	}
+}
+
+// rawIDToInt64 extracts an int64 from a JSON-RPC ID encoded as RawMessage.
+// Used by test helpers; ACPProcess always allocates int IDs for outbound calls.
+func rawIDToInt64(raw json.RawMessage) int64 {
+	var n int64
+	_ = json.Unmarshal(raw, &n)
+	return n
 }
 
 // fakeACPServer simulates a claude-agent-acp subprocess via in-process io.Pipe pairs.
@@ -165,7 +173,7 @@ func serveHandshake(t *testing.T, srv *fakeACPServer, sessionID string) {
 		if req.Method != "initialize" {
 			t.Errorf("expected initialize, got %q", req.Method)
 		}
-		srv.sendResponse(*req.ID, map[string]any{
+		srv.sendResponse(rawIDToInt64(req.ID), map[string]any{
 			"protocolVersion": 1,
 			"agentCapabilities": map[string]any{},
 		})
@@ -175,14 +183,14 @@ func serveHandshake(t *testing.T, srv *fakeACPServer, sessionID string) {
 		if req.Method != "session/new" {
 			t.Errorf("expected session/new, got %q", req.Method)
 		}
-		srv.sendResponse(*req.ID, map[string]any{"sessionId": sessionID})
+		srv.sendResponse(rawIDToInt64(req.ID), map[string]any{"sessionId": sessionID})
 
 		// session/set_mode (bypassPermissions)
 		req = srv.readRequest(t)
 		if req.Method != "session/set_mode" {
 			t.Errorf("expected session/set_mode, got %q", req.Method)
 		}
-		srv.sendResponse(*req.ID, map[string]any{})
+		srv.sendResponse(rawIDToInt64(req.ID), map[string]any{})
 	}()
 }
 
@@ -262,7 +270,7 @@ func TestACPProcess_Prompt_Success(t *testing.T) {
 		})
 
 		// Send the final response (completion).
-		srv.sendResponse(*req.ID, map[string]any{"status": "completed"})
+		srv.sendResponse(rawIDToInt64(req.ID), map[string]any{"status": "completed"})
 	}()
 
 	text, err := proc.Prompt(ctx, "hello")
@@ -287,7 +295,7 @@ func TestACPProcess_Prompt_Error(t *testing.T) {
 
 	go func() {
 		req := srv.readRequest(t)
-		srv.sendError(*req.ID, "agent crashed")
+		srv.sendError(rawIDToInt64(req.ID), "agent crashed")
 	}()
 
 	_, err := proc.Prompt(ctx, "hello")
@@ -387,7 +395,7 @@ func TestACPProcess_RequestFormat(t *testing.T) {
 			t.Errorf("unexpected prompt: %+v", params.Prompt)
 		}
 
-		srv.sendResponse(*req.ID, map[string]any{"status": "completed"})
+		srv.sendResponse(rawIDToInt64(req.ID), map[string]any{"status": "completed"})
 	}()
 
 	if _, err := proc.Prompt(ctx, "test input"); err != nil {
@@ -434,7 +442,7 @@ func TestACPProcess_PromptWithContent_ImageBlock(t *testing.T) {
 			t.Errorf("block[1] = %+v, want flat image-png/AAAA", params.Prompt[1])
 		}
 
-		srv.sendResponse(*req.ID, map[string]any{"status": "completed"})
+		srv.sendResponse(rawIDToInt64(req.ID), map[string]any{"status": "completed"})
 	}()
 
 	blocks := []ACPContent{
@@ -482,4 +490,53 @@ func TestACPProcess_EnsureRunning_NoDeadlock(t *testing.T) {
 	}
 
 	proc.Stop()
+}
+
+// TestPickAutoApproveOption_RuntimeShapes verifies the auto-approve picker
+// returns the right optionId for each runtime's request_permission shape.
+func TestPickAutoApproveOption_RuntimeShapes(t *testing.T) {
+	cases := []struct {
+		name   string
+		params string
+		want   string
+	}{
+		{
+			name:   "claude-style legacy (no options array)",
+			params: `{"toolCall":{"toolCallId":"x"}}`,
+			want:   "bypassPermissions",
+		},
+		{
+			name:   "codex with allow_once",
+			params: `{"options":[{"optionId":"approved","kind":"allow_once"},{"optionId":"approved-execpolicy-amendment","kind":"allow_always"},{"optionId":"abort","kind":"reject_once"}]}`,
+			want:   "approved",
+		},
+		{
+			name:   "only allow_always available",
+			params: `{"options":[{"optionId":"forever","kind":"allow_always"},{"optionId":"abort","kind":"reject_once"}]}`,
+			want:   "forever",
+		},
+		{
+			name:   "only reject options (last resort)",
+			params: `{"options":[{"optionId":"reject","kind":"reject_once"}]}`,
+			want:   "bypassPermissions",
+		},
+		{
+			name:   "options field with unknown kind",
+			params: `{"options":[{"optionId":"weird","kind":"new_kind"}]}`,
+			want:   "weird",
+		},
+		{
+			name:   "empty params",
+			params: ``,
+			want:   "bypassPermissions",
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := pickAutoApproveOption(json.RawMessage(c.params))
+			if got != c.want {
+				t.Errorf("pickAutoApproveOption() = %q, want %q", got, c.want)
+			}
+		})
+	}
 }

@@ -22,7 +22,21 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl -fsSL https://deb.nodesource.com/setup_24.x | bash - && \
     apt-get install -y --no-install-recommends nodejs && \
     rm -rf /var/lib/apt/lists/*
-RUN npm install -g @anthropic-ai/claude-code @agentclientprotocol/claude-agent-acp
+# codex-acp ships per-platform native binaries via optionalDependencies.
+# npm sometimes skips those silently; explicitly install the matching arch
+# package so the bin shim can resolve the binary at runtime.
+RUN ARCH=$(dpkg --print-architecture) && \
+    case "$ARCH" in \
+      amd64) CODEX_PLATFORM_PKG="@zed-industries/codex-acp-linux-x64" ;; \
+      arm64) CODEX_PLATFORM_PKG="@zed-industries/codex-acp-linux-arm64" ;; \
+      *) echo "unsupported architecture for codex-acp: $ARCH" && exit 1 ;; \
+    esac && \
+    npm install -g \
+      @anthropic-ai/claude-code \
+      @agentclientprotocol/claude-agent-acp \
+      @openai/codex \
+      @zed-industries/codex-acp \
+      "$CODEX_PLATFORM_PKG"
 RUN ARCH=$(dpkg --print-architecture) && \
     case "$ARCH" in \
       amd64) OC_ASSET="opencode-linux-x64.tar.gz" ;; \
@@ -37,6 +51,7 @@ WORKDIR /app
 COPY --from=builder /app/perch .
 COPY claude/ /app/perch-claude/
 COPY opencode/ /app/perch-opencode/
+COPY codex/ /app/perch-codex/
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 

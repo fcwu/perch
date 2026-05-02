@@ -80,6 +80,22 @@ if [ -n "$WORKDIR" ]; then
         if [ -n "$PUID" ] && [ -d "$WORKDIR/.opencode" ]; then
             chown -R "${PUID}:${PGID}" "$WORKDIR/.opencode"
         fi
+    elif [ "$AGENT_RUNTIME" = "codex" ]; then
+        # codex-acp reads ~/.codex/config.toml; perch ships /app/perch-codex/
+        # as a placeholder asset dir (no skills today; future change may add).
+        if [ -d /app/perch-codex/skills ] && [ -n "$(ls -A /app/perch-codex/skills 2>/dev/null)" ]; then
+            mkdir -p "$WORKDIR/.codex/skills"
+            for skill_dir in /app/perch-codex/skills/*/; do
+                [ -d "$skill_dir" ] || continue
+                skill_name=$(basename "$skill_dir")
+                if [ ! -d "$WORKDIR/.codex/skills/$skill_name" ]; then
+                    cp -r "$skill_dir" "$WORKDIR/.codex/skills/$skill_name"
+                fi
+            done
+        fi
+        if [ -n "$PUID" ] && [ -d "$WORKDIR/.codex" ]; then
+            chown -R "${PUID}:${PGID}" "$WORKDIR/.codex"
+        fi
     else
         # Copy perch-bundled skills into $WORKDIR/.claude/skills/ (no-overwrite).
         # Claude Code discovers skills from both ~/.claude/skills/ (global) and

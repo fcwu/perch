@@ -62,16 +62,63 @@ type ACPProcess struct {
 // acpMsg is the wire format for ACP JSON-RPC 2.0 messages.
 type acpMsg struct {
 	JSONRPC string          `json:"jsonrpc"`
-	ID      *int64          `json:"id,omitempty"`
-	Method  string          `json:"method,omitempty"`
-	Params  json.RawMessage `json:"params,omitempty"`
-	Result  json.RawMessage `json:"result,omitempty"`
-	Error   *acpRPCError    `json:"error,omitempty"`
+	// ID is RawMessage so we accept either integer (claude/opencode) or
+	// string (codex sends UUIDs for agent→client requests like
+	// session/request_permission). Pending-call tracking on perch's side
+	// uses int64 (calls perch initiates), so int IDs are still parsed
+	// numerically downstream; string IDs only flow through agent→client
+	// dispatch where we echo the raw ID back.
+	ID     json.RawMessage `json:"id,omitempty"`
+	Method string          `json:"method,omitempty"`
+	Params json.RawMessage `json:"params,omitempty"`
+	Result json.RawMessage `json:"result,omitempty"`
+	Error  *acpRPCError    `json:"error,omitempty"`
 }
 
 type acpRPCError struct {
 	Code    int    `json:"code"`
 	Message string `json:"message"`
+}
+
+// pickAutoApproveOption picks an optionId from a session/request_permission
+// params payload. Different agents expose different options:
+//   - claude-agent-acp historically accepts "bypassPermissions"
+//   - codex-acp offers options like {optionId:"approved", kind:"allow_once"}
+//
+// Strategy: parse `options[]`, prefer the first with kind="allow_once", then
+// "allow_always", then any non-reject option. Fall back to "bypassPermissions"
+// if the params shape is unfamiliar (legacy claude path).
+func pickAutoApproveOption(params json.RawMessage) string {
+	var p struct {
+		Options []struct {
+			OptionID string `json:"optionId"`
+			Kind     string `json:"kind"`
+		} `json:"options"`
+	}
+	if len(params) == 0 || json.Unmarshal(params, &p) != nil || len(p.Options) == 0 {
+		return "bypassPermissions"
+	}
+	var fallback string
+	for _, opt := range p.Options {
+		switch opt.Kind {
+		case "allow_once":
+			return opt.OptionID
+		case "allow_always":
+			if fallback == "" {
+				fallback = opt.OptionID
+			}
+		}
+	}
+	if fallback != "" {
+		return fallback
+	}
+	// No allow_* option found; pick the first non-reject as last resort.
+	for _, opt := range p.Options {
+		if opt.Kind != "reject_once" && opt.Kind != "reject_always" {
+			return opt.OptionID
+		}
+	}
+	return "bypassPermissions"
 }
 
 // NewACPProcess creates an ACPProcess for the given executable + args.
@@ -296,7 +343,8 @@ func (p *ACPProcess) call(ctx context.Context, method string, params any) (json.
 		JSONRPC: "2.0",
 		Method:  method,
 	}
-	req.ID = &id
+	idJSON, _ := json.Marshal(id)
+	req.ID = idJSON
 	if params != nil {
 		b, err := json.Marshal(params)
 		if err != nil {
@@ -368,21 +416,27 @@ func (p *ACPProcess) readLoop(r io.Reader) {
 
 		var msg acpMsg
 		if err := json.Unmarshal([]byte(line), &msg); err != nil {
-			p.logger.Debug("ACP: unparseable line", "line", line[:min(len(line), 200)])
+			p.logger.Debug("ACP: unparseable line", "err", err, "line", line[:min(len(line), 200)])
 			continue
 		}
 
 		switch {
-		case msg.ID != nil && msg.Method != "":
+		case len(msg.ID) > 0 && msg.Method != "":
 			// Incoming request from agent (e.g. session/request_permission).
-			// Auto-approve with bypassPermissions so the bot runs unattended.
+			// Auto-approve so the bot runs unattended. The optionId differs
+			// per runtime: claude offers "bypassPermissions"; codex offers
+			// "approved" / "approved-execpolicy-amendment" / "abort". Pick
+			// the first option whose kind is "allow_once" (or "allow_always"
+			// as fallback) from the request's options array, defaulting to
+			// "bypassPermissions" for legacy claude shape.
 			resp := acpMsg{
 				JSONRPC: "2.0",
 				ID:      msg.ID,
 			}
 			if msg.Method == "session/request_permission" {
+				optionId := pickAutoApproveOption(msg.Params)
 				b, _ := json.Marshal(map[string]any{
-					"outcome": map[string]any{"outcome": "selected", "optionId": "bypassPermissions"},
+					"outcome": map[string]any{"outcome": "selected", "optionId": optionId},
 				})
 				resp.Result = b
 			} else {
@@ -397,11 +451,18 @@ func (p *ACPProcess) readLoop(r io.Reader) {
 			}
 			p.mu.Unlock()
 
-		case msg.ID != nil:
-			// Response to a pending call.
+		case len(msg.ID) > 0:
+			// Response to a pending call. Only int IDs are ours (perch
+			// originates int IDs via nextID); string IDs from the agent's
+			// own request namespace shouldn't reach here, but guard anyway.
+			var id int64
+			if err := json.Unmarshal(msg.ID, &id); err != nil {
+				p.logger.Debug("ACP: response with non-int ID, ignoring", "id", string(msg.ID))
+				continue
+			}
 			p.pendMu.Lock()
-			ch := p.pending[*msg.ID]
-			delete(p.pending, *msg.ID)
+			ch := p.pending[id]
+			delete(p.pending, id)
 			p.pendMu.Unlock()
 			if ch != nil {
 				ch <- msg

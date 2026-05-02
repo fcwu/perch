@@ -15,7 +15,6 @@ type AgentRuntime struct {
 	ProjectConfigDir  string
 	ProjectConfigFile string
 	AssetDir          string
-	SupportsHooks     bool
 
 	// ACPExecutable is the binary spawned for chat-API / Discord / Telegram
 	// ACP sessions when this runtime is active. ACPArgs are passed before any
@@ -41,7 +40,6 @@ func loadAgentRuntime() (AgentRuntime, error) {
 			ProjectConfigDir:  ".claude",
 			ProjectConfigFile: "settings.json",
 			AssetDir:          "/app/perch-claude",
-			SupportsHooks:     true,
 			ACPExecutable:     "claude-agent-acp",
 			ACPArgs:           nil,
 		}, nil
@@ -53,11 +51,25 @@ func loadAgentRuntime() (AgentRuntime, error) {
 			ProjectConfigDir:  ".opencode",
 			ProjectConfigFile: ".opencode.json",
 			AssetDir:          "/app/perch-opencode",
-			SupportsHooks:     false,
 			ACPExecutable:     "opencode",
 			// --log-level WARN: opencode acp writes INFO logs to stdout by
 			// default, which corrupts the JSON-RPC stream perch reads.
 			ACPArgs: []string{"acp", "--log-level", "WARN"},
+		}, nil
+	case "codex":
+		return AgentRuntime{
+			Name:              "codex",
+			Command:           "codex",
+			ArgsEnv:           "CODEX_ARGS",
+			ProjectConfigDir:  ".codex",
+			ProjectConfigFile: "config.toml",
+			AssetDir:          "/app/perch-codex",
+			// codex-acp is the Zed-maintained ACP wrapper around OpenAI Codex
+			// (npm @zed-industries/codex-acp). Auth via OPENAI_API_KEY env var
+			// inherited by the subprocess. No subcommand or log-level flag
+			// needed — pre-flight verified stdout is clean JSON-RPC.
+			ACPExecutable: "codex-acp",
+			ACPArgs:       nil,
 		}, nil
 	default:
 		return AgentRuntime{}, fmt.Errorf("unsupported AGENT_RUNTIME %q", name)
