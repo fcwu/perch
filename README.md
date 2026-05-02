@@ -171,6 +171,17 @@ Settings 儲存在 `/data/settings.json`。需要重啟的設定，按 **Save & 
 | `DISCORD_ALLOWED_USER_IDS` | — | DM 白名單；**未設定時 DM 功能完全關閉** |
 | `TELEGRAM_BOT_TOKEN` | — | Telegram bot token |
 | `TELEGRAM_CHAT_ID` | — | Telegram chat ID |
+| `CHAT_UPLOAD_MAX_BYTES` | `10485760` (10 MiB) | 單一附件大小上限 |
+| `CHAT_UPLOAD_MAX_FILES` | `4` | 單次 query 附件數量上限 |
+| `CHAT_UPLOAD_ALLOWED_MIME` | image+text+pdf 預設集 | 允許的 MIME 白名單（逗號分隔） |
+| `CHAT_UPLOAD_DIR_QUOTA_BYTES` | `524288000` (500 MiB) | 每個 conversation 累計上傳容量上限 |
+| `CHAT_UPLOAD_ORPHAN_TTL_DAYS` | `7` | 啟動時 mtime 超過 N 天的孤兒 uploads 目錄自動刪除 |
+
+### 附件處理
+
+- **圖片**（PNG/JPEG/GIF/WebP）：直接送入 AI 視覺理解
+- **文件**（TXT、Markdown、CSV、JSON、PDF 等）：agent 讀取後分析，適合丟入程式碼、日誌、報表等檔案
+- 上傳的檔案在對話結束後自動清理
 
 ---
 

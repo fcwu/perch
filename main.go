@@ -12,6 +12,7 @@ import (
 	"os/signal"
 	"strings"
 	"syscall"
+	"time"
 )
 
 // buildTime is injected at build time via -ldflags "-X main.buildTime=..."
@@ -187,7 +188,19 @@ func main() {
 	}
 
 	srv := newServerWithMode(pm, auth, im, sessProvider, userSessions, gitlabAuth, adminAuth, adminHub, store, userRL, sm, mode, logger.Logger)
-	srv.chatSessions = newACPUserSessionManager(runtime, workdir, store, adminHub, logger.Logger)
+	chatACP := newACPUserSessionManager(runtime, workdir, store, adminHub, logger.Logger)
+	chatACP.SetSettings(sm)
+	srv.chatSessions = chatACP
+
+	// Cleanup orphaned per-conversation upload directories on startup.
+	if cs := EffectiveAttachmentLimits(sm.GetEffective().Chat); cs.OrphanTTLDays > 0 {
+		ttl := time.Duration(cs.OrphanTTLDays) * 24 * time.Hour
+		if kept, removed, err := cleanupOrphanUploads(workdir, ttl); err != nil {
+			logger.Logger.Warn("uploads orphan cleanup failed", "err", err)
+		} else {
+			logger.Logger.Info("uploads orphan cleanup", "kept", kept, "removed", removed, "ttl_days", cs.OrphanTTLDays)
+		}
+	}
 
 	// Apply rate limiting to sensitive endpoints only
 	sensitivePaths := map[string]bool{"/login": true, "/bootstrap": true}
@@ -336,9 +349,11 @@ func buildEnvSeed(runtime AgentRuntime) RuntimeSettings {
 
 	// Chat upload limits — defaults from attachments.go
 	chat := ChatSettings{
-		UploadMaxBytes: int64Ptr(int64(defaultUploadMaxBytes)),
-		UploadMaxFiles: intPtr(defaultUploadMaxFiles),
-		UploadAllowedMime: append([]string{}, defaultUploadAllowedMime...),
+		UploadMaxBytes:      int64Ptr(int64(defaultUploadMaxBytes)),
+		UploadMaxFiles:      intPtr(defaultUploadMaxFiles),
+		UploadAllowedMime:   append([]string{}, defaultUploadAllowedMime...),
+		UploadDirQuotaBytes: int64Ptr(int64(defaultUploadDirQuotaBytes)),
+		UploadOrphanTTLDays: intPtr(defaultUploadOrphanTTLDays),
 	}
 	if v := os.Getenv("CHAT_UPLOAD_MAX_BYTES"); v != "" {
 		var n int64
@@ -364,6 +379,20 @@ func buildEnvSeed(runtime AgentRuntime) RuntimeSettings {
 		}
 		if len(mimes) > 0 {
 			chat.UploadAllowedMime = mimes
+		}
+	}
+	if v := os.Getenv("CHAT_UPLOAD_DIR_QUOTA_BYTES"); v != "" {
+		var n int64
+		fmt.Sscanf(v, "%d", &n)
+		if n > 0 {
+			chat.UploadDirQuotaBytes = int64Ptr(n)
+		}
+	}
+	if v := os.Getenv("CHAT_UPLOAD_ORPHAN_TTL_DAYS"); v != "" {
+		var n int
+		fmt.Sscanf(v, "%d", &n)
+		if n > 0 {
+			chat.UploadOrphanTTLDays = intPtr(n)
 		}
 	}
 	s.Chat = &chat

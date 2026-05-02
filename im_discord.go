@@ -427,17 +427,26 @@ func (d *DiscordSessionManager) onMessage(s *discordgo.Session, m *discordgo.Mes
 	}
 
 	sess := d.getOrCreateSession(m.ChannelID)
-	imageBlocks, fetchFailed := d.fetchImageAttachments(m.Attachments)
-	go sess.handleWithACP(s, m.ChannelID, m.ID, content, imageBlocks, fetchFailed, d.logger)
+	imageBlocks, persisted, fetchFailed, disallowed := d.processAttachments(m.ChannelID, m.Attachments)
+	go sess.handleWithACP(s, m.ChannelID, m.ID, content, imageBlocks, persisted, fetchFailed, disallowed, d.logger)
 }
 
-// fetchImageAttachments downloads image attachments (per allow-list and size
-// limit), base64-encodes them, and returns ACP image blocks plus the names of
-// any images that failed to fetch (so the reply can mention them).
-// Non-image attachments are silently dropped (per design Q2).
-func (d *DiscordSessionManager) fetchImageAttachments(atts []*discordgo.MessageAttachment) ([]ACPContent, []string) {
+// disallowedAttachment captures a Discord attachment whose ContentType is
+// not in the chat allow-list, for surfacing back to the user.
+type disallowedAttachment struct {
+	Filename string
+	Mime     string
+}
+
+// processAttachments downloads inbound Discord attachments and routes them
+// per the chat allow-list:
+//   - images stay in memory and become ACP image content blocks
+//   - non-image MIMEs are persisted under <workdir>/uploads/<channelID>/
+//     and returned as PersistedAttachment for the prompt prefix
+//   - disallowed MIMEs are dropped and reported back to the user
+func (d *DiscordSessionManager) processAttachments(channelID string, atts []*discordgo.MessageAttachment) ([]ACPContent, []PersistedAttachment, []string, []disallowedAttachment) {
 	if len(atts) == 0 {
-		return nil, nil
+		return nil, nil, nil, nil
 	}
 	lim := d.attachmentLimits()
 	allow := map[string]bool{}
@@ -445,15 +454,18 @@ func (d *DiscordSessionManager) fetchImageAttachments(atts []*discordgo.MessageA
 		allow[m] = true
 	}
 
-	var blocks []ACPContent
+	var imageBlocks []ACPContent
+	var persisted []PersistedAttachment
 	var failed []string
+	var disallowed []disallowedAttachment
 	totalKept := 0
 	for _, a := range atts {
 		if a == nil {
 			continue
 		}
 		if !allow[a.ContentType] {
-			d.logger.Debug("Discord ACP: drop non-image attachment", "filename", a.Filename, "ct", a.ContentType)
+			d.logger.Info("Discord ACP: drop attachment with disallowed MIME", "filename", a.Filename, "ct", a.ContentType)
+			disallowed = append(disallowed, disallowedAttachment{Filename: a.Filename, Mime: a.ContentType})
 			continue
 		}
 		if int64(a.Size) > lim.MaxBytes {
@@ -474,22 +486,61 @@ func (d *DiscordSessionManager) fetchImageAttachments(atts []*discordgo.MessageA
 			d.logger.Warn("Discord ACP: drop oversized attachment after fetch", "filename", a.Filename, "size", len(data), "limit", lim.MaxBytes)
 			continue
 		}
-		got := MagicMime(data)
-		if got != a.ContentType {
-			d.logger.Warn("Discord ACP: drop attachment with mime/magic mismatch", "filename", a.Filename, "claimed", a.ContentType, "magic", got)
+
+		if IsImageMIME(a.ContentType) {
+			got := MagicMime(data)
+			if got != a.ContentType {
+				d.logger.Warn("Discord ACP: drop image with mime/magic mismatch", "filename", a.Filename, "claimed", a.ContentType, "magic", got)
+				continue
+			}
+			imageBlocks = append(imageBlocks, ACPContent{
+				Type:     "image",
+				Data:     base64.StdEncoding.EncodeToString(data),
+				MimeType: got,
+			})
+			totalKept++
 			continue
 		}
-		blocks = append(blocks, ACPContent{
-			Type:     "image",
-			Data:     base64.StdEncoding.EncodeToString(data),
-			MimeType: got,
-		})
+
+		// Non-image: validate (PDF magic or text heuristic) then persist to disk.
+		if a.ContentType == "application/pdf" {
+			if MagicMime(data) != "application/pdf" {
+				d.logger.Warn("Discord ACP: drop PDF with magic mismatch", "filename", a.Filename)
+				continue
+			}
+		} else if textMimeSet[a.ContentType] {
+			if !looksLikeText(data) {
+				d.logger.Warn("Discord ACP: drop text attachment with binary content", "filename", a.Filename, "ct", a.ContentType)
+				continue
+			}
+		}
+
+		// Build a one-shot []Attachment to reuse the disk-write rollback logic.
+		one := []Attachment{{
+			Filename:   a.Filename,
+			MimeType:   a.ContentType,
+			DataBase64: base64.StdEncoding.EncodeToString(data),
+		}}
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		written, err := WriteAttachmentsToDisk(ctx, d.workdir, channelID, one, lim)
+		cancel()
+		if err != nil {
+			d.logger.Warn("Discord ACP: persist attachment failed", "filename", a.Filename, "err", err)
+			failed = append(failed, a.Filename)
+			continue
+		}
+		persisted = append(persisted, written...)
 		totalKept++
 	}
-	if len(blocks) > 0 || len(failed) > 0 {
-		d.logger.Info("Discord ACP: attachments processed", "kept", len(blocks), "failed", len(failed))
+	if len(imageBlocks) > 0 || len(persisted) > 0 || len(failed) > 0 || len(disallowed) > 0 {
+		d.logger.Info("Discord ACP: attachments processed",
+			"images", len(imageBlocks),
+			"files", len(persisted),
+			"failed", len(failed),
+			"disallowed", len(disallowed),
+		)
 	}
-	return blocks, failed
+	return imageBlocks, persisted, failed, disallowed
 }
 
 // fetchURLBytes performs a GET on url with a hard byte limit (response body
@@ -514,9 +565,11 @@ func fetchURLBytes(url string, maxBytes int64) ([]byte, error) {
 
 // handleWithACP sends message to the claude-agent-acp subprocess and routes the reply to Discord.
 // It runs in its own goroutine and never returns an error (logs instead).
-// imageBlocks are pre-fetched image content blocks; fetchFailed lists filenames
-// of attachments that failed to download (for the user-visible reply suffix).
-func (sess *discordSession) handleWithACP(s *discordgo.Session, channelID, messageID, content string, imageBlocks []ACPContent, fetchFailed []string, logger *slog.Logger) {
+// imageBlocks are pre-fetched image content blocks; persisted are non-image
+// attachments already written to disk and referenced via the prompt prefix;
+// fetchFailed and disallowed list filenames whose handling needs to surface
+// to the user in the reply.
+func (sess *discordSession) handleWithACP(s *discordgo.Session, channelID, messageID, content string, imageBlocks []ACPContent, persisted []PersistedAttachment, fetchFailed []string, disallowed []disallowedAttachment, logger *slog.Logger) {
 	// One message at a time per session — drop concurrent duplicates.
 	sess.mu.Lock()
 	if sess.last != nil {
@@ -553,9 +606,12 @@ func (sess *discordSession) handleWithACP(s *discordgo.Session, channelID, messa
 		return
 	}
 
+	// Build the text block: file prefixes (when non-image attachments were
+	// persisted to disk) + the user's message.
+	textBody := BuildPromptFilePrefix(persisted, content)
 	blocks := make([]ACPContent, 0, 1+len(imageBlocks))
-	if content != "" {
-		blocks = append(blocks, ACPContent{Type: "text", Text: content})
+	if textBody != "" {
+		blocks = append(blocks, ACPContent{Type: "text", Text: textBody})
 	} else if len(imageBlocks) > 0 {
 		// ACP requires at least one block; keep an empty text block as the
 		// implicit "describe these images" prompt so claude-agent-acp accepts the call.
@@ -582,8 +638,10 @@ func (sess *discordSession) handleWithACP(s *discordgo.Session, channelID, messa
 	_ = s.MessageReactionAdd(channelID, messageID, emojiSpeech)
 	if len(fetchFailed) > 0 {
 		// Append a soft warning so the user knows some attachments didn't reach Claude.
-		warn := "\n\n> 附件 " + strings.Join(fetchFailed, ", ") + " 下載失敗，未送進 Claude"
-		text = text + warn
+		text = text + "\n\n> 附件 " + strings.Join(fetchFailed, ", ") + " 下載失敗，未送進 Claude"
+	}
+	for _, da := range disallowed {
+		text = text + "\n\n> 附件 " + da.Filename + " 不支援此類型 (" + da.Mime + ")"
 	}
 	if text == "" {
 		return // nothing to send
@@ -651,7 +709,7 @@ func (d *DiscordSessionManager) DispatchScheduled(target, message string) bool {
 	}
 
 	sess := d.getOrCreateSession(channelID)
-	go sess.handleWithACP(dgo, channelID, sent.ID, message, nil, nil, d.logger)
+	go sess.handleWithACP(dgo, channelID, sent.ID, message, nil, nil, nil, nil, d.logger)
 	return true
 }
 

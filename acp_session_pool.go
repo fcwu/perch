@@ -45,6 +45,7 @@ type ACPSessionPool struct {
 	perUserMax      int
 	globalMax       int
 	processFactory  func() *ACPProcess // injectable for tests; nil → NewACPProcess
+	evictHook       func(key string)   // optional; called after a session is removed (idle expiry or LRU eviction)
 
 	mu       sync.Mutex
 	sessions map[string]*acpPoolEntry
@@ -173,19 +174,27 @@ func (p *ACPSessionPool) Release(key string) {
 
 func (p *ACPSessionPool) expireKey(key string) {
 	p.mu.Lock()
-	defer p.mu.Unlock()
-
 	entry, ok := p.sessions[key]
 	if !ok {
+		p.mu.Unlock()
 		return
 	}
 	if entry.refCount > 0 {
+		p.mu.Unlock()
 		return
 	}
 	entry.process.Stop()
 	p.lru.Remove(entry.lruElem)
 	delete(p.sessions, key)
+	hook := p.evictHook
 	p.logger.Info("ACP pool: session expired (idle)", "key", key, "total", len(p.sessions))
+	p.mu.Unlock()
+
+	// Hook runs without the pool lock held to avoid deadlocks if the hook
+	// itself touches state that interacts with the pool (e.g. logging IO).
+	if hook != nil {
+		hook(key)
+	}
 }
 
 // evictByPrefix removes the LRU idle entry whose key starts with prefix.
@@ -226,8 +235,14 @@ func (p *ACPSessionPool) removeEntryLocked(entry *acpPoolEntry, elem *list.Eleme
 	}
 	entry.process.Stop()
 	p.lru.Remove(elem)
-	delete(p.sessions, entry.key)
-	p.logger.Info("ACP pool: session evicted", "key", entry.key, "reason", reason, "total", len(p.sessions))
+	key := entry.key
+	delete(p.sessions, key)
+	p.logger.Info("ACP pool: session evicted", "key", key, "reason", reason, "total", len(p.sessions))
+	if hook := p.evictHook; hook != nil {
+		// Run hook outside the pool lock — schedule via goroutine so caller
+		// keeps the lock for the rest of its critical section.
+		go hook(key)
+	}
 }
 
 // StopAll terminates all pooled subprocesses. Used during shutdown.

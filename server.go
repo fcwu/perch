@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/fs"
 	"log/slog"
@@ -481,6 +482,10 @@ func (s *Server) handleChatAPI(w http.ResponseWriter, r *http.Request) {
 	if err := s.chatSessions.StartSession(userID, username, req.Query, req.NewConversation, conversationID, req.Attachments); err != nil {
 		if ce, ok := err.(interface{ IsConflict() bool }); ok && ce.IsConflict() {
 			http.Error(w, "session already in progress", http.StatusConflict)
+			return
+		}
+		if errors.Is(err, ErrUploadQuotaExceeded) {
+			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
 		http.Error(w, "internal error", http.StatusInternalServerError)

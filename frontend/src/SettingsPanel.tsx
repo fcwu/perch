@@ -12,7 +12,7 @@ interface Settings {
   gitlab?: { url?: string; client_id?: string; client_secret?: string; redirect_uri?: string; allowed_ids?: string[]; admin_ids?: string[] }
   workspace?: { sync_enabled?: boolean; sync_interval?: string; git_token?: string; notify_channel?: string; sync_submodules?: boolean }
   log?: { format?: string }
-  chat?: { upload_max_bytes?: number; upload_max_files?: number; upload_allowed_mime?: string[] }
+  chat?: { upload_max_bytes?: number; upload_max_files?: number; upload_allowed_mime?: string[]; upload_dir_quota_bytes?: number; upload_orphan_ttl_days?: number }
 }
 
 interface SettingsResponse {
@@ -111,6 +111,8 @@ function GeneralTab({ settings, registerDelta }: TabProps) {
   const [uploadMaxBytes, setUploadMaxBytes] = useState(String(settings.chat?.upload_max_bytes ?? ''))
   const [uploadMaxFiles, setUploadMaxFiles] = useState(String(settings.chat?.upload_max_files ?? ''))
   const [uploadAllowedMime, setUploadAllowedMime] = useState((settings.chat?.upload_allowed_mime ?? []).join(','))
+  const [uploadDirQuotaBytes, setUploadDirQuotaBytes] = useState(String(settings.chat?.upload_dir_quota_bytes ?? ''))
+  const [uploadOrphanTTLDays, setUploadOrphanTTLDays] = useState(String(settings.chat?.upload_orphan_ttl_days ?? ''))
 
   useEffect(() => {
     setRuntime(settings.agent?.runtime ?? '')
@@ -120,6 +122,8 @@ function GeneralTab({ settings, registerDelta }: TabProps) {
     setUploadMaxBytes(String(settings.chat?.upload_max_bytes ?? ''))
     setUploadMaxFiles(String(settings.chat?.upload_max_files ?? ''))
     setUploadAllowedMime((settings.chat?.upload_allowed_mime ?? []).join(','))
+    setUploadDirQuotaBytes(String(settings.chat?.upload_dir_quota_bytes ?? ''))
+    setUploadOrphanTTLDays(String(settings.chat?.upload_orphan_ttl_days ?? ''))
   }, [settings])
 
   useEffect(() => {
@@ -131,14 +135,16 @@ function GeneralTab({ settings, registerDelta }: TabProps) {
         upload_max_bytes: uploadMaxBytes ? Number(uploadMaxBytes) : undefined,
         upload_max_files: uploadMaxFiles ? Number(uploadMaxFiles) : undefined,
         upload_allowed_mime: uploadAllowedMime ? uploadAllowedMime.split(',').map(s => s.trim()).filter(Boolean) : undefined,
+        upload_dir_quota_bytes: uploadDirQuotaBytes ? Number(uploadDirQuotaBytes) : undefined,
+        upload_orphan_ttl_days: uploadOrphanTTLDays ? Number(uploadOrphanTTLDays) : undefined,
       },
     }))
-  }, [runtime, args, rpm, blockIPs, uploadMaxBytes, uploadMaxFiles, uploadAllowedMime, registerDelta])
+  }, [runtime, args, rpm, blockIPs, uploadMaxBytes, uploadMaxFiles, uploadAllowedMime, uploadDirQuotaBytes, uploadOrphanTTLDays, registerDelta])
 
   return (
     <>
       <Field label="Agent Runtime" restartRequired>
-        <RadioGroup options={['claude', 'opencode']} value={runtime} onChange={setRuntime} />
+        <RadioGroup options={['claude', 'opencode', 'codex']} value={runtime} onChange={setRuntime} />
       </Field>
       <Field label="Agent Args">
         <TextInput value={args} onChange={setArgs} placeholder="--dangerously-skip-permissions" />
@@ -161,7 +167,13 @@ function GeneralTab({ settings, registerDelta }: TabProps) {
         <TextInput value={uploadMaxFiles} onChange={setUploadMaxFiles} placeholder="4" />
       </Field>
       <Field label="Chat Upload — Allowed MIME (comma)">
-        <TextInput value={uploadAllowedMime} onChange={setUploadAllowedMime} placeholder="image/png,image/jpeg,image/gif,image/webp" />
+        <TextInput value={uploadAllowedMime} onChange={setUploadAllowedMime} placeholder="image/png,image/jpeg,image/gif,image/webp,text/plain,application/pdf" />
+      </Field>
+      <Field label="Chat Upload — Dir quota per conversation (bytes)">
+        <TextInput value={uploadDirQuotaBytes} onChange={setUploadDirQuotaBytes} placeholder="524288000 (500MB)" />
+      </Field>
+      <Field label="Chat Upload — Orphan TTL (days)">
+        <TextInput value={uploadOrphanTTLDays} onChange={setUploadOrphanTTLDays} placeholder="7" />
       </Field>
     </>
   )

@@ -23,9 +23,11 @@ type RuntimeSettings struct {
 }
 
 type ChatSettings struct {
-	UploadMaxBytes   *int64   `json:"upload_max_bytes,omitempty"`   // immediate
-	UploadMaxFiles   *int     `json:"upload_max_files,omitempty"`   // immediate
-	UploadAllowedMime []string `json:"upload_allowed_mime,omitempty"` // immediate
+	UploadMaxBytes      *int64   `json:"upload_max_bytes,omitempty"`       // immediate
+	UploadMaxFiles      *int     `json:"upload_max_files,omitempty"`       // immediate
+	UploadAllowedMime   []string `json:"upload_allowed_mime,omitempty"`    // immediate
+	UploadDirQuotaBytes *int64   `json:"upload_dir_quota_bytes,omitempty"` // immediate
+	UploadOrphanTTLDays *int     `json:"upload_orphan_ttl_days,omitempty"` // immediate
 }
 
 type AgentSettings struct {
@@ -290,6 +292,12 @@ func mergeSettings(base, override RuntimeSettings) RuntimeSettings {
 		if override.Chat.UploadAllowedMime != nil {
 			c.UploadAllowedMime = override.Chat.UploadAllowedMime
 		}
+		if override.Chat.UploadDirQuotaBytes != nil {
+			c.UploadDirQuotaBytes = override.Chat.UploadDirQuotaBytes
+		}
+		if override.Chat.UploadOrphanTTLDays != nil {
+			c.UploadOrphanTTLDays = override.Chat.UploadOrphanTTLDays
+		}
 		r.Chat = &c
 	}
 
@@ -468,6 +476,12 @@ func (sm *SettingsManager) Patch(delta RuntimeSettings) (restartRequired bool, e
 		}
 		if delta.Chat.UploadAllowedMime != nil {
 			sm.current.Chat.UploadAllowedMime = delta.Chat.UploadAllowedMime
+		}
+		if delta.Chat.UploadDirQuotaBytes != nil {
+			sm.current.Chat.UploadDirQuotaBytes = delta.Chat.UploadDirQuotaBytes
+		}
+		if delta.Chat.UploadOrphanTTLDays != nil {
+			sm.current.Chat.UploadOrphanTTLDays = delta.Chat.UploadOrphanTTLDays
 		}
 	}
 

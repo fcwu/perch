@@ -117,3 +117,23 @@ curl -v -N -H "Cookie: session_token=<token>" http://localhost:<port>/api/chat/s
 # 若看到 "data:" 開頭的行 → SSE 正常
 ```
 
+---
+
+## 5. 附件落盤路徑（agent 端）
+
+非圖檔附件由 server 寫到 `<workdir>/uploads/<conv-id>/<filename>`，並在 prompt 最前面加上：
+
+```
+[file: ./uploads/<conv-id>/<filename> (<mime>, <size>)]
+
+<原使用者文字>
+```
+
+Agent 看到此前綴時，路徑相對 `<workdir>`，可直接用 `Read`、`Bash`（含 `pdftotext`、`jq`、`wc` 等）讀取分析。Discord 的「conv-id」是 channel ID。
+
+清理：
+
+- ACP session pool 把 (user, conv) 從 pool evict 時，`uploads/<conv-id>/` 會被刪掉
+- perch 啟動會掃所有子目錄的 mtime，超過 `CHAT_UPLOAD_ORPHAN_TTL_DAYS`（預設 7）天的整個刪掉
+- 容器重啟不會清掉「最近還在用」的目錄
+

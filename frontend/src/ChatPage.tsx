@@ -18,9 +18,26 @@ function PaperclipIcon() {
   )
 }
 
-const ALLOWED_UPLOAD_MIME = ['image/png', 'image/jpeg', 'image/gif', 'image/webp']
+function FileIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/>
+      <polyline points="14 2 14 8 20 8"/>
+    </svg>
+  )
+}
+
+const ALLOWED_UPLOAD_MIME = [
+  'image/png', 'image/jpeg', 'image/gif', 'image/webp',
+  'text/plain', 'text/markdown', 'text/csv', 'text/x-log',
+  'application/json', 'application/x-ndjson', 'application/pdf',
+]
 const MAX_UPLOAD_BYTES_CLIENT = 10 * 1024 * 1024 // mirrors server default; server is authoritative
 const MAX_UPLOAD_FILES_CLIENT = 4
+
+function isImageMime(mime: string): boolean {
+  return mime === 'image/png' || mime === 'image/jpeg' || mime === 'image/gif' || mime === 'image/webp'
+}
 
 interface PendingAttachment {
   filename: string
@@ -86,9 +103,18 @@ export default function ChatPage({ conversationId }: ChatPageProps) {
   const rawBufRef = useRef('')
 
   const addFiles = useCallback(async (files: FileList | File[]) => {
-    const list = Array.from(files).filter(f => ALLOWED_UPLOAD_MIME.includes(f.type))
-    if (list.length === 0) return
     const errors: string[] = []
+    const all = Array.from(files)
+    const allowed = all.filter(f => ALLOWED_UPLOAD_MIME.includes(f.type))
+    for (const f of all) {
+      if (!ALLOWED_UPLOAD_MIME.includes(f.type)) {
+        errors.push(`${f.name}: unsupported type "${f.type || 'unknown'}"`)
+      }
+    }
+    if (allowed.length === 0) {
+      if (errors.length > 0) alert('Upload skipped:\n' + errors.join('\n'))
+      return
+    }
     setAttachments(prev => {
       const room = MAX_UPLOAD_FILES_CLIENT - prev.length
       if (room <= 0) {
@@ -98,7 +124,7 @@ export default function ChatPage({ conversationId }: ChatPageProps) {
       return prev
     })
     const ready: PendingAttachment[] = []
-    for (const f of list) {
+    for (const f of allowed) {
       if (f.size > MAX_UPLOAD_BYTES_CLIENT) {
         errors.push(`${f.name}: ${formatBytes(f.size)} > ${formatBytes(MAX_UPLOAD_BYTES_CLIENT)}`)
         continue
@@ -133,9 +159,9 @@ export default function ChatPage({ conversationId }: ChatPageProps) {
     toolCounter.current = 0
     rawBufRef.current = ''
 
-    // Display the user's message with image-attachment markers so history matches server placeholder.
+    // Display the user's message with attachment markers so history matches server placeholder.
     const userDisplay = sentAttachments.length > 0
-      ? sentAttachments.map(a => `[image:${a.filename}]`).join(' ') + (q ? ' ' + q : '')
+      ? sentAttachments.map(a => `[${isImageMime(a.mime_type) ? 'image' : 'file'}:${a.filename}]`).join(' ') + (q ? ' ' + q : '')
       : q
     setMessages(prev => [...prev, { role: 'user', content: userDisplay, done: true }, { role: 'assistant', content: '', done: false }])
 
@@ -301,24 +327,27 @@ export default function ChatPage({ conversationId }: ChatPageProps) {
           {/* Attachment chips */}
           {attachments.length > 0 && (
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 8 }}>
-              {attachments.map((a, i) => (
-                <span key={i} style={{
-                  display: 'inline-flex', alignItems: 'center', gap: 6,
-                  background: '#2a2a2a', border: '1px solid #3a3a3a',
-                  borderRadius: 6, padding: '4px 8px', fontSize: 12, color: '#cfcfcf',
-                  fontFamily: FONT,
-                }}>
-                  📎 {a.filename} <span style={{ color: '#888' }}>{formatBytes(a.size)}</span>
-                  <button
-                    onClick={() => removeAttachment(i)}
-                    title="Remove"
-                    style={{
-                      background: 'transparent', border: 'none', color: '#888',
-                      cursor: 'pointer', padding: 0, lineHeight: 1, fontSize: 14,
-                    }}
-                  >✕</button>
-                </span>
-              ))}
+              {attachments.map((a, i) => {
+                const isImg = isImageMime(a.mime_type)
+                return (
+                  <span key={i} style={{
+                    display: 'inline-flex', alignItems: 'center', gap: 6,
+                    background: '#2a2a2a', border: '1px solid ' + (isImg ? '#3a3a3a' : '#3a4a5a'),
+                    borderRadius: 6, padding: '4px 8px', fontSize: 12, color: '#cfcfcf',
+                    fontFamily: FONT,
+                  }}>
+                    {isImg ? '🖼️' : <FileIcon />} {a.filename} <span style={{ color: '#888' }}>{formatBytes(a.size)}</span>
+                    <button
+                      onClick={() => removeAttachment(i)}
+                      title="Remove"
+                      style={{
+                        background: 'transparent', border: 'none', color: '#888',
+                        cursor: 'pointer', padding: 0, lineHeight: 1, fontSize: 14,
+                      }}
+                    >✕</button>
+                  </span>
+                )
+              })}
             </div>
           )}
           <div
@@ -341,7 +370,7 @@ export default function ChatPage({ conversationId }: ChatPageProps) {
             <input
               ref={fileInputRef}
               type="file"
-              accept="image/*"
+              accept={ALLOWED_UPLOAD_MIME.join(',')}
               multiple
               style={{ display: 'none' }}
               onChange={e => {
@@ -352,7 +381,7 @@ export default function ChatPage({ conversationId }: ChatPageProps) {
             <button
               onClick={() => fileInputRef.current?.click()}
               disabled={loading || attachments.length >= MAX_UPLOAD_FILES_CLIENT}
-              title="Attach images"
+              title="Attach files (images, text, PDF)"
               style={{
                 background: 'transparent', border: 'none', borderRadius: 8,
                 margin: 6, color: '#888', width: 32, height: 32,
@@ -384,7 +413,7 @@ export default function ChatPage({ conversationId }: ChatPageProps) {
                 }
               }}
               disabled={loading}
-              placeholder={dragOver ? 'Drop images here…' : 'Message…'}
+              placeholder={dragOver ? 'Drop files here…' : 'Message…'}
               rows={1}
               style={{
                 flex: 1,

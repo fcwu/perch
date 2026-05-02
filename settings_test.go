@@ -49,6 +49,46 @@ func TestPatch_MergesDelta(t *testing.T) {
 	}
 }
 
+func TestPatch_ChatUploadFieldsRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	sm, err := NewSettingsManager(filepath.Join(dir, "settings.json"))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	quota := int64(2048)
+	ttl := 3
+	maxBytes := int64(1024)
+	delta := RuntimeSettings{
+		Chat: &ChatSettings{
+			UploadMaxBytes:      &maxBytes,
+			UploadDirQuotaBytes: &quota,
+			UploadOrphanTTLDays: &ttl,
+			UploadAllowedMime:   []string{"text/plain"},
+		},
+	}
+	if _, err := sm.Patch(delta); err != nil {
+		t.Fatalf("Patch error: %v", err)
+	}
+
+	got := sm.GetEffective()
+	if got.Chat == nil {
+		t.Fatal("expected Chat in effective settings")
+	}
+	if got.Chat.UploadDirQuotaBytes == nil || *got.Chat.UploadDirQuotaBytes != 2048 {
+		t.Errorf("UploadDirQuotaBytes = %v, want 2048", got.Chat.UploadDirQuotaBytes)
+	}
+	if got.Chat.UploadOrphanTTLDays == nil || *got.Chat.UploadOrphanTTLDays != 3 {
+		t.Errorf("UploadOrphanTTLDays = %v, want 3", got.Chat.UploadOrphanTTLDays)
+	}
+	if got.Chat.UploadMaxBytes == nil || *got.Chat.UploadMaxBytes != 1024 {
+		t.Errorf("UploadMaxBytes = %v, want 1024", got.Chat.UploadMaxBytes)
+	}
+	if len(got.Chat.UploadAllowedMime) != 1 || got.Chat.UploadAllowedMime[0] != "text/plain" {
+		t.Errorf("UploadAllowedMime = %v, want [text/plain]", got.Chat.UploadAllowedMime)
+	}
+}
+
 func TestPatch_RestartRequiredForAuthMethod(t *testing.T) {
 	dir := t.TempDir()
 	sm, err := NewSettingsManager(filepath.Join(dir, "settings.json"))

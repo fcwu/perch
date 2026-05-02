@@ -3,7 +3,10 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -13,9 +16,10 @@ import (
 type acpChatSession struct {
 	userID         string
 	username       string
-	query          string // display form (with [image:filename] placeholders for management history)
+	query          string // display form (with [image:filename] [file:filename] placeholders for management history)
 	rawText        string // raw user text (without placeholders), used for prompt building
-	attachments    []Attachment
+	attachments    []Attachment // images only; non-images are persisted to disk before runPrompt
+	persistedFiles []PersistedAttachment // non-image attachments written under <workdir>/uploads/<convID>/
 	conversationID string
 	sessionID      string // store session UUID (set after InsertSession)
 	poolKey        string
@@ -25,7 +29,7 @@ type acpChatSession struct {
 	done   bool
 }
 
-func newACPChatSession(userID, username, query, conversationID string, attachments []Attachment) *acpChatSession {
+func newACPChatSession(userID, username, query, conversationID string, images []Attachment, persisted []PersistedAttachment) *acpChatSession {
 	convID := conversationID
 	if convID == "" {
 		convID = "default"
@@ -33,9 +37,10 @@ func newACPChatSession(userID, username, query, conversationID string, attachmen
 	return &acpChatSession{
 		userID:         userID,
 		username:       username,
-		query:          formatQueryForHistory(query, attachments),
+		query:          formatQueryForHistory(query, images, persisted),
 		rawText:        query,
-		attachments:    attachments,
+		attachments:    images,
+		persistedFiles: persisted,
 		conversationID: conversationID,
 		sessionID:      newUUID(),
 		poolKey:        "chat-api:" + userID + ":" + convID,
@@ -45,15 +50,20 @@ func newACPChatSession(userID, username, query, conversationID string, attachmen
 
 // formatQueryForHistory builds the placeholder-prefixed string stored in
 // query_sessions.query so the management history list does not embed base64
-// data. Per design D4: "[image:foo.png] [image:bar.jpg] <text>".
-func formatQueryForHistory(text string, atts []Attachment) string {
-	if len(atts) == 0 {
+// data or absolute paths. Format: "[image:foo.png] [file:bar.pdf] <text>".
+func formatQueryForHistory(text string, images []Attachment, persisted []PersistedAttachment) string {
+	if len(images) == 0 && len(persisted) == 0 {
 		return text
 	}
 	var b strings.Builder
-	for _, a := range atts {
+	for _, a := range images {
 		b.WriteString("[image:")
 		b.WriteString(a.Filename)
+		b.WriteString("] ")
+	}
+	for _, p := range persisted {
+		b.WriteString("[file:")
+		b.WriteString(p.Filename)
 		b.WriteString("] ")
 	}
 	b.WriteString(text)
@@ -97,6 +107,8 @@ type ACPUserSessionManager struct {
 	adminHub *ManagementHub
 	logger   *slog.Logger
 	timeout  time.Duration
+	workdir  string
+	settings *SettingsManager // optional; nil → built-in defaults
 
 	mu       sync.Mutex
 	sessions map[string]*acpChatSession // userID → active session
@@ -106,18 +118,93 @@ func newACPUserSessionManager(runtime AgentRuntime, workdir string, store *Store
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &ACPUserSessionManager{
-		pool:     newACPSessionPool(runtime.ACPExecutable, runtime.ACPArgs, workdir, logger),
+	pool := newACPSessionPool(runtime.ACPExecutable, runtime.ACPArgs, workdir, logger)
+	m := &ACPUserSessionManager{
+		pool:     pool,
 		store:    store,
 		adminHub: adminHub,
 		logger:   logger,
 		timeout:  userSessionTimeout,
+		workdir:  workdir,
 		sessions: make(map[string]*acpChatSession),
 	}
+	// Wire eviction hook so per-conversation uploads are cleaned up when the
+	// pool drops the (user, conv) subprocess. The pool key for chat-api is
+	// "chat-api:<userID>:<convID>"; we extract <convID> and rm -rf its dir.
+	pool.evictHook = func(key string) {
+		convID, ok := chatAPIConvIDFromPoolKey(key)
+		if !ok || convID == "default" {
+			return
+		}
+		convDir := filepath.Join(workdir, "uploads", convID)
+		if err := os.RemoveAll(convDir); err != nil {
+			logger.Warn("ACP chat: cleanup uploads dir failed", "convID", convID, "err", err)
+		} else {
+			logger.Info("ACP chat: cleaned uploads dir on evict", "convID", convID)
+		}
+	}
+	return m
+}
+
+// SetSettings wires the settings manager so the chat API can read attachment
+// limits at request time.
+func (m *ACPUserSessionManager) SetSettings(sm *SettingsManager) {
+	m.settings = sm
+}
+
+// chatAPIConvIDFromPoolKey extracts the conversation ID from a pool key of
+// the form "chat-api:<userID>:<convID>". Returns ok=false for non-chat keys.
+func chatAPIConvIDFromPoolKey(key string) (string, bool) {
+	const prefix = "chat-api:"
+	if !strings.HasPrefix(key, prefix) {
+		return "", false
+	}
+	rest := key[len(prefix):]
+	colon := strings.IndexByte(rest, ':')
+	if colon < 0 {
+		return "", false
+	}
+	return rest[colon+1:], true
 }
 
 // StartSession starts an ACP prompt for userID. Returns 409-alike error if busy.
 func (m *ACPUserSessionManager) StartSession(userID, username, query string, newConversation bool, conversationID string, attachments []Attachment) error {
+	// Partition attachments: images stay in memory (inline ACP image block);
+	// non-images are persisted under <workdir>/uploads/<convID>/.
+	var images []Attachment
+	var nonImages []Attachment
+	for _, a := range attachments {
+		if IsImageMIME(a.MimeType) {
+			images = append(images, a)
+		} else {
+			nonImages = append(nonImages, a)
+		}
+	}
+
+	convForDir := conversationID
+	if convForDir == "" {
+		convForDir = "default"
+	}
+
+	var persisted []PersistedAttachment
+	if len(nonImages) > 0 {
+		var cs *ChatSettings
+		if m.settings != nil {
+			cs = m.settings.GetEffective().Chat
+		}
+		lim := EffectiveAttachmentLimits(cs)
+		// Persist with a short timeout — disk writes should be quick.
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		var err error
+		persisted, err = WriteAttachmentsToDisk(ctx, m.workdir, convForDir, nonImages, lim)
+		if err != nil {
+			// Preserve the sentinel so the HTTP handler can map quota errors
+			// to 400 Bad Request instead of a generic 500.
+			return fmt.Errorf("persist attachments: %w", err)
+		}
+	}
+
 	m.mu.Lock()
 	existing, ok := m.sessions[userID]
 	if ok {
@@ -126,34 +213,47 @@ func (m *ACPUserSessionManager) StartSession(userID, username, query string, new
 		existing.mu.Unlock()
 		if running {
 			m.mu.Unlock()
+			// Roll back disk writes on conflict — caller's request is rejected.
+			for _, p := range persisted {
+				_ = os.Remove(p.AbsPath)
+			}
 			return &sessionConflictError{userID: userID}
 		}
 		delete(m.sessions, userID)
 	}
 
-	sess := newACPChatSession(userID, username, query, conversationID, attachments)
+	sess := newACPChatSession(userID, username, query, conversationID, images, persisted)
 	m.sessions[userID] = sess
 	m.mu.Unlock()
 
-	// Build text prompt with history if continuing a conversation. History
-	// expansion only touches text; attachments are appended as image blocks
-	// after the (possibly expanded) text block.
-	promptText := query
+	// Build text prompt: history expansion (if continuing) + file prefix
+	// (when non-image attachments were persisted) + the user's query.
+	promptText := BuildPromptFilePrefix(persisted, query)
 	if !newConversation && m.store != nil {
 		since := time.Now().UnixMilli() - conversationWindow.Milliseconds()
 		if history, err := m.store.GetRecentHistory(userID, since, conversationMaxTurns); err != nil {
 			m.logger.Warn("ACP chat: GetRecentHistory failed", "err", err)
 		} else {
-			promptText = buildPrompt(history, query)
+			promptText = buildPrompt(history, BuildPromptFilePrefix(persisted, query))
 		}
 	}
 
 	if len(attachments) > 0 {
-		var total int
-		for _, a := range attachments {
-			total += len(a.DataBase64)
+		var imgBytes int
+		for _, a := range images {
+			imgBytes += len(a.DataBase64)
 		}
-		m.logger.Info("ACP chat: attachments accepted", "userID", userID, "count", len(attachments), "total_b64_bytes", total)
+		var fileBytes int64
+		for _, p := range persisted {
+			fileBytes += p.SizeBytes
+		}
+		m.logger.Info("ACP chat: attachments accepted",
+			"userID", userID,
+			"images", len(images),
+			"image_b64_bytes", imgBytes,
+			"files", len(persisted),
+			"file_bytes", fileBytes,
+		)
 	}
 	go m.runPrompt(sess, promptText)
 	return nil
@@ -240,6 +340,9 @@ func (m *ACPUserSessionManager) runPrompt(sess *acpChatSession, prompt string) {
 		}
 	}
 
+	// sess.attachments holds only image attachments (non-images were persisted
+	// to disk and are referenced via the `[file: ...]` prefix already baked
+	// into prompt by BuildPromptFilePrefix).
 	blocks := []ACPContent{{Type: "text", Text: prompt}}
 	blocks = append(blocks, AttachmentsToACPBlocks(sess.attachments)...)
 	response, err := proc.PromptWithContent(ctx, blocks, onChunk, onToolStart, onToolEnd)
