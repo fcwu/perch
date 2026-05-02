@@ -50,4 +50,4 @@
 - [x] 6.1 全套 QA cycle zero FAIL / zero env-fix-by-qa SKIP — `tests/test-report-2026-05-01-codex-support-1506.md`：CX01-04 + MR01-02 全 PASS（CX02、CX03 還比 design 預期更乾淨）
 - [x] 6.2 README、Settings UI、code 三方一致：列項都是 claude / opencode / codex（README.md 含表格 + 「Codex 額外注意」段、SettingsPanel RadioGroup、`runtime.go::loadAgentRuntime` 三 case 對齊）
 - [x] 6.3 Phase 0 pre-flight 結果已合併進 design.md（Q1/Q2 從 open question 變 verified；新增「Phase 0 pre-flight」段 + 「對 perch 的影響」表）
-- [ ] 6.4 archive 完成 — 等使用者確認後跑 `/opsx:archive`
+- [x] 6.4 archive 完成 — 2026-05-02 archived
