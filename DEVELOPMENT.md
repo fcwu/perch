@@ -20,7 +20,7 @@ AUTH_MODE=none LISTEN_ADDR=:8080 ./perch
 
 瀏覽器開啟 **`http://localhost:8080`**，會自動重導向至 `/chat`（Chat UI）；terminal 在 `http://localhost:8080/terminal`。
 
-> `AUTH_MODE=none` 和 `AUTH_MODE=password` 使用 plain HTTP；只有 `AUTH_MODE=mtls` 才使用 HTTPS。
+> Perch 使用 plain HTTP；TLS termination 交由反向代理（Cloudflare、nginx 等）處理。
 
 ---
 
@@ -45,7 +45,6 @@ go test ./...
 │  Perch (Go binary)          │
 │                             │
 │  IP Block (TCP 層)          │
-│  TLS / mTLS                 │
 │  Auth Middleware             │
 │  Rate Limiter               │
 │                             │
@@ -66,7 +65,7 @@ go test ./...
 
 - 所有瀏覽器連線共用同一個 PTY session（多人同時看到同樣畫面）
 - Claude Code 崩潰後自動重啟
-- IP 封鎖在 TLS handshake 之前就丟棄連線
+- IP 封鎖在 TCP 層直接丟棄連線
 
 ---
 

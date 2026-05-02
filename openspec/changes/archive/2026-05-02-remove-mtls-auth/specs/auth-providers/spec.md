@@ -1,4 +1,4 @@
-## ADDED Requirements
+## MODIFIED Requirements
 
 ### Requirement: AUTH_METHOD selects the authentication method for single-user mode
 In single-user mode, the system SHALL read `AUTH_METHOD` at startup. Accepted values: `none` (default), `password`, `gitlab`. If `mtls` is provided, the server SHALL refuse to start with a clear error message.
@@ -23,16 +23,8 @@ In single-user mode, the system SHALL read `AUTH_METHOD` at startup. Accepted va
 - **WHEN** `AUTH_METHOD=mtls` is set
 - **THEN** the server refuses to start and logs a clear error indicating mtls is no longer supported
 
-### Requirement: PERCH_USERNAME defaults to "admin" for password auth
-When `AUTH_METHOD=password`, `PERCH_USERNAME` env var sets the username (default: `admin`). `PERCH_PASSWORD` is required; the server refuses to start if it is unset.
+## REMOVED Requirements
 
-#### Scenario: Missing PERCH_PASSWORD causes startup failure
-- **WHEN** `AUTH_METHOD=password` and `PERCH_PASSWORD` is empty or unset
-- **THEN** the server refuses to start and logs a configuration error
-
-### Requirement: GITLAB_ADMIN_IDS restricts allowed accounts in single-user GitLab auth
-When `AUTH_METHOD=gitlab` in single-user mode, `GITLAB_ADMIN_IDS` (comma-separated GitLab user IDs) restricts which accounts may complete OAuth. If unset, any authenticated GitLab user is allowed.
-
-#### Scenario: Non-listed user is rejected in single-user GitLab auth
-- **WHEN** `AUTH_METHOD=gitlab`, `GITLAB_ADMIN_IDS` is set, and the authenticated user's GitLab ID is absent
-- **THEN** the server returns HTTP 403 and does NOT set a session cookie
+### Requirement: AUTH_METHOD=mtls bootstrap flow
+**Reason**: mTLS 認證已移除。外層安全方案（Cloudflare Zero Trust、VPN）可提供同等保護，且無需管理 client certificate。
+**Migration**: 將 `AUTH_METHOD=mtls` 改為 `none`（內網部署）或 `password`（密碼保護）。`/bootstrap` 路由不再存在。

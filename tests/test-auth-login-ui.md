@@ -186,18 +186,6 @@
 
 ---
 
-## E2E-curl — mTLS 模式
-
-### AL14 — AUTH_METHOD=mtls 自動生成 self-signed 憑證並正常啟動
-
-**層級**：E2E-curl（無需 GitLab）
-
-**Given** Perch 以 `AUTH_METHOD=mtls` 啟動（不預先設定 TLS 憑證）
-**When** 伺服器啟動，使用者造訪 `/bootstrap` 頁面
-**Then** 可下載 `client.p12` 憑證檔案；持憑證連線後可正常存取
-
----
-
 ## E2E-curl — Multi-user 模式
 
 ### AL02 — 明確設定 PERCH_MODE=multi

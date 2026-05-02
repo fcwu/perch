@@ -83,52 +83,15 @@ func TestAuthPasswordBypassEndpoints(t *testing.T) {
 	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
-	// /login and /bootstrap must be reachable without a session so users can authenticate
-	bypassed := []string{"/login", "/bootstrap"}
-	for _, path := range bypassed {
-		req := httptest.NewRequest("GET", path, nil)
-		w := httptest.NewRecorder()
-		mw.wrap(next).ServeHTTP(w, req)
-		if w.Code == http.StatusUnauthorized {
-			t.Errorf("path %s: expected non-401 (auth bypass), got 401", path)
-		}
-	}
-}
-
-func TestAuthMTLSRedirectsWithoutClientCert(t *testing.T) {
-	mw := newAuthMiddleware("mtls", "")
-	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-	})
-	// No TLS state → should redirect to /bootstrap for all non-bootstrap paths
-	protected := []string{"/", "/ws", "/input", "/schedule"}
-	for _, path := range protected {
-		req := httptest.NewRequest("GET", path, nil)
-		w := httptest.NewRecorder()
-		mw.wrap(next).ServeHTTP(w, req)
-		if w.Code != http.StatusFound {
-			t.Errorf("mtls path %s: expected 302 redirect without client cert, got %d", path, w.Code)
-		}
-		if loc := w.Header().Get("Location"); loc != "/bootstrap" {
-			t.Errorf("mtls path %s: expected redirect to /bootstrap, got %q", path, loc)
-		}
-	}
-}
-
-func TestAuthMTLSBootstrapAccessibleWithoutClientCert(t *testing.T) {
-	// /bootstrap must be reachable before the client has a certificate;
-	// it is the endpoint that hands out the client p12.
-	mw := newAuthMiddleware("mtls", "")
-	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-	})
-	req := httptest.NewRequest("GET", "/bootstrap", nil) // no TLS, no client cert
+	// /login must be reachable without a session so users can authenticate
+	req := httptest.NewRequest("GET", "/login", nil)
 	w := httptest.NewRecorder()
 	mw.wrap(next).ServeHTTP(w, req)
 	if w.Code == http.StatusUnauthorized {
-		t.Error("expected /bootstrap to be accessible without client cert, got 401")
+		t.Errorf("/login: expected non-401 (auth bypass), got 401")
 	}
 }
+
 
 func TestAuthPasswordInjectsUserIDInContext(t *testing.T) {
 	mw := newAuthMiddleware("password", "secret")

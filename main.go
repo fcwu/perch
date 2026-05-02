@@ -2,9 +2,6 @@ package main
 
 import (
 	"context"
-	"crypto/tls"
-	"crypto/x509"
-	"encoding/pem"
 	"fmt"
 	"net"
 	"net/http"
@@ -54,7 +51,11 @@ func main() {
 	if authMethod == "" {
 		authMethod = "none"
 	}
-	validMethods := map[string]bool{"none": true, "password": true, "mtls": true, "gitlab": true}
+	if authMethod == "mtls" {
+		logger.Error("AUTH_METHOD=mtls is no longer supported; use none, password, or gitlab")
+		os.Exit(1)
+	}
+	validMethods := map[string]bool{"none": true, "password": true, "gitlab": true}
 	if !validMethods[authMethod] {
 		logger.Error("invalid AUTH_METHOD", "value", authMethod)
 		os.Exit(1)
@@ -203,7 +204,7 @@ func main() {
 	}
 
 	// Apply rate limiting to sensitive endpoints only
-	sensitivePaths := map[string]bool{"/login": true, "/bootstrap": true}
+	sensitivePaths := map[string]bool{"/login": true}
 	finalHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if sensitivePaths[r.URL.Path] {
 			rl.wrap(srv).ServeHTTP(w, r)
@@ -221,45 +222,7 @@ func main() {
 	bl := newIPBlockList(blockedIPs)
 	blockedListener := wrapListener(baseListener, bl)
 
-	// --- TLS (mtls mode only) ---
 	var finalListener net.Listener = blockedListener
-	if authMethod == "mtls" {
-		caCertPEM, caKeyPEM, err := generateSelfSignedCert("perch-ca", nil, nil)
-		if err != nil {
-			logger.Error("generate CA cert", "err", err)
-			os.Exit(1)
-		}
-		// Parse CA cert/key so the server cert can be signed by the CA.
-		caBlock, _ := pem.Decode(caCertPEM)
-		caCert, err := x509.ParseCertificate(caBlock.Bytes)
-		if err != nil {
-			logger.Error("parse CA cert", "err", err)
-			os.Exit(1)
-		}
-		caKeyBlock, _ := pem.Decode(caKeyPEM)
-		caKey, err := x509.ParseECPrivateKey(caKeyBlock.Bytes)
-		if err != nil {
-			logger.Error("parse CA key", "err", err)
-			os.Exit(1)
-		}
-		serverCertPEM, serverKeyPEM, err := generateSelfSignedCert("perch-server", caCert, caKey)
-		if err != nil {
-			logger.Error("generate server cert", "err", err)
-			os.Exit(1)
-		}
-		p12Data, err := generateClientP12(caCertPEM, caKeyPEM, "perch")
-		if err != nil {
-			logger.Error("generate client p12", "err", err)
-			os.Exit(1)
-		}
-		srv.mux.Handle("/bootstrap", newBootstrapHandler(p12Data, "data/bootstrap.used"))
-		tlsCfg, err := buildTLSConfig(authMethod, serverCertPEM, serverKeyPEM, caCertPEM)
-		if err != nil {
-			logger.Error("build TLS config", "err", err)
-			os.Exit(1)
-		}
-		finalListener = tls.NewListener(blockedListener, tlsCfg)
-	}
 
 	httpSrv := &http.Server{Handler: finalHandler}
 

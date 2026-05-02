@@ -21,7 +21,7 @@ type gitLabAuth struct {
 	gitlabURL    string
 	cookieSecret string
 	mode         OperatingMode
-	authMethod   string          // AUTH_METHOD value: none | password | mtls | gitlab
+	authMethod   string          // AUTH_METHOD value: none | password | gitlab
 	adminIDs     map[string]bool // GitLab user IDs that get admin role
 	allowedIDs   map[string]bool // non-admin IDs allowed in multi-user mode; nil = deny all; "∗" sentinel = allow all
 	allowAll     bool            // true when GITLAB_ALLOWED_IDS=*

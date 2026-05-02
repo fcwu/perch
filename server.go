@@ -206,16 +206,9 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		r.URL.Path = "/chat"
 	}
 	// Chat/API paths: auth enforced at handler registration, skip primary auth.
-	// Exceptions:
-	//   - password mode: chat API routes need primary auth (GitLab auth is off).
-	//   - mtls mode: every chat path must require a client cert; the
-	//     middleware 302s unauthenticated requests to /bootstrap (T12).
+	// Exception: password mode needs primary auth on chat API routes.
 	isConvPath := r.URL.Path == "/api/conversations" || strings.HasPrefix(r.URL.Path, "/api/conversations/")
 	if r.URL.Path == "/chat" || r.URL.Path == "/api/chat" || r.URL.Path == "/api/chat/stream" || r.URL.Path == "/ws/chat" || isConvPath {
-		if s.auth != nil && s.auth.mode == "mtls" {
-			s.auth.wrap(s.mux).ServeHTTP(w, r)
-			return
-		}
 		if s.auth != nil && s.auth.mode == "password" && r.URL.Path != "/chat" {
 			s.auth.wrap(s.mux).ServeHTTP(w, r)
 			return

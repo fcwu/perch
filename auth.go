@@ -30,7 +30,7 @@ func (a *AuthMiddleware) wrap(next http.Handler) http.Handler {
 		case "none":
 			next.ServeHTTP(w, r)
 		case "password":
-			if r.URL.Path == "/login" || r.URL.Path == "/bootstrap" {
+			if r.URL.Path == "/login" {
 				next.ServeHTTP(w, r)
 				return
 			}
@@ -42,16 +42,6 @@ func (a *AuthMiddleware) wrap(next http.Handler) http.Handler {
 			ctx := context.WithValue(r.Context(), ctxUserID, "local")
 			ctx = context.WithValue(ctx, ctxUsername, "local")
 			next.ServeHTTP(w, r.WithContext(ctx))
-		case "mtls":
-			if r.URL.Path == "/bootstrap" {
-				next.ServeHTTP(w, r)
-				return
-			}
-			if r.TLS == nil || len(r.TLS.PeerCertificates) == 0 {
-				http.Redirect(w, r, "/bootstrap", http.StatusFound)
-				return
-			}
-			next.ServeHTTP(w, r)
 		}
 	})
 }

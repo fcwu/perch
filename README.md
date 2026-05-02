@@ -26,7 +26,6 @@ Perch 是一個輕量的 web terminal server，讓你不需要 SSH，直接用�
 - [認證方式](#認證方式)
   - [`none` — 無認證](#none--無認證)
   - [`password` — 密碼登入](#password--密碼登入)
-  - [`mtls` — 雙向 TLS（最安全）](#mtls--雙向-tls最安全)
   - [`gitlab` — GitLab OAuth（單使用者）](#gitlab--gitlab-oauth單使用者)
 - [運作模式](#運作模式)
   - [單使用者模式（預設）](#單使用者模式預設)
@@ -50,12 +49,12 @@ Perch 是一個輕量的 web terminal server，讓你不需要 SSH，直接用�
 - **完整 terminal**：基於 xterm.js，支援顏色、滾動、可點擊的 URL
 - **即時串流**：所有連線共用同一個 PTY session，即時看到 Claude Code 輸出
 - **兩種運作模式**：單使用者（`PERCH_MODE=single`）直接存取 terminal；多使用者（`PERCH_MODE=multi`）透過 GitLab OAuth 管理多位使用者，管理員與一般使用者分流
-- **四種認證方式**：無認證（內網測試）、密碼登入、mTLS 雙向憑證、GitLab OAuth
+- **三種認證方式**：無認證（內網測試）、密碼登入、GitLab OAuth
 - **多輪對話 Chat UI**：網頁聊天介面支援連續追問，對話歷史自動從 SQLite 重建，24 小時內的對話可跨 session 保留
 - **Runtime Settings**：認證、限速、agent 參數等可在 UI 熱改，不需重啟容器
 - **排程器**：用自然語言設定每天幾點自動送指令進 terminal（透過 `local-schedule` skill）
 - **IP 封鎖**：TCP 層封鎖惡意 IP
-- **限速**：HTTP 層限制登入/bootstrap 端點的請求頻率
+- **限速**：HTTP 層限制登入端點的請求頻率
 - **自動重啟**：Claude Code 崩潰後自動重啟
 
 ### Web Terminal 排程
@@ -125,7 +124,7 @@ Settings 儲存在 `/data/settings.json`。需要重啟的設定，按 **Save & 
 | `PUID` | `1000` | 容器內行程的 UID；建議設為 `$(id -u)` |
 | `PGID` | `PUID` 同值 | 容器內行程的 GID；建議設為 `$(id -g)` |
 | `TZ` | `UTC` | 容器時區，影響排程觸發時間，例如 `Asia/Taipei` |
-| `LISTEN_ADDR` | `:8080` | 監聽位址；mTLS 模式需改為 `:8443` |
+| `LISTEN_ADDR` | `:8080` | 監聽位址 |
 | `PERCH_MODE` | `single` | `single`（單使用者）/ `multi`（多使用者） |
 | `AGENT_RUNTIME` | `claude` | `claude` / `opencode` / `codex` |
 | `CLAUDE_WORKDIR` | `/workspace`（若存在） | Claude Code 的起始工作目錄 |
@@ -159,7 +158,7 @@ Settings 儲存在 `/data/settings.json`。需要重啟的設定，按 **Save & 
 
 | 變數 | 預設值 | 說明 |
 |------|--------|------|
-| `AUTH_METHOD` | `none` | `none` / `password` / `mtls` / `gitlab` |
+| `AUTH_METHOD` | `none` | `none` / `password` / `gitlab` |
 | `PERCH_PASSWORD` | — | 密碼（`AUTH_METHOD=password` 時） |
 | `ADMIN_TOKEN` | — | Admin 介面 token；設定後開啟 admin 路由保護 |
 | `CLAUDE_ARGS` / `OPENCODE_ARGS` | — | 傳給 agent 的額外 CLI 參數 |
@@ -243,16 +242,6 @@ docker run -d \
 ### `password` — 密碼登入
 
 連線後需輸入密碼。密碼在 Settings → Auth → Password 設定，無需重啟容器。
-
-### `mtls` — 雙向 TLS（最安全）
-
-瀏覽器必須安裝 client 憑證才能連線。
-
-**首次設定流程：**
-1. 在 Settings 切換到 `mtls` 並重啟
-2. 瀏覽器開啟 `https://<your-server>:8443`，**自動跳轉** 到 `/bootstrap` 並下載 `client.p12`
-3. 安裝 `client.p12`（密碼：`perch`）— Android: 設定 → 安全性 → 加密憑證；iOS: 設定 → 一般 → VPN 與裝置管理
-4. Bootstrap 端點自動失效（只能用一次）
 
 ### `gitlab` — GitLab OAuth（單使用者）
 
