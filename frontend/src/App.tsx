@@ -4,6 +4,8 @@ import ChatApp from './ChatApp'
 import AdminRealtimePage from './AdminRealtimePage'
 import AdminHistoryPage from './AdminHistoryPage'
 import AdminAnalyticsPage from './AdminAnalyticsPage'
+import AdminConversationsPage from './AdminConversationsPage'
+import AdminSchedulesPage from './AdminSchedulesPage'
 
 interface AuthStatus {
   authenticated: boolean
@@ -173,7 +175,7 @@ function AdminLoginPage() {
   )
 }
 
-type AdminTab = 'realtime' | 'history' | 'analytics'
+type AdminTab = 'realtime' | 'history' | 'analytics' | 'conversations' | 'schedules'
 
 const ADMIN_FONT = "-apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif"
 
@@ -181,13 +183,21 @@ function AdminApp({ showLogout, showLive }: { showLogout: boolean, showLive: boo
   const initTab = (): AdminTab => {
     const p = window.location.pathname
     if (p.startsWith('/management/analytics')) return 'analytics'
+    if (p.startsWith('/management/conversations')) return 'conversations'
+    if (p.startsWith('/management/schedules')) return 'schedules'
     if (p.startsWith('/management/history')) return 'history'
-    return showLive ? 'realtime' : 'history'
+    return showLive ? 'realtime' : 'conversations'
   }
   const [tab, setTab] = useState<AdminTab>(initTab)
 
   const navigate = (t: AdminTab) => {
-    const url = t === 'realtime' ? '/management' : t === 'history' ? '/management/history' : '/management/analytics'
+    const url = (
+      t === 'realtime' ? '/management' :
+      t === 'history' ? '/management/history' :
+      t === 'analytics' ? '/management/analytics' :
+      t === 'conversations' ? '/management/conversations' :
+      '/management/schedules'
+    )
     window.history.pushState({}, '', url)
     setTab(t)
   }
@@ -217,6 +227,8 @@ function AdminApp({ showLogout, showLive }: { showLogout: boolean, showLive: boo
         >← Chat</a>
         <span style={{ color: '#4a4a4a', fontSize: 12, fontWeight: 600, paddingRight: 4, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Admin</span>
         {showLive && <button style={tabStyle(tab === 'realtime')} onClick={() => navigate('realtime')}>Live</button>}
+        <button style={tabStyle(tab === 'conversations')} onClick={() => navigate('conversations')}>Conversations</button>
+        <button style={tabStyle(tab === 'schedules')} onClick={() => navigate('schedules')}>Schedules</button>
         <button style={tabStyle(tab === 'history')} onClick={() => navigate('history')}>History</button>
         <button style={tabStyle(tab === 'analytics')} onClick={() => navigate('analytics')}>Analytics</button>
         {showLogout && (
@@ -227,6 +239,8 @@ function AdminApp({ showLogout, showLive }: { showLogout: boolean, showLive: boo
       </div>
       <div style={{ flex: 1, overflowY: 'auto' }}>
         {tab === 'realtime' && showLive && <AdminRealtimePage />}
+        {tab === 'conversations' && <AdminConversationsPage />}
+        {tab === 'schedules' && <AdminSchedulesPage />}
         {tab === 'history' && <AdminHistoryPage />}
         {tab === 'analytics' && <AdminAnalyticsPage />}
       </div>

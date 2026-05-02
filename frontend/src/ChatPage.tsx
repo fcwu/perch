@@ -1,5 +1,7 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
 import { ToolPanel, ToolEntry } from './ToolPanel'
+import ChatHeader from './ChatHeader'
+import SchedulePanel from './SchedulePanel'
 
 function SendIcon() {
   return (
@@ -96,6 +98,7 @@ export default function ChatPage({ conversationId }: ChatPageProps) {
   const [toolEntries, setToolEntries] = useState<ToolEntry[]>([])
   const [attachments, setAttachments] = useState<PendingAttachment[]>([])
   const [dragOver, setDragOver] = useState(false)
+  const [scheduleOpen, setScheduleOpen] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const esRef = useRef<EventSource | null>(null)
   const toolCounter = useRef(0)
@@ -167,6 +170,13 @@ export default function ChatPage({ conversationId }: ChatPageProps) {
 
     try {
       const body: Record<string, unknown> = { query: q, conversation_id: conversationId }
+      // For new conversations, include the user's preferred runtime/model
+      // (set by the header dropdown when no conversation is active yet).
+      if (!conversationId) {
+        const w = window as unknown as { perchPreferredRuntime?: string; perchPreferredModel?: string }
+        if (w.perchPreferredRuntime) body.runtime = w.perchPreferredRuntime
+        if (w.perchPreferredModel) body.model = w.perchPreferredModel
+      }
       if (sentAttachments.length > 0) {
         body.attachments = sentAttachments.map(a => ({
           filename: a.filename,
@@ -272,6 +282,10 @@ export default function ChatPage({ conversationId }: ChatPageProps) {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100dvh', background: '#171717', color: '#e0e0e0', fontFamily: FONT }}>
+      <ChatHeader conversationId={conversationId} onScheduleClick={() => setScheduleOpen(true)} />
+      {scheduleOpen && conversationId && (
+        <SchedulePanel conversationId={conversationId} onClose={() => setScheduleOpen(false)} />
+      )}
       {/* Thread area */}
       <div ref={threadRef} style={{ flex: 1, overflowY: 'auto', padding: '24px 24px 8px' }}>
         {messages.length === 0 && !loading && (

@@ -45,6 +45,16 @@ type Server struct {
 	mode            OperatingMode
 	logger          *slog.Logger
 	mux             *http.ServeMux
+
+	// defaultRuntime is the server-wide AGENT_RUNTIME, used when a new
+	// conversation is created without an explicit runtime/model override.
+	defaultRuntime AgentRuntime
+	// pool is the ACP session pool, used to evict (user, conv) sessions on
+	// runtime/model PATCH so the next prompt boots a fresh subprocess.
+	pool *ACPSessionPool
+	// scheduler is the chat scheduler, used to hot-reload chat_schedules rows
+	// when the schedule CRUD endpoints mutate them.
+	scheduler *Scheduler
 }
 
 func newServer(pm *PTYManager, auth *AuthMiddleware, im *IMManager, sessions SessionProvider, userSessions *UserSessionManager, gitlabAuth *gitLabAuth, adminAuth *adminAuth, adminHub *ManagementHub, store *Store, userRL *UserRateLimiter, logger *slog.Logger) *Server {
@@ -77,6 +87,26 @@ func newServerWithMode(pm *PTYManager, auth *AuthMiddleware, im *IMManager, sess
 		s.mux.Handle("/api/management/history/", managementMW(http.HandlerFunc(s.handleManagementHistoryDetail)))
 		s.mux.Handle("/api/management/history", managementMW(http.HandlerFunc(s.handleManagementHistory)))
 		s.mux.Handle("/api/management/analytics", managementMW(http.HandlerFunc(s.handleManagementAnalytics)))
+		// Read-only admin views over conversations + chat schedules. No PATCH /
+		// POST / DELETE routes are registered — operators must use SQL for
+		// destructive operations.
+		s.mux.Handle("GET /api/management/conversations", managementMW(http.HandlerFunc(s.handleManagementListConversations)))
+		s.mux.Handle("GET /api/management/conversations/{id}", managementMW(http.HandlerFunc(s.handleManagementGetConversation)))
+		s.mux.Handle("GET /api/management/conversations/{id}/messages", managementMW(http.HandlerFunc(s.handleManagementListConversationMessages)))
+		s.mux.Handle("GET /api/management/schedules", managementMW(http.HandlerFunc(s.handleManagementListSchedules)))
+		// 405 guards — without these, PATCH/POST/DELETE fall through to the
+		// SPA `/` handler and return 200 HTML, which violates the read-only
+		// admin contract (admin-conversations-readonly spec §8.6).
+		methodNotAllowed := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		})
+		s.mux.Handle("PATCH /api/management/conversations/{id}", methodNotAllowed)
+		s.mux.Handle("POST /api/management/conversations/{id}", methodNotAllowed)
+		s.mux.Handle("DELETE /api/management/conversations/{id}", methodNotAllowed)
+		s.mux.Handle("PATCH /api/management/schedules/{id}", methodNotAllowed)
+		s.mux.Handle("POST /api/management/schedules", methodNotAllowed)
+		s.mux.Handle("POST /api/management/schedules/{id}", methodNotAllowed)
+		s.mux.Handle("DELETE /api/management/schedules/{id}", methodNotAllowed)
 		if mode == ModeMulti {
 			s.mux.Handle("/ws/management", managementMW(http.HandlerFunc(s.handleManagementWS)))
 		} else {
@@ -108,7 +138,14 @@ func newServerWithMode(pm *PTYManager, auth *AuthMiddleware, im *IMManager, sess
 		s.mux.Handle("/ws/chat", chatWSHandler)
 		// Conversation routes: protected by GitLab session cookie.
 		s.mux.Handle("GET /api/conversations", gitlabAuth.middleware(http.HandlerFunc(s.handleListConversations)))
+		s.mux.Handle("PATCH /api/conversations/{id}", gitlabAuth.middleware(http.HandlerFunc(s.handlePatchConversation)))
 		s.mux.Handle("DELETE /api/conversations/{id}", gitlabAuth.middleware(http.HandlerFunc(s.handleDeleteConversation)))
+		s.mux.Handle("GET /api/conversations/{id}/messages", gitlabAuth.middleware(http.HandlerFunc(s.handleListConversationMessages)))
+		s.mux.Handle("GET /api/conversations/{id}/schedules", gitlabAuth.middleware(http.HandlerFunc(s.handleListChatSchedules)))
+		s.mux.Handle("POST /api/conversations/{id}/schedules", gitlabAuth.middleware(http.HandlerFunc(s.handleCreateChatSchedule)))
+		s.mux.Handle("DELETE /api/conversations/{id}/schedules/{job_id}", gitlabAuth.middleware(http.HandlerFunc(s.handleDeleteChatSchedule)))
+		// Runtime registry — auth-gated alongside the chat endpoints.
+		s.mux.Handle("GET /api/runtimes", gitlabAuth.middleware(http.HandlerFunc(s.handleListRuntimes)))
 	} else {
 		// Register chat routes even when GitLab auth is disabled so unauthenticated
 		// requests get a proper error response instead of falling through to the SPA
@@ -119,7 +156,13 @@ func newServerWithMode(pm *PTYManager, auth *AuthMiddleware, im *IMManager, sess
 		s.mux.Handle("/ws/chat", http.HandlerFunc(s.handleChatWS))
 		// Conversation routes (no extra middleware; ServeHTTP applies primary auth in password mode).
 		s.mux.HandleFunc("GET /api/conversations", s.handleListConversations)
+		s.mux.HandleFunc("PATCH /api/conversations/{id}", s.handlePatchConversation)
 		s.mux.HandleFunc("DELETE /api/conversations/{id}", s.handleDeleteConversation)
+		s.mux.HandleFunc("GET /api/conversations/{id}/messages", s.handleListConversationMessages)
+		s.mux.HandleFunc("GET /api/conversations/{id}/schedules", s.handleListChatSchedules)
+		s.mux.HandleFunc("POST /api/conversations/{id}/schedules", s.handleCreateChatSchedule)
+		s.mux.HandleFunc("DELETE /api/conversations/{id}/schedules/{job_id}", s.handleDeleteChatSchedule)
+		s.mux.HandleFunc("GET /api/runtimes", s.handleListRuntimes)
 	}
 	distFS, err := fs.Sub(frontendFS, "frontend/dist")
 	if err == nil {
@@ -208,7 +251,8 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Chat/API paths: auth enforced at handler registration, skip primary auth.
 	// Exception: password mode needs primary auth on chat API routes.
 	isConvPath := r.URL.Path == "/api/conversations" || strings.HasPrefix(r.URL.Path, "/api/conversations/")
-	if r.URL.Path == "/chat" || r.URL.Path == "/api/chat" || r.URL.Path == "/api/chat/stream" || r.URL.Path == "/ws/chat" || isConvPath {
+	isRuntimesPath := r.URL.Path == "/api/runtimes"
+	if r.URL.Path == "/chat" || r.URL.Path == "/api/chat" || r.URL.Path == "/api/chat/stream" || r.URL.Path == "/ws/chat" || isConvPath || isRuntimesPath {
 		if s.auth != nil && s.auth.mode == "password" && r.URL.Path != "/chat" {
 			s.auth.wrap(s.mux).ServeHTTP(w, r)
 			return
@@ -426,6 +470,8 @@ func (s *Server) handleChatAPI(w http.ResponseWriter, r *http.Request) {
 		ConversationID  string       `json:"conversation_id,omitempty"`
 		NewConversation bool         `json:"new_conversation,omitempty"`
 		Attachments     []Attachment `json:"attachments,omitempty"`
+		Runtime         string       `json:"runtime,omitempty"`
+		Model           string       `json:"model,omitempty"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "bad request: invalid JSON", http.StatusBadRequest)
@@ -453,7 +499,8 @@ func (s *Server) handleChatAPI(w http.ResponseWriter, r *http.Request) {
 	if conversationID == "" && s.store != nil {
 		conversationID = newUUID()
 		title := req.Query
-		if err := s.store.InsertConversation(conversationID, userID, title); err != nil {
+		runtime, model := s.resolveNewConversationRuntime(req.Runtime, req.Model)
+		if err := s.store.InsertConversation(conversationID, userID, title, runtime, model); err != nil {
 			s.logger.Error("store: insert conversation", "err", err)
 			conversationID = "" // non-fatal: proceed without conversation tracking
 		}
@@ -727,24 +774,261 @@ func (s *Server) resolveUserID(r *http.Request) string {
 	return "default"
 }
 
-// handleListConversations handles GET /api/conversations.
+// resolveNewConversationRuntime picks the runtime+model for a freshly created
+// conversation. If the caller supplied valid values they win; otherwise the
+// server's default runtime is used. Unknown runtimes fall back to the default.
+func (s *Server) resolveNewConversationRuntime(runtime, model string) (string, string) {
+	if runtime != "" {
+		if r, err := agentRuntimeByName(runtime); err == nil {
+			if model == "" {
+				model = r.DefaultModel
+			}
+			return r.Name, model
+		}
+	}
+	if s.defaultRuntime.Name != "" {
+		m := model
+		if m == "" {
+			m = s.defaultRuntime.DefaultModel
+		}
+		return s.defaultRuntime.Name, m
+	}
+	return "", ""
+}
+
+// handleListConversations handles GET /api/conversations with optional cursor
+// (?before=<updated_at_ms>) and ?limit=<n>. Response shape:
+//
+//	{ "pinned": [...], "recent": [...], "next_before": <ms or 0> }
+//
+// Pinned rows are returned only on the first page (before==0).
 func (s *Server) handleListConversations(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
 	if s.store == nil {
-		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte("[]"))
+		w.Write([]byte(`{"pinned":[],"recent":[]}`))
 		return
 	}
 	userID := s.resolveUserID(r)
-	convs, err := s.store.ListConversations(userID)
+	q := r.URL.Query()
+	var before int64
+	fmt.Sscanf(q.Get("before"), "%d", &before)
+	var limit int
+	fmt.Sscanf(q.Get("limit"), "%d", &limit)
+	pinned, recent, nextBefore, err := s.store.ListConversationsPage(userID, before, limit)
 	if err != nil {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
-	if convs == nil {
-		convs = []ConversationRow{}
+	if pinned == nil {
+		pinned = []ConversationRow{}
+	}
+	if recent == nil {
+		recent = []ConversationRow{}
+	}
+	resp := map[string]any{
+		"pinned":      pinned,
+		"recent":      recent,
+		"next_before": nextBefore,
+	}
+	json.NewEncoder(w).Encode(resp)
+}
+
+// handlePatchConversation handles PATCH /api/conversations/{id} with body
+// {"pinned"?: bool, "runtime"?: string, "model"?: string}. Each field is
+// independently applied. On runtime/model change, the corresponding ACP pool
+// key is evicted so the next prompt boots a fresh subprocess.
+func (s *Server) handlePatchConversation(w http.ResponseWriter, r *http.Request) {
+	if s.store == nil {
+		http.Error(w, "not found", http.StatusNotFound)
+		return
+	}
+	id := r.PathValue("id")
+	if id == "" {
+		http.Error(w, "missing id", http.StatusBadRequest)
+		return
+	}
+	userID := s.resolveUserID(r)
+
+	var req struct {
+		Pinned  *bool  `json:"pinned,omitempty"`
+		Runtime string `json:"runtime,omitempty"`
+		Model   string `json:"model,omitempty"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "bad request: invalid JSON", http.StatusBadRequest)
+		return
+	}
+
+	// Validate runtime+model against the registry up front so a bad runtime
+	// doesn't leave the row partially updated.
+	if req.Runtime != "" {
+		rt, err := agentRuntimeByName(req.Runtime)
+		if err != nil {
+			http.Error(w, "bad request: unknown runtime", http.StatusBadRequest)
+			return
+		}
+		if req.Model != "" {
+			ok := false
+			for _, m := range rt.Models {
+				if m == req.Model {
+					ok = true
+					break
+				}
+			}
+			if !ok {
+				http.Error(w, "bad request: unknown model for runtime", http.StatusBadRequest)
+				return
+			}
+		}
+	}
+	if req.Model != "" && req.Runtime == "" {
+		// Model-only change: validate against the conversation's current runtime.
+		conv, err := s.store.GetConversation(id, userID)
+		if err != nil {
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+		if conv == nil {
+			http.Error(w, "not found", http.StatusNotFound)
+			return
+		}
+		rt, rerr := agentRuntimeByName(conv.Runtime)
+		if rerr != nil {
+			http.Error(w, "bad request: conversation has unknown runtime; specify runtime too", http.StatusBadRequest)
+			return
+		}
+		ok := false
+		for _, m := range rt.Models {
+			if m == req.Model {
+				ok = true
+				break
+			}
+		}
+		if !ok {
+			http.Error(w, "bad request: unknown model for runtime", http.StatusBadRequest)
+			return
+		}
+	}
+
+	matched := false
+	if req.Pinned != nil {
+		ok, err := s.store.UpdateConversationPin(id, userID, *req.Pinned)
+		if err != nil {
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+		matched = matched || ok
+	}
+	if req.Runtime != "" || req.Model != "" {
+		ok, err := s.store.UpdateConversationRuntime(id, userID, req.Runtime, req.Model)
+		if err != nil {
+			http.Error(w, "internal error", http.StatusInternalServerError)
+			return
+		}
+		matched = matched || ok
+		if ok && s.pool != nil {
+			s.pool.EvictByKey("chat-api:" + userID + ":" + id)
+		}
+	}
+
+	// If the request was empty or no fields matched, treat as 404 (the row
+	// either doesn't exist or doesn't belong to this user).
+	if !matched {
+		http.Error(w, "not found", http.StatusNotFound)
+		return
+	}
+
+	conv, err := s.store.GetConversation(id, userID)
+	if err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	if conv == nil {
+		http.Error(w, "not found", http.StatusNotFound)
+		return
 	}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(convs)
+	json.NewEncoder(w).Encode(conv)
+}
+
+// handleListConversationMessages handles GET /api/conversations/{id}/messages
+// for the authenticated user.
+func (s *Server) handleListConversationMessages(w http.ResponseWriter, r *http.Request) {
+	if s.store == nil {
+		http.Error(w, "not found", http.StatusNotFound)
+		return
+	}
+	id := r.PathValue("id")
+	if id == "" {
+		http.Error(w, "missing id", http.StatusBadRequest)
+		return
+	}
+	userID := s.resolveUserID(r)
+	conv, err := s.store.GetConversation(id, userID)
+	if err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	if conv == nil {
+		http.Error(w, "not found", http.StatusNotFound)
+		return
+	}
+	q := r.URL.Query()
+	var page, limit int
+	fmt.Sscanf(q.Get("page"), "%d", &page)
+	fmt.Sscanf(q.Get("limit"), "%d", &limit)
+	msgs, total, err := s.store.ListMessagesByConversation(id, page, limit)
+	if err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	if msgs == nil {
+		msgs = []ConversationMessage{}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{"total": total, "messages": msgs})
+}
+
+// handleListRuntimes handles GET /api/runtimes — returns the runtime registry
+// for the chat picker. Auth is applied at registration time consistent with
+// other /api/* endpoints.
+func (s *Server) handleListRuntimes(w http.ResponseWriter, r *http.Request) {
+	type runtimeView struct {
+		ID           string   `json:"id"`
+		Name         string   `json:"name"`
+		Models       []string `json:"models"`
+		DefaultModel string   `json:"default_model"`
+		SupportsMCP  bool     `json:"supports_mcp"`
+	}
+	out := []runtimeView{}
+	for _, name := range availableRuntimeNames() {
+		rt, err := agentRuntimeByName(name)
+		if err != nil {
+			continue
+		}
+		out = append(out, runtimeView{
+			ID:           rt.Name,
+			Name:         displayRuntimeName(rt.Name),
+			Models:       append([]string{}, rt.Models...),
+			DefaultModel: rt.DefaultModel,
+			SupportsMCP:  rt.SupportsMCP,
+		})
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{"runtimes": out})
+}
+
+func displayRuntimeName(id string) string {
+	switch id {
+	case "claude":
+		return "Claude"
+	case "codex":
+		return "Codex"
+	case "opencode":
+		return "OpenCode"
+	default:
+		return id
+	}
 }
 
 // handleDeleteConversation handles DELETE /api/conversations/{id}.
@@ -769,6 +1053,116 @@ func (s *Server) handleDeleteConversation(w http.ResponseWriter, r *http.Request
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// handleManagementListConversations handles
+// GET /api/management/conversations with optional ?user, ?q, ?from, ?to,
+// ?page, ?limit filters. Read-only; no mutation routes are registered.
+func (s *Server) handleManagementListConversations(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if s.store == nil {
+		json.NewEncoder(w).Encode(map[string]any{"total": 0, "conversations": []any{}})
+		return
+	}
+	q := r.URL.Query()
+	user := q.Get("user")
+	keyword := q.Get("q")
+	var from, to int64
+	fmt.Sscanf(q.Get("from"), "%d", &from)
+	fmt.Sscanf(q.Get("to"), "%d", &to)
+	var page, limit int
+	fmt.Sscanf(q.Get("page"), "%d", &page)
+	fmt.Sscanf(q.Get("limit"), "%d", &limit)
+	rows, total, err := s.store.ListConversationsAdmin(user, keyword, from, to, page, limit)
+	if err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	if rows == nil {
+		rows = []ConversationRow{}
+	}
+	json.NewEncoder(w).Encode(map[string]any{"total": total, "conversations": rows})
+}
+
+// handleManagementGetConversation handles GET /api/management/conversations/{id}.
+// Returns the full row regardless of which user owns it.
+func (s *Server) handleManagementGetConversation(w http.ResponseWriter, r *http.Request) {
+	if s.store == nil {
+		http.Error(w, "not found", http.StatusNotFound)
+		return
+	}
+	id := r.PathValue("id")
+	if id == "" {
+		http.Error(w, "missing id", http.StatusBadRequest)
+		return
+	}
+	conv, err := s.store.GetConversation(id, "")
+	if err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	if conv == nil {
+		http.Error(w, "not found", http.StatusNotFound)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(conv)
+}
+
+// handleManagementListConversationMessages handles
+// GET /api/management/conversations/{id}/messages.
+func (s *Server) handleManagementListConversationMessages(w http.ResponseWriter, r *http.Request) {
+	if s.store == nil {
+		http.Error(w, "not found", http.StatusNotFound)
+		return
+	}
+	id := r.PathValue("id")
+	if id == "" {
+		http.Error(w, "missing id", http.StatusBadRequest)
+		return
+	}
+	q := r.URL.Query()
+	var page, limit int
+	fmt.Sscanf(q.Get("page"), "%d", &page)
+	fmt.Sscanf(q.Get("limit"), "%d", &limit)
+	if limit <= 0 {
+		limit = 50
+	}
+	msgs, total, err := s.store.ListMessagesByConversation(id, page, limit)
+	if err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	if msgs == nil {
+		msgs = []ConversationMessage{}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{"total": total, "messages": msgs})
+}
+
+// handleManagementListSchedules handles GET /api/management/schedules with
+// optional ?user, ?conv, ?page, ?limit filters.
+func (s *Server) handleManagementListSchedules(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if s.store == nil {
+		json.NewEncoder(w).Encode(map[string]any{"total": 0, "schedules": []any{}})
+		return
+	}
+	q := r.URL.Query()
+	user := q.Get("user")
+	conv := q.Get("conv")
+	var page, limit int
+	fmt.Sscanf(q.Get("page"), "%d", &page)
+	fmt.Sscanf(q.Get("limit"), "%d", &limit)
+	rows, total, err := s.store.ListChatSchedulesAdmin(user, conv, page, limit)
+	if err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+	if rows == nil {
+		rows = []ChatSchedule{}
+	}
+	json.NewEncoder(w).Encode(map[string]any{"total": total, "schedules": rows})
 }
 
 // handleManagementAnalytics handles GET /admin/analytics

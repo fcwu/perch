@@ -38,6 +38,15 @@ type ACPProcess struct {
 	workdir    string
 	logger     *slog.Logger
 
+	// extraEnv is appended to os.Environ() when launching the subprocess.
+	// Populated by SetEnv before EnsureRunning.
+	extraEnv []string
+
+	// mcpServers is the list of MCP server descriptors passed to ACP
+	// session/new. nil/empty → []. Populated by SetMCPServers before
+	// EnsureRunning.
+	mcpServers []any
+
 	// lifecycle
 	mu        sync.Mutex
 	initMu    sync.Mutex // serializes EnsureRunning→Start to prevent concurrent init races
@@ -160,6 +169,22 @@ func (p *ACPProcess) IsRunning() bool {
 	return p.running
 }
 
+// SetEnv replaces the extra-env slice that will be appended to os.Environ()
+// when the subprocess starts. Must be called before EnsureRunning.
+func (p *ACPProcess) SetEnv(env []string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.extraEnv = append([]string(nil), env...)
+}
+
+// SetMCPServers configures the mcpServers payload for the next session/new
+// call. Must be called before EnsureRunning.
+func (p *ACPProcess) SetMCPServers(mcp []any) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.mcpServers = mcp
+}
+
 // EnsureRunning starts the subprocess if it is not already running.
 // initMu serializes concurrent callers so only one goroutine runs Start()
 // at a time; others wait and then find the process already running.
@@ -184,6 +209,9 @@ func (p *ACPProcess) Start(ctx context.Context) error {
 	cmd := exec.Command(p.executable, p.args...) // lifecycle managed explicitly; not ctx-bound
 	if p.workdir != "" {
 		cmd.Dir = p.workdir
+	}
+	if len(p.extraEnv) > 0 {
+		cmd.Env = append(os.Environ(), p.extraEnv...)
 	}
 
 	stdinPipe, err := cmd.StdinPipe()
@@ -224,9 +252,13 @@ func (p *ACPProcess) Start(ctx context.Context) error {
 
 	// ACP handshake: session/new (permissionMode comes from settings, set via session/set_mode below)
 	t1 := time.Now()
+	mcpServers := p.mcpServers
+	if mcpServers == nil {
+		mcpServers = []any{}
+	}
 	result, err := p.call(ctx, "session/new", map[string]any{
 		"cwd":        p.workdir,
-		"mcpServers": []any{},
+		"mcpServers": mcpServers,
 	})
 	if err != nil {
 		p.Stop()

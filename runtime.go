@@ -14,7 +14,7 @@ type AgentRuntime struct {
 	DefaultEnv        []string
 	ProjectConfigDir  string
 	ProjectConfigFile string
-	AssetDir          string
+	AssetDir           string
 
 	// ACPExecutable is the binary spawned for chat-API / Discord / Telegram
 	// ACP sessions when this runtime is active. ACPArgs are passed before any
@@ -22,6 +22,16 @@ type AgentRuntime struct {
 	// argv used by exec.Command.
 	ACPExecutable string
 	ACPArgs       []string
+
+	// SupportsMCP indicates whether the runtime honors mcpServers passed in
+	// session/new. Drives whether perch advertises the self-hosted MCP server
+	// (and thus the agent-side scheduler tools) for sessions on this runtime.
+	SupportsMCP bool
+
+	// Models is the user-selectable model id list for this runtime; first entry
+	// is conventionally the default. DefaultModel can override that selection.
+	Models       []string
+	DefaultModel string
 }
 
 func loadAgentRuntime() (AgentRuntime, error) {
@@ -30,6 +40,18 @@ func loadAgentRuntime() (AgentRuntime, error) {
 		name = "claude"
 	}
 
+	r, err := agentRuntimeByName(name)
+	if err != nil {
+		return AgentRuntime{}, err
+	}
+	return r, nil
+}
+
+// agentRuntimeByName returns the registry entry for the named runtime. Used
+// both by loadAgentRuntime (env-driven) and by code paths that need to spawn
+// or describe a runtime by id (e.g., per-conversation runtime selection,
+// GET /api/runtimes).
+func agentRuntimeByName(name string) (AgentRuntime, error) {
 	switch name {
 	case "claude":
 		return AgentRuntime{
@@ -42,6 +64,9 @@ func loadAgentRuntime() (AgentRuntime, error) {
 			AssetDir:          "/app/perch-claude",
 			ACPExecutable:     "claude-agent-acp",
 			ACPArgs:           nil,
+			SupportsMCP:       true,
+			Models:            []string{"claude-sonnet-4-6", "claude-opus-4-7"},
+			DefaultModel:      "claude-sonnet-4-6",
 		}, nil
 	case "opencode":
 		return AgentRuntime{
@@ -54,7 +79,10 @@ func loadAgentRuntime() (AgentRuntime, error) {
 			ACPExecutable:     "opencode",
 			// --log-level WARN: opencode acp writes INFO logs to stdout by
 			// default, which corrupts the JSON-RPC stream perch reads.
-			ACPArgs: []string{"acp", "--log-level", "WARN"},
+			ACPArgs:      []string{"acp", "--log-level", "WARN"},
+			SupportsMCP:  false,
+			Models:       []string{"opencode-default"},
+			DefaultModel: "opencode-default",
 		}, nil
 	case "codex":
 		return AgentRuntime{
@@ -70,10 +98,19 @@ func loadAgentRuntime() (AgentRuntime, error) {
 			// needed — pre-flight verified stdout is clean JSON-RPC.
 			ACPExecutable: "codex-acp",
 			ACPArgs:       nil,
+			SupportsMCP:   false,
+			Models:        []string{"gpt-5-codex"},
+			DefaultModel:  "gpt-5-codex",
 		}, nil
 	default:
 		return AgentRuntime{}, fmt.Errorf("unsupported AGENT_RUNTIME %q", name)
 	}
+}
+
+// availableRuntimeNames returns the runtime ids the registry knows about, in
+// canonical order. Used by GET /api/runtimes to assemble the picker payload.
+func availableRuntimeNames() []string {
+	return []string{"claude", "codex", "opencode"}
 }
 
 func (r AgentRuntime) MainArgs() []string {

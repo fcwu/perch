@@ -110,6 +110,10 @@ type ACPUserSessionManager struct {
 	workdir  string
 	settings *SettingsManager // optional; nil → built-in defaults
 
+	defaultRuntime AgentRuntime
+	runtimeFor     func(name string) (AgentRuntime, error)
+	mcpServersFor  func(rt AgentRuntime, userID, conversationID string) []map[string]any
+
 	mu       sync.Mutex
 	sessions map[string]*acpChatSession // userID → active session
 }
@@ -120,13 +124,46 @@ func newACPUserSessionManager(runtime AgentRuntime, workdir string, store *Store
 	}
 	pool := newACPSessionPool(runtime.ACPExecutable, runtime.ACPArgs, workdir, logger)
 	m := &ACPUserSessionManager{
-		pool:     pool,
-		store:    store,
-		adminHub: adminHub,
-		logger:   logger,
-		timeout:  userSessionTimeout,
-		workdir:  workdir,
-		sessions: make(map[string]*acpChatSession),
+		pool:           pool,
+		store:          store,
+		adminHub:       adminHub,
+		logger:         logger,
+		timeout:        userSessionTimeout,
+		workdir:        workdir,
+		defaultRuntime: runtime,
+		runtimeFor:     agentRuntimeByName,
+		sessions:       make(map[string]*acpChatSession),
+	}
+	// Wire per-key process construction so chat-api:<user>:<conv> spawns the
+	// runtime + MCP servers configured for that conversation. Non-chat keys
+	// fall back to the default runtime (the one passed at construction).
+	pool.keyFactory = func(key string) *ACPProcess {
+		userID, convID, ok := chatAPIPoolKeyParts(key)
+		if !ok {
+			return nil
+		}
+		rt := m.defaultRuntime
+		if store != nil {
+			conv, err := store.GetConversation(convID, userID)
+			if err == nil && conv != nil && conv.Runtime != "" {
+				if resolved, rerr := m.resolveRuntime(conv.Runtime); rerr == nil {
+					rt = resolved
+				}
+			}
+		}
+		proc := NewACPProcess(rt.ACPExecutable, rt.ACPArgs, workdir, logger)
+		// mcpServers payload: empty when the runtime doesn't honour MCP.
+		if rt.SupportsMCP && m.mcpServersFor != nil {
+			servers := m.mcpServersFor(rt, userID, convID)
+			if len(servers) > 0 {
+				asAny := make([]any, 0, len(servers))
+				for _, s := range servers {
+					asAny = append(asAny, s)
+				}
+				proc.SetMCPServers(asAny)
+			}
+		}
+		return proc
 	}
 	// Wire eviction hook so per-conversation uploads are cleaned up when the
 	// pool drops the (user, conv) subprocess. The pool key for chat-api is
@@ -152,19 +189,106 @@ func (m *ACPUserSessionManager) SetSettings(sm *SettingsManager) {
 	m.settings = sm
 }
 
+// Pool exposes the underlying ACP session pool so external callers (e.g. the
+// HTTP server) can evict entries when the conversation's runtime/model change.
+func (m *ACPUserSessionManager) Pool() *ACPSessionPool {
+	return m.pool
+}
+
+// SetRuntimeResolver wires a resolver that returns the AgentRuntime for a
+// given runtime id. The chat manager uses it to spawn the right ACP binary
+// based on the conversation's runtime column.
+func (m *ACPUserSessionManager) SetRuntimeResolver(fn func(name string) (AgentRuntime, error)) {
+	m.runtimeFor = fn
+}
+
+// SetMCPServers wires the perch self-hosted MCP server descriptor builder.
+// Called per session/new to populate the mcpServers field. Returning a nil or
+// empty slice means the runtime gets `mcpServers: []`.
+func (m *ACPUserSessionManager) SetMCPServers(fn func(rt AgentRuntime, userID, conversationID string) []map[string]any) {
+	m.mcpServersFor = fn
+}
+
+// RunScheduledPrompt is the dispatcher entry point for chat_schedules fires.
+// It runs prompt against the (user, conv) ACP session under
+// `source='schedule'` semantics, persists the turn, and returns when the ACP
+// run is complete (or errors out).
+func (m *ACPUserSessionManager) RunScheduledPrompt(sch ChatSchedule) error {
+	if m.store == nil {
+		return fmt.Errorf("chat manager: store is nil")
+	}
+	conv, err := m.store.GetConversation(sch.ConversationID, sch.UserID)
+	if err != nil {
+		return fmt.Errorf("get conversation: %w", err)
+	}
+	if conv == nil {
+		return fmt.Errorf("conversation not found")
+	}
+
+	// Skip-and-log if the conversation's runtime is no longer registered.
+	if m.runtimeFor != nil && conv.Runtime != "" {
+		if _, rerr := m.runtimeFor(conv.Runtime); rerr != nil {
+			return fmt.Errorf("runtime not registered: %w", rerr)
+		}
+	}
+
+	username := conv.UserID // best-effort; chat IM uses the userID-as-username convention
+	sessID := newUUID()
+	if err := m.store.InsertSessionWithSource(sessID, conv.UserID, username, sch.Prompt, conv.ID, "schedule"); err != nil {
+		return fmt.Errorf("insert query_session: %w", err)
+	}
+
+	poolKey := "chat-api:" + conv.UserID + ":" + conv.ID
+	ctx, cancel := context.WithTimeout(context.Background(), m.timeout)
+	defer cancel()
+	proc, err := m.pool.Acquire(ctx, poolKey)
+	if err != nil {
+		_ = m.store.UpdateSessionError(sessID, err.Error())
+		return fmt.Errorf("acquire pool session: %w", err)
+	}
+	defer m.pool.Release(poolKey)
+
+	blocks := []ACPContent{{Type: "text", Text: sch.Prompt}}
+	response, err := proc.PromptWithContent(ctx, blocks, nil, nil, nil)
+	if err != nil {
+		_ = m.store.UpdateSessionError(sessID, err.Error())
+		return fmt.Errorf("acp prompt: %w", err)
+	}
+	if err := m.store.UpdateSessionDoneAndTouch(sessID, response, conv.ID); err != nil {
+		m.logger.Warn("RunScheduledPrompt: mark done failed", "err", err)
+	}
+	return nil
+}
+
 // chatAPIConvIDFromPoolKey extracts the conversation ID from a pool key of
 // the form "chat-api:<userID>:<convID>". Returns ok=false for non-chat keys.
 func chatAPIConvIDFromPoolKey(key string) (string, bool) {
+	_, conv, ok := chatAPIPoolKeyParts(key)
+	return conv, ok
+}
+
+// chatAPIPoolKeyParts splits a chat-api pool key into (userID, convID).
+func chatAPIPoolKeyParts(key string) (string, string, bool) {
 	const prefix = "chat-api:"
 	if !strings.HasPrefix(key, prefix) {
-		return "", false
+		return "", "", false
 	}
 	rest := key[len(prefix):]
 	colon := strings.IndexByte(rest, ':')
 	if colon < 0 {
-		return "", false
+		return "", "", false
 	}
-	return rest[colon+1:], true
+	return rest[:colon], rest[colon+1:], true
+}
+
+// resolveRuntime delegates to the wired resolver, falling back to the
+// canonical registry. Used by the per-key process factory and the scheduled
+// fire path so an unknown runtime fails closed.
+func (m *ACPUserSessionManager) resolveRuntime(name string) (AgentRuntime, error) {
+	if m.runtimeFor != nil {
+		return m.runtimeFor(name)
+	}
+	return agentRuntimeByName(name)
 }
 
 // StartSession starts an ACP prompt for userID. Returns 409-alike error if busy.
@@ -275,6 +399,16 @@ func (m *ACPUserSessionManager) runPrompt(sess *acpChatSession, prompt string) {
 	// Record session start in store and notify admin hub.
 	if m.store != nil {
 		if sess.conversationID != "" {
+			// Lazy-backfill runtime/model on legacy rows so the per-key
+			// process factory has a deterministic runtime to work with.
+			if conv, err := m.store.GetConversation(sess.conversationID, sess.userID); err == nil && conv != nil {
+				if conv.Runtime == "" {
+					rt := m.defaultRuntime
+					if err := m.store.BackfillConversationRuntime(conv.ID, rt.Name, rt.DefaultModel); err != nil {
+						m.logger.Warn("ACP chat: backfill runtime failed", "convID", conv.ID, "err", err)
+					}
+				}
+			}
 			_ = m.store.InsertSessionWithConversation(sess.sessionID, sess.userID, sess.username, sess.query, sess.conversationID)
 		} else {
 			_ = m.store.InsertSession(sess.sessionID, sess.userID, sess.username, sess.query)

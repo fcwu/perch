@@ -77,7 +77,58 @@ go test ./...
 | `/chat` | Main Chat UI (Open Web UI style) |
 | `/chat?id=<uuid>` | Opens specific conversation |
 | `/terminal` | xterm.js terminal (admin only) |
-| `/admin` | Admin panel (realtime/history/analytics) |
+| `/management` | Admin panel: Live / Conversations / Schedules / History / Analytics |
+
+### User-facing API
+
+| Method | Path | Description |
+|---|---|---|
+| `POST` | `/api/chat` | Start a chat turn. Body accepts `runtime` and `model` for new conversations. |
+| `GET` | `/api/chat/stream` | SSE stream of the active session. |
+| `GET` | `/api/conversations?before=<ms>&limit=<n>` | Cursor-paginated list. Response: `{pinned, recent, next_before}`. |
+| `PATCH` | `/api/conversations/{id}` | Body `{pinned?, runtime?, model?}`. Switching runtime/model evicts the ACP pool entry. |
+| `DELETE` | `/api/conversations/{id}` | Cascades to `query_sessions` and `chat_schedules`. |
+| `GET` | `/api/conversations/{id}/messages` | Lists turns with `source` ('user' / 'schedule'). |
+| `GET` | `/api/conversations/{id}/schedules` | Lists schedules for the conversation. |
+| `POST` | `/api/conversations/{id}/schedules` | Body `{prompt, hour?, minute?, repeat?, one_shot_at?}`. Exactly one of (hour+minute) or one_shot_at. |
+| `DELETE` | `/api/conversations/{id}/schedules/{job_id}` | Removes one schedule. |
+| `GET` | `/api/runtimes` | Returns `{runtimes:[{id,name,models,default_model,supports_mcp}, ...]}`. |
+
+### Admin API (read-only, gated by `ADMIN_TOKEN`)
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/api/management/conversations?user&q&from&to&page&limit` | List conversations across users. |
+| `GET` | `/api/management/conversations/{id}` | Single row (no user filter). |
+| `GET` | `/api/management/conversations/{id}/messages` | Turns ordered ASC, includes `source`. |
+| `GET` | `/api/management/schedules?user&conv&page&limit` | List chat schedules across users. |
+
+> Admin is read-only by design — `PATCH/POST/DELETE` on the admin paths return **405 Method Not Allowed**. Operators wishing to mutate user data SHOULD use SQL directly. This keeps the blast radius of admin UI bugs small.
+
+### `./perch mcp` sub-mode
+
+The same binary serves a stdio Model Context Protocol server when invoked as `./perch mcp`. It is launched as a subprocess by ACP runtimes (currently claude-agent-acp; `SupportsMCP=true` in `runtime.go`) when a chat session starts:
+
+```
+mcpServers: [{
+  type: "stdio",
+  command: "<path-to-perch>",
+  args: ["mcp"],
+  env: { PERCH_USER_ID, PERCH_CONV_ID, PERCH_DB_PATH }
+}]
+```
+
+Identity is bound from the env vars at startup; **tool arguments cannot override `user_id` or `conversation_id`**. Tools exposed:
+
+- `schedule_message({prompt, hour?, minute?, repeat?, one_shot_at?}) → {id}`
+- `list_schedules() → {schedules: [...]}` (enabled rows only)
+- `cancel_schedule({id}) → {deleted: bool}`
+
+Each tool call has a 5-second deadline. If `PERCH_USER_ID`, `PERCH_CONV_ID`, or `PERCH_DB_PATH` is missing, the process exits non-zero before serving any call.
+
+### Schema (multi-agent chat)
+
+`conversations` carries `pinned, pinned_at, runtime, model` (nullable when legacy; lazily backfilled on the first chat turn). `query_sessions` carries `source TEXT DEFAULT 'user'` so scheduler-fired turns can be tagged. `chat_schedules` is a new table FK'd to `conversations(id)`.
 
 ---
 

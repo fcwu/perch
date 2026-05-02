@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -31,6 +32,13 @@ type Job struct {
 	lastFiredAt time.Time // not persisted; prevents double-fire within the same minute
 }
 
+// chatJobState tracks fire-time bookkeeping for a chat_schedules row that has
+// been merged into the scheduler's in-memory map.
+type chatJobState struct {
+	row         ChatSchedule
+	lastFiredAt time.Time // not persisted; prevents double-fire within the same minute
+}
+
 type Scheduler struct {
 	mu       sync.Mutex
 	jobs     map[string]*Job
@@ -39,6 +47,14 @@ type Scheduler struct {
 	savePath string                            // path to schedules.jsonl
 	logger   *slog.Logger
 	selfWrite bool // true while we are writing to prevent re-triggering watch
+
+	// store and chatFire are wired by main once the SQLite store + ACP chat
+	// manager are constructed. chatFire is invoked by the ticker for matched
+	// chat_schedules rows; it returns nil on success, an error on dispatch
+	// failure (in which case the row is NOT deleted).
+	store     *Store
+	chatJobs  map[string]*chatJobState
+	chatFire  func(sch ChatSchedule) error
 }
 
 func newScheduler(pm *PTYManager, workdir string, logger *slog.Logger) *Scheduler {
@@ -54,10 +70,59 @@ func newScheduler(pm *PTYManager, workdir string, logger *slog.Logger) *Schedule
 	}
 	return &Scheduler{
 		jobs:     make(map[string]*Job),
+		chatJobs: make(map[string]*chatJobState),
 		pty:      pm,
 		savePath: savePath,
 		logger:   logger,
 	}
+}
+
+// SetChatFire wires the chat-job dispatcher (typically the ACP chat session
+// manager). The scheduler calls it from fireDue when a chat_schedules row
+// matches the current time.
+func (s *Scheduler) SetChatFire(store *Store, fire func(sch ChatSchedule) error) {
+	s.mu.Lock()
+	s.store = store
+	s.chatFire = fire
+	s.mu.Unlock()
+}
+
+// LoadChatSchedules reads chat_schedules from the store and replaces the
+// in-memory chat job map. Called on boot and (by ReloadChatSchedules) after
+// CRUD mutations.
+func (s *Scheduler) LoadChatSchedules() {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	store := s.store
+	s.mu.Unlock()
+	if store == nil {
+		return
+	}
+	rows, err := store.LoadAllChatSchedules()
+	if err != nil {
+		s.logger.Warn("scheduler: load chat_schedules failed", "err", err)
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	old := s.chatJobs
+	next := make(map[string]*chatJobState, len(rows))
+	for _, r := range rows {
+		state := &chatJobState{row: r}
+		if prev, ok := old[r.ID]; ok {
+			state.lastFiredAt = prev.lastFiredAt
+		}
+		next[r.ID] = state
+	}
+	s.chatJobs = next
+}
+
+// ReloadChatSchedules is the hot-reload path triggered by chat-schedule CRUD
+// handlers. It re-queries the store and merges into the in-memory map.
+func (s *Scheduler) ReloadChatSchedules() {
+	s.LoadChatSchedules()
 }
 
 func randomID() string {
@@ -314,6 +379,16 @@ func (s *Scheduler) fireDue(t time.Time) {
 		}
 		job.lastFiredAt = t
 
+		// chat: targets must never fall back to the main PTY — that
+		// would leak the prompt into the local terminal and into a
+		// runtime that isn't bound to the originating conversation.
+		// Chat jobs live in chatJobs, but defensively skip the
+		// JSONL-driven Job map's chat: targets too.
+		if strings.HasPrefix(job.Target, "chat:") {
+			s.logger.Warn("scheduler: legacy job has chat: target, skipping", "jobID", id, "target", job.Target)
+			continue
+		}
+
 		// Targeted jobs (e.g. discord:<channelID>) are routed by the
 		// adapter, which handles header posting and ACP/PTY dispatch
 		// itself. Falling through to the main-PTY write would leak the
@@ -335,7 +410,92 @@ func (s *Scheduler) fireDue(t time.Time) {
 	for _, id := range toDelete {
 		delete(s.jobs, id)
 	}
+
+	// Chat-schedule jobs use the same ticker. Iterate after the JSONL jobs.
+	chatFire := s.chatFire
+	store := s.store
+	var chatToDelete []string
+	type chatFireJob struct {
+		row     ChatSchedule
+		isOneShot bool
+		willDelete bool
+	}
+	var fires []chatFireJob
+	nowMs := t.UnixMilli()
+	for id, state := range s.chatJobs {
+		row := state.row
+		if !row.Enabled {
+			continue
+		}
+		matched := false
+		isOneShot := row.OneShotAt > 0
+		if isOneShot {
+			if row.OneShotAt <= nowMs {
+				matched = true
+			}
+		} else if row.Hour != nil && row.Minute != nil {
+			if t.Hour() == *row.Hour && t.Minute() == *row.Minute {
+				matched = true
+			}
+		}
+		if !matched {
+			continue
+		}
+		if time.Since(state.lastFiredAt) < time.Minute {
+			continue
+		}
+		state.lastFiredAt = t
+		willDelete := isOneShot || !row.Repeat
+		fires = append(fires, chatFireJob{row: row, isOneShot: isOneShot, willDelete: willDelete})
+		if willDelete {
+			chatToDelete = append(chatToDelete, id)
+		}
+	}
 	s.mu.Unlock()
+
+	// Dispatch chat fires outside the lock — fire functions may take seconds
+	// to talk to the ACP subprocess.
+	for _, fj := range fires {
+		if chatFire == nil {
+			s.logger.Warn("scheduler: chat fire requested but no dispatcher wired", "id", fj.row.ID)
+			continue
+		}
+		if err := chatFire(fj.row); err != nil {
+			s.logger.Warn("scheduler: chat fire failed", "id", fj.row.ID, "err", err)
+			// Fire failed: undo the willDelete bookkeeping so the row
+			// stays in the map and gets retried on the next tick.
+			s.mu.Lock()
+			if fj.willDelete {
+				for i, did := range chatToDelete {
+					if did == fj.row.ID {
+						chatToDelete = append(chatToDelete[:i], chatToDelete[i+1:]...)
+						break
+					}
+				}
+			}
+			s.mu.Unlock()
+			continue
+		}
+		if store != nil {
+			if err := store.TouchChatScheduleFired(fj.row.ID, nowMs); err != nil {
+				s.logger.Warn("scheduler: touch chat_schedules.last_fired_at failed", "id", fj.row.ID, "err", err)
+			}
+		}
+	}
+
+	if len(chatToDelete) > 0 && store != nil {
+		s.mu.Lock()
+		for _, id := range chatToDelete {
+			delete(s.chatJobs, id)
+		}
+		s.mu.Unlock()
+		for _, id := range chatToDelete {
+			if _, err := store.db.Exec(`DELETE FROM chat_schedules WHERE id=?`, id); err != nil {
+				s.logger.Warn("scheduler: delete completed chat_schedules row failed", "id", id, "err", err)
+			}
+		}
+	}
+
 	if len(toDelete) > 0 {
 		s.persist()
 	}

@@ -67,28 +67,45 @@ CREATE TABLE IF NOT EXISTS conversations (
 	created_at INTEGER NOT NULL,
 	updated_at INTEGER NOT NULL
 );
+CREATE TABLE IF NOT EXISTS chat_schedules (
+	id              TEXT PRIMARY KEY,
+	user_id         TEXT NOT NULL,
+	conversation_id TEXT NOT NULL REFERENCES conversations(id),
+	hour            INTEGER,
+	minute          INTEGER,
+	repeat          INTEGER NOT NULL DEFAULT 0,
+	one_shot_at     INTEGER NOT NULL DEFAULT 0,
+	prompt          TEXT NOT NULL,
+	enabled         INTEGER NOT NULL DEFAULT 1,
+	created_at      INTEGER NOT NULL,
+	last_fired_at   INTEGER
+);
 CREATE INDEX IF NOT EXISTS idx_qs_user_id    ON query_sessions(user_id);
 CREATE INDEX IF NOT EXISTS idx_qs_started_at ON query_sessions(started_at);
 CREATE INDEX IF NOT EXISTS idx_te_session_id ON tool_events(session_id);
 CREATE INDEX IF NOT EXISTS idx_conv_user_id    ON conversations(user_id);
 CREATE INDEX IF NOT EXISTS idx_conv_updated_at ON conversations(updated_at);
+CREATE INDEX IF NOT EXISTS idx_chat_schedules_user_conv ON chat_schedules(user_id, conversation_id);
 `)
 	if err != nil {
 		return err
 	}
-	return migrateQuerySessionsColumns(db)
+	if err := migrateQuerySessionsColumns(db); err != nil {
+		return err
+	}
+	return migrateConversationsColumns(db)
 }
 
-// migrateQuerySessionsColumns adds columns to query_sessions that were added after the
-// initial schema. SQLite does not support IF NOT EXISTS on ALTER TABLE, so we inspect
-// PRAGMA table_info first.
-func migrateQuerySessionsColumns(db *sql.DB) error {
-	rows, err := db.Query("PRAGMA table_info(query_sessions)")
+// addColumnIfMissing inspects PRAGMA table_info(table) and runs `ALTER TABLE
+// table ADD COLUMN ...` only when the column is absent. SQLite does not support
+// `IF NOT EXISTS` on ALTER TABLE, so this idempotent helper is the migration
+// primitive used by the per-table migrators.
+func addColumnIfMissing(db *sql.DB, table, column, decl string) error {
+	rows, err := db.Query(fmt.Sprintf("PRAGMA table_info(%s)", table))
 	if err != nil {
 		return err
 	}
 	defer rows.Close()
-	hasConvID := false
 	for rows.Next() {
 		var cid int
 		var name, typ string
@@ -98,20 +115,47 @@ func migrateQuerySessionsColumns(db *sql.DB) error {
 		if err := rows.Scan(&cid, &name, &typ, &notNull, &dflt, &pk); err != nil {
 			return err
 		}
-		if name == "conversation_id" {
-			hasConvID = true
+		if name == column {
+			return rows.Err()
 		}
 	}
 	if err := rows.Err(); err != nil {
 		return err
 	}
-	if !hasConvID {
-		if _, err := db.Exec(`ALTER TABLE query_sessions ADD COLUMN conversation_id TEXT`); err != nil {
-			return err
-		}
-		if _, err := db.Exec(`CREATE INDEX IF NOT EXISTS idx_qs_conv_id ON query_sessions(conversation_id)`); err != nil {
-			return err
-		}
+	_, err = db.Exec(fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s %s", table, column, decl))
+	return err
+}
+
+// migrateQuerySessionsColumns adds columns to query_sessions that were added
+// after the initial schema. Idempotent: re-running on an already-migrated DB is
+// a no-op.
+func migrateQuerySessionsColumns(db *sql.DB) error {
+	if err := addColumnIfMissing(db, "query_sessions", "conversation_id", "TEXT"); err != nil {
+		return err
+	}
+	if _, err := db.Exec(`CREATE INDEX IF NOT EXISTS idx_qs_conv_id ON query_sessions(conversation_id)`); err != nil {
+		return err
+	}
+	if err := addColumnIfMissing(db, "query_sessions", "source", "TEXT NOT NULL DEFAULT 'user'"); err != nil {
+		return err
+	}
+	return nil
+}
+
+// migrateConversationsColumns adds the pinning + per-conversation runtime
+// columns introduced for the multi-agent chat work.
+func migrateConversationsColumns(db *sql.DB) error {
+	if err := addColumnIfMissing(db, "conversations", "pinned", "INTEGER NOT NULL DEFAULT 0"); err != nil {
+		return err
+	}
+	if err := addColumnIfMissing(db, "conversations", "pinned_at", "INTEGER"); err != nil {
+		return err
+	}
+	if err := addColumnIfMissing(db, "conversations", "runtime", "TEXT"); err != nil {
+		return err
+	}
+	if err := addColumnIfMissing(db, "conversations", "model", "TEXT"); err != nil {
+		return err
 	}
 	return nil
 }

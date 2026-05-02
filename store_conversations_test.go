@@ -18,14 +18,14 @@ func openTestStore(t *testing.T) *Store {
 func TestInsertAndListConversations(t *testing.T) {
 	s := openTestStore(t)
 
-	if err := s.InsertConversation("conv-1", "user-a", "Hello world, this is my first message"); err != nil {
+	if err := s.InsertConversation("conv-1", "user-a", "Hello world, this is my first message", "claude", "claude-sonnet-4-6"); err != nil {
 		t.Fatalf("InsertConversation: %v", err)
 	}
-	if err := s.InsertConversation("conv-2", "user-a", "Second conversation"); err != nil {
+	if err := s.InsertConversation("conv-2", "user-a", "Second conversation", "claude", "claude-sonnet-4-6"); err != nil {
 		t.Fatalf("InsertConversation: %v", err)
 	}
 	// Different user — should not appear in user-a's list.
-	if err := s.InsertConversation("conv-3", "user-b", "Other user"); err != nil {
+	if err := s.InsertConversation("conv-3", "user-b", "Other user", "claude", "claude-sonnet-4-6"); err != nil {
 		t.Fatalf("InsertConversation: %v", err)
 	}
 
@@ -38,7 +38,7 @@ func TestInsertAndListConversations(t *testing.T) {
 	}
 	// InsertConversation with long title should be truncated to ≤60 runes.
 	longTitle := "This is a very long title that definitely exceeds sixty characters in total"
-	if err := s.InsertConversation("conv-long", "user-a", longTitle); err != nil {
+	if err := s.InsertConversation("conv-long", "user-a", longTitle, "claude", "claude-sonnet-4-6"); err != nil {
 		t.Fatalf("InsertConversation: %v", err)
 	}
 	convs, err = s.ListConversations("user-a")
@@ -57,7 +57,7 @@ func TestInsertAndListConversations(t *testing.T) {
 func TestDeleteConversation(t *testing.T) {
 	s := openTestStore(t)
 
-	if err := s.InsertConversation("del-conv", "user-x", "To be deleted"); err != nil {
+	if err := s.InsertConversation("del-conv", "user-x", "To be deleted", "claude", "claude-sonnet-4-6"); err != nil {
 		t.Fatalf("InsertConversation: %v", err)
 	}
 
@@ -92,7 +92,7 @@ func TestDeleteConversation(t *testing.T) {
 func TestDeleteConversationCleansUpSessions(t *testing.T) {
 	s := openTestStore(t)
 
-	if err := s.InsertConversation("c1", "user-z", "Conversation with sessions"); err != nil {
+	if err := s.InsertConversation("c1", "user-z", "Conversation with sessions", "claude", "claude-sonnet-4-6"); err != nil {
 		t.Fatalf("InsertConversation: %v", err)
 	}
 	// Insert a session belonging to this conversation.
@@ -121,7 +121,7 @@ func TestDeleteConversationCleansUpSessions(t *testing.T) {
 func TestTouchConversation(t *testing.T) {
 	s := openTestStore(t)
 
-	if err := s.InsertConversation("touch-conv", "user-t", "Touch test"); err != nil {
+	if err := s.InsertConversation("touch-conv", "user-t", "Touch test", "claude", "claude-sonnet-4-6"); err != nil {
 		t.Fatalf("InsertConversation: %v", err)
 	}
 

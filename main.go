@@ -16,6 +16,14 @@ import (
 var buildTime = "unknown"
 
 func main() {
+	// Sub-command dispatch: `./perch mcp` runs the stdio MCP server and exits
+	// without touching the HTTP server or scheduler. All other invocations
+	// fall through to the standard server bootstrap.
+	if len(os.Args) > 1 && os.Args[1] == "mcp" {
+		os.Exit(runMCPServer())
+		return
+	}
+
 	logger := newLogger(nil, nil)
 	runtime, err := loadAgentRuntime()
 	if err != nil {
@@ -192,6 +200,44 @@ func main() {
 	chatACP := newACPUserSessionManager(runtime, workdir, store, adminHub, logger.Logger)
 	chatACP.SetSettings(sm)
 	srv.chatSessions = chatACP
+	srv.defaultRuntime = runtime
+	srv.pool = chatACP.Pool()
+	srv.scheduler = sched
+
+	// Resolve the perch binary path once so we can hand it to ACP runtimes
+	// as the MCP server command. Falls back to "perch" on PATH if the lookup
+	// fails — in development this is good enough.
+	perchBin, exeErr := os.Executable()
+	if exeErr != nil {
+		logger.Warn("os.Executable failed; MCP servers may not launch", "err", exeErr)
+		perchBin = "perch"
+	}
+
+	chatACP.SetMCPServers(func(rt AgentRuntime, userID, convID string) []map[string]any {
+		if !rt.SupportsMCP {
+			return nil
+		}
+		return []map[string]any{
+			{
+				"type":    "stdio",
+				"command": perchBin,
+				"args":    []string{"mcp"},
+				"env": map[string]any{
+					"PERCH_USER_ID": userID,
+					"PERCH_CONV_ID": convID,
+					"PERCH_DB_PATH": dbPath,
+				},
+			},
+		}
+	})
+
+	// Wire the chat-schedules dispatcher into the scheduler and load existing
+	// rows on boot. The scheduler ticker handles both legacy JSONL jobs and
+	// chat_schedules from the store.
+	if store != nil {
+		sched.SetChatFire(store, chatACP.RunScheduledPrompt)
+		sched.LoadChatSchedules()
+	}
 
 	// Cleanup orphaned per-conversation upload directories on startup.
 	if cs := EffectiveAttachmentLimits(sm.GetEffective().Chat); cs.OrphanTTLDays > 0 {

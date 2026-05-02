@@ -37,15 +37,21 @@ type acpPoolEntry struct {
 // global limit, evicting idle (refCount==0) sessions via LRU when needed.
 // All methods are safe for concurrent use.
 type ACPSessionPool struct {
-	executable      string
-	args            []string
-	workdir         string
-	logger          *slog.Logger
-	idleTimeout     time.Duration
-	perUserMax      int
-	globalMax       int
-	processFactory  func() *ACPProcess // injectable for tests; nil → NewACPProcess
-	evictHook       func(key string)   // optional; called after a session is removed (idle expiry or LRU eviction)
+	executable     string
+	args           []string
+	workdir        string
+	logger         *slog.Logger
+	idleTimeout    time.Duration
+	perUserMax     int
+	globalMax      int
+	processFactory func() *ACPProcess // injectable for tests; nil → NewACPProcess
+	// keyFactory, when non-nil, is consulted before processFactory to allow
+	// per-key process construction (e.g., chat-api:<user>:<conv> spawns the
+	// right runtime + mcpServers). The factory is responsible for honouring
+	// any overrides (ACP_EXECUTABLE etc.). When nil or returning nil, the
+	// pool falls back to processFactory / NewACPProcess.
+	keyFactory func(key string) *ACPProcess
+	evictHook  func(key string) // optional; called after a session is removed (idle expiry or LRU eviction)
 
 	mu       sync.Mutex
 	sessions map[string]*acpPoolEntry
@@ -73,6 +79,18 @@ func (p *ACPSessionPool) newProcess() *ACPProcess {
 	return NewACPProcess(p.executable, p.args, p.workdir, p.logger)
 }
 
+// newProcessForKey returns a process for the given pool key. It prefers the
+// per-key factory when set so different keys can spawn different runtimes; it
+// falls back to the global factory / executable otherwise.
+func (p *ACPSessionPool) newProcessForKey(key string) *ACPProcess {
+	if p.keyFactory != nil {
+		if proc := p.keyFactory(key); proc != nil {
+			return proc
+		}
+	}
+	return p.newProcess()
+}
+
 // Acquire returns the ACPProcess for key, starting one if it does not exist or
 // has crashed. The reference count is incremented; caller must call Release.
 func (p *ACPSessionPool) Acquire(ctx context.Context, key string) (*ACPProcess, error) {
@@ -90,7 +108,7 @@ func (p *ACPSessionPool) Acquire(ctx context.Context, key string) (*ACPProcess, 
 
 		if !entry.process.IsRunning() {
 			// Replace the crashed process with a fresh one from the factory.
-			newProc := p.newProcess()
+			newProc := p.newProcessForKey(key)
 			if err := newProc.EnsureRunning(ctx); err != nil {
 				entry.refCount--
 				return nil, fmt.Errorf("acp pool: restart %q: %w", key, err)
@@ -131,7 +149,7 @@ func (p *ACPSessionPool) Acquire(ctx context.Context, key string) (*ACPProcess, 
 		}
 	}
 
-	proc := p.newProcess()
+	proc := p.newProcessForKey(key)
 	if err := proc.EnsureRunning(ctx); err != nil {
 		return nil, fmt.Errorf("acp pool: start %q: %w", key, err)
 	}
@@ -243,6 +261,33 @@ func (p *ACPSessionPool) removeEntryLocked(entry *acpPoolEntry, elem *list.Eleme
 		// keeps the lock for the rest of its critical section.
 		go hook(key)
 	}
+}
+
+// EvictByKey removes the entry for the exact key, terminating its subprocess
+// regardless of refCount. Used by the conversation PATCH handler to force a
+// fresh subprocess on the next prompt after a runtime/model change. No-op when
+// the key is not present. Returns true when an entry was evicted.
+func (p *ACPSessionPool) EvictByKey(key string) bool {
+	p.mu.Lock()
+	entry, ok := p.sessions[key]
+	if !ok {
+		p.mu.Unlock()
+		return false
+	}
+	if entry.idleTimer != nil {
+		entry.idleTimer.Stop()
+		entry.idleTimer = nil
+	}
+	entry.process.Stop()
+	p.lru.Remove(entry.lruElem)
+	delete(p.sessions, key)
+	hook := p.evictHook
+	p.logger.Info("ACP pool: session evicted (forced)", "key", key, "total", len(p.sessions))
+	p.mu.Unlock()
+	if hook != nil {
+		hook(key)
+	}
+	return true
 }
 
 // StopAll terminates all pooled subprocesses. Used during shutdown.
