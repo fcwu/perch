@@ -219,13 +219,14 @@ func main() {
 		}
 		return []map[string]any{
 			{
+				"name":    "perch",
 				"type":    "stdio",
 				"command": perchBin,
 				"args":    []string{"mcp"},
-				"env": map[string]any{
-					"PERCH_USER_ID": userID,
-					"PERCH_CONV_ID": convID,
-					"PERCH_DB_PATH": dbPath,
+				"env": []map[string]any{
+					{"name": "PERCH_USER_ID", "value": userID},
+					{"name": "PERCH_CONV_ID", "value": convID},
+					{"name": "PERCH_DB_PATH", "value": dbPath},
 				},
 			},
 		}
