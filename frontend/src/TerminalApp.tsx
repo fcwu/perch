@@ -215,6 +215,32 @@ export default function TerminalApp({ showLogout }: { showLogout: boolean }) {
     return connectWS(activeTab)
   }, [activeTab, connectWS])
 
+  // Touch-scroll support for Android / mobile browsers.
+  // xterm.js does not handle touch events natively; we translate swipe
+  // gestures into scrollLines() calls using the terminal's configured fontSize.
+  useEffect(() => {
+    const el = containerRef.current
+    if (!el) return
+    let lastY = 0
+    const onTouchStart = (e: TouchEvent) => { lastY = e.touches[0].clientY }
+    const onTouchMove = (e: TouchEvent) => {
+      e.preventDefault()
+      const term = termRef.current
+      if (!term) return
+      const dy = e.touches[0].clientY - lastY
+      lastY = e.touches[0].clientY
+      const lineHeight = (term.options.fontSize ?? 14) * 1.2
+      const lines = Math.round(dy / lineHeight)
+      if (lines !== 0) term.scrollLines(lines)
+    }
+    el.addEventListener('touchstart', onTouchStart, { passive: true })
+    el.addEventListener('touchmove', onTouchMove, { passive: false })
+    return () => {
+      el.removeEventListener('touchstart', onTouchStart)
+      el.removeEventListener('touchmove', onTouchMove)
+    }
+  }, [])
+
   const tabStyle = (active: boolean): React.CSSProperties => ({
     padding: '4px 12px',
     cursor: 'pointer',
