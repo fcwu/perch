@@ -20,12 +20,10 @@ FROM ubuntu:24.04
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates curl git jq gosu \
     fonts-noto-cjk fonts-noto-cjk-extra \
-    python3 python3-pip && \
+    python3 && \
     curl -fsSL https://deb.nodesource.com/setup_24.x | bash - && \
     apt-get install -y --no-install-recommends nodejs && \
     rm -rf /var/lib/apt/lists/*
-# ddddocr: Python CAPTCHA OCR library used by finance-fubon-statement skill
-RUN pip3 install ddddocr --break-system-packages --no-cache-dir
 # codex-acp ships per-platform native binaries via optionalDependencies.
 # npm sometimes skips those silently; explicitly install the matching arch
 # package so the bin shim can resolve the binary at runtime.
