@@ -18,7 +18,8 @@ RUN CGO_ENABLED=0 GOOS=linux go build -ldflags "-X main.buildTime=$(date -u +%Y-
 # Stage 3: Runtime
 FROM ubuntu:24.04
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    ca-certificates curl git jq gosu && \
+    ca-certificates curl git jq gosu \
+    fonts-noto-cjk fonts-noto-cjk-extra && \
     curl -fsSL https://deb.nodesource.com/setup_24.x | bash - && \
     apt-get install -y --no-install-recommends nodejs && \
     rm -rf /var/lib/apt/lists/*
@@ -36,7 +37,8 @@ RUN ARCH=$(dpkg --print-architecture) && \
       @agentclientprotocol/claude-agent-acp \
       @openai/codex \
       @zed-industries/codex-acp \
-      "$CODEX_PLATFORM_PKG"
+      "$CODEX_PLATFORM_PKG" \
+      @playwright/mcp
 RUN ARCH=$(dpkg --print-architecture) && \
     case "$ARCH" in \
       amd64) OC_ASSET="opencode-linux-x64.tar.gz" ;; \
@@ -46,6 +48,8 @@ RUN ARCH=$(dpkg --print-architecture) && \
     curl -fsSL https://api.github.com/repos/sst/opencode/releases/latest | \
     jq -r --arg n "$OC_ASSET" '(.assets[] | select(.name==$n) | .browser_download_url)' | \
     xargs -I {} sh -lc 'tmp=$(mktemp -d) && curl -fsSL "{}" -o "$tmp/opencode.tgz" && tar -xzf "$tmp/opencode.tgz" -C /usr/local/bin && chmod +x /usr/local/bin/opencode && rm -rf "$tmp"'
+# Install Playwright-managed Chromium binary and system dependencies (~270MB)
+RUN npx playwright install --with-deps chromium
 
 WORKDIR /app
 COPY --from=builder /app/perch .

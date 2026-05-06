@@ -53,6 +53,7 @@ Perch 是一個輕量的 web terminal server，讓你不需要 SSH，直接用�
 - **多輪對話 Chat UI**：網頁聊天介面支援連續追問，對話歷史自動從 SQLite 重建，24 小時內的對話可跨 session 保留
 - **Runtime Settings**：認證、限速、agent 參數等可在 UI 熱改，不需重啟容器
 - **排程器**：用自然語言設定每天幾點自動送指令進 terminal（透過 `local-schedule` skill）
+- **瀏覽器自動化**：container 內含 headless Chromium（Playwright），Claude 可自主操作網頁、下載帳單、填寫表單；遇到 CAPTCHA 或需人介入時透過 Discord 截圖求助
 - **IP 封鎖**：TCP 層封鎖惡意 IP
 - **限速**：HTTP 層限制登入端點的請求頻率
 - **自動重啟**：Claude Code 崩潰後自動重啟

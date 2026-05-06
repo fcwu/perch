@@ -59,6 +59,13 @@ if command -v jq >/dev/null 2>&1; then
         if .hasAcceptedAllTerms == null then .hasAcceptedAllTerms = true else . end |
         if .projects[$wd].hasTrustDialogAccepted == null then
             .projects[$wd].hasTrustDialogAccepted = true
+        else . end |
+        if .mcpServers.playwright == null then
+            .mcpServers.playwright = {
+                "command": "npx",
+                "args": ["-y", "@playwright/mcp", "--headless", "--browser=chromium",
+                         "--user-data-dir=/data/playwright/profile"]
+            }
         else . end
     ' "$CLAUDE_JSON" > "${CLAUDE_JSON}.tmp" && mv "${CLAUDE_JSON}.tmp" "$CLAUDE_JSON"
 else
@@ -125,6 +132,15 @@ fi
 if [ -n "$PUID" ]; then
     [ -d /home/perchuser/.claude ] && chown -R "${PUID}:${PGID}" /home/perchuser/.claude
     [ -f "$CLAUDE_JSON" ] && chown "${PUID}:${PGID}" "$CLAUDE_JSON"
+fi
+
+# Ensure browser automation and finance data directories exist under /data.
+# These are created at startup so container-side skills can write immediately.
+mkdir -p /data/playwright/profile /data/playwright/downloads /data/playwright/state
+mkdir -p /data/finance
+if [ ! -d /data/secrets ]; then
+    mkdir -p /data/secrets
+    chmod 0700 /data/secrets
 fi
 
 AUTH_METHOD="${AUTH_METHOD:-${AUTH_MODE:-none}}"
