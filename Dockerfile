@@ -19,10 +19,13 @@ RUN CGO_ENABLED=0 GOOS=linux go build -ldflags "-X main.buildTime=$(date -u +%Y-
 FROM ubuntu:24.04
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates curl git jq gosu \
-    fonts-noto-cjk fonts-noto-cjk-extra && \
+    fonts-noto-cjk fonts-noto-cjk-extra \
+    python3 python3-pip && \
     curl -fsSL https://deb.nodesource.com/setup_24.x | bash - && \
     apt-get install -y --no-install-recommends nodejs && \
     rm -rf /var/lib/apt/lists/*
+# ddddocr: Python CAPTCHA OCR library used by finance-fubon-statement skill
+RUN pip3 install ddddocr --break-system-packages --no-cache-dir
 # codex-acp ships per-platform native binaries via optionalDependencies.
 # npm sometimes skips those silently; explicitly install the matching arch
 # package so the bin shim can resolve the binary at runtime.
@@ -50,6 +53,8 @@ RUN ARCH=$(dpkg --print-architecture) && \
     xargs -I {} sh -lc 'tmp=$(mktemp -d) && curl -fsSL "{}" -o "$tmp/opencode.tgz" && tar -xzf "$tmp/opencode.tgz" -C /usr/local/bin && chmod +x /usr/local/bin/opencode && rm -rf "$tmp"'
 # Install Playwright-managed Chromium binary and system dependencies (~270MB)
 RUN npx playwright install --with-deps chromium
+# Expose browser path so skill-local playwright instances share the same binaries
+ENV PLAYWRIGHT_BROWSERS_PATH=/root/.cache/ms-playwright
 
 WORKDIR /app
 COPY --from=builder /app/perch .
