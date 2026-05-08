@@ -1,4 +1,4 @@
-## ADDED Requirements
+## Requirements
 
 ### Requirement: Server reconstructs per-user conversation history from query_sessions
 

@@ -229,16 +229,20 @@ type discordSession struct {
 	runtime     AgentRuntime
 	sessionUUID string
 	acpProcess  *ACPProcess // lazy-started on first Prompt()
+	imgStore    *imageStore
+	workdir     string
 
 	mu   sync.Mutex
 	last *discordPending
 }
 
-func newDiscordSession(runtime AgentRuntime, channelID, workdir string, logger *slog.Logger) *discordSession {
+func newDiscordSession(runtime AgentRuntime, channelID, workdir string, imgStore *imageStore, logger *slog.Logger) *discordSession {
 	return &discordSession{
 		channelID:  channelID,
 		runtime:    runtime,
 		acpProcess: NewACPProcess(runtime.ACPExecutable, runtime.ACPArgs, workdir, logger),
+		imgStore:   imgStore,
+		workdir:    workdir,
 	}
 }
 
@@ -257,6 +261,7 @@ type DiscordSessionManager struct {
 	logger           *slog.Logger
 	workdir          string
 	settings         *SettingsManager // optional; nil = use built-in defaults
+	imgStore         *imageStore
 
 	mu             sync.Mutex
 	dgo            *discordgo.Session
@@ -278,6 +283,7 @@ func newDiscordSessionManager(runtime AgentRuntime, token, channelID string, all
 		workdir:          workdir,
 		sessions:         make(map[string]*discordSession),
 		channelPrivate:   make(map[string]bool),
+		imgStore:         newImageStore(workdir, logger),
 	}
 }
 
@@ -635,32 +641,83 @@ func (sess *discordSession) handleWithACP(s *discordgo.Session, channelID, messa
 		return
 	}
 
+	// Extract [image: ...] tokens from the response and store images.
+	text, imgAttachments := extractImages(text, sess.imgStore, sess.workdir, channelID)
+
 	_ = s.MessageReactionAdd(channelID, messageID, emojiSpeech)
 	if len(fetchFailed) > 0 {
-		// Append a soft warning so the user knows some attachments didn't reach Claude.
 		text = text + "\n\n> 附件 " + strings.Join(fetchFailed, ", ") + " 下載失敗，未送進 Claude"
 	}
 	for _, da := range disallowed {
 		text = text + "\n\n> 附件 " + da.Filename + " 不支援此類型 (" + da.Mime + ")"
 	}
-	if text == "" {
+	if text == "" && len(imgAttachments) == 0 {
 		return // nothing to send
 	}
 	chunks := splitForDiscord(text)
-	logger.Info("Discord ACP: sending reply", "channel", channelID, "replyTo", messageID, "chunks", len(chunks))
-	for i, chunk := range chunks {
-		if i == 0 {
-			_, err := s.ChannelMessageSendComplex(channelID, &discordgo.MessageSend{
-				Content:   chunk,
-				Reference: &discordgo.MessageReference{MessageID: messageID},
-			})
-			if err != nil {
-				logger.Warn("Discord ACP: send reply failed", "channel", channelID, "err", err)
-			}
+	logger.Info("Discord ACP: sending reply", "channel", channelID, "replyTo", messageID, "chunks", len(chunks), "images", len(imgAttachments))
+
+	// Build Discord file list from image attachments.
+	var discordFiles []*discordgo.File
+	var oversizeNote string
+	for _, att := range imgAttachments {
+		// att.URL is "/api/images/<convID>/<filename>"; derive abs path.
+		parts := strings.Split(strings.TrimPrefix(att.URL, "/api/images/"), "/")
+		if len(parts) != 2 {
 			continue
 		}
-		if _, err := s.ChannelMessageSend(channelID, chunk); err != nil {
-			logger.Warn("Discord ACP: send continuation failed", "channel", channelID, "part", i, "err", err)
+		absPath := sess.imgStore.AbsPath(parts[0], parts[1])
+		fi, err := os.Stat(absPath)
+		if err != nil {
+			logger.Warn("Discord ACP: image stat failed", "path", absPath, "err", err)
+			continue
+		}
+		if fi.Size() > maxImageBytes {
+			oversizeNote += "\n(圖片過大，無法傳送至 Discord: " + att.Caption + ")"
+			continue
+		}
+		f, err := os.Open(absPath)
+		if err != nil {
+			logger.Warn("Discord ACP: image open failed", "path", absPath, "err", err)
+			continue
+		}
+		discordFiles = append(discordFiles, &discordgo.File{Name: att.Caption, Reader: f})
+	}
+	if oversizeNote != "" {
+		if len(chunks) > 0 {
+			chunks[len(chunks)-1] += oversizeNote
+		} else {
+			chunks = append(chunks, oversizeNote)
+		}
+	}
+
+	for i, chunk := range chunks {
+		var files []*discordgo.File
+		if i == len(chunks)-1 {
+			files = discordFiles // attach images only on the last chunk
+		}
+		send := &discordgo.MessageSend{Content: chunk, Files: files}
+		if i == 0 {
+			send.Reference = &discordgo.MessageReference{MessageID: messageID}
+		}
+		if _, err := s.ChannelMessageSendComplex(channelID, send); err != nil {
+			logger.Warn("Discord ACP: send reply failed", "channel", channelID, "part", i, "err", err)
+		}
+	}
+	// If there was no text at all, send images-only reply.
+	if len(chunks) == 0 && len(discordFiles) > 0 {
+		send := &discordgo.MessageSend{
+			Files:     discordFiles,
+			Reference: &discordgo.MessageReference{MessageID: messageID},
+		}
+		if _, err := s.ChannelMessageSendComplex(channelID, send); err != nil {
+			logger.Warn("Discord ACP: send images-only reply failed", "channel", channelID, "err", err)
+		}
+	}
+	// Close file handles after send.
+	for _, df := range discordFiles {
+		if c, ok := df.Reader.(interface{ Close() error }); ok {
+			_ = c.Close()
 		}
 	}
 }
@@ -671,7 +728,7 @@ func (d *DiscordSessionManager) getOrCreateSession(channelID string) *discordSes
 	if sess, ok := d.sessions[channelID]; ok {
 		return sess
 	}
-	sess := newDiscordSession(d.runtime, channelID, d.workdir, d.logger)
+	sess := newDiscordSession(d.runtime, channelID, d.workdir, d.imgStore, d.logger)
 	d.sessions[channelID] = sess
 	return sess
 }

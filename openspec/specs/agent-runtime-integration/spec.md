@@ -1,4 +1,4 @@
-## ADDED Requirements
+## Requirements
 
 ### Requirement: Runtime-specific project configuration assets are synced into the workspace
 The system SHALL copy or prepare runtime-specific project configuration assets in the active runtime's project-level configuration directory without modifying unrelated runtime directories.

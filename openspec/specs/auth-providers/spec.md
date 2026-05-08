@@ -1,4 +1,4 @@
-## ADDED Requirements
+## Requirements
 
 ### Requirement: AUTH_METHOD selects the authentication method for single-user mode
 In single-user mode, the system SHALL read `AUTH_METHOD` at startup. Accepted values: `none` (default), `password`, `gitlab`. If `mtls` is provided, the server SHALL refuse to start with a clear error message.

@@ -119,11 +119,19 @@ if [ -n "$WORKDIR" ]; then
         fi
 
 
+        # Seed workspace CLAUDE.md with perch-specific instructions (no-overwrite).
+        if [ ! -f "$WORKDIR/CLAUDE.md" ] && [ -f /app/perch-claude/CLAUDE.md ]; then
+            cp /app/perch-claude/CLAUDE.md "$WORKDIR/CLAUDE.md"
+        fi
+
         # Fix ownership of anything created above under .claude/ (mkdir/cp/node all
         # run as root).  Only applies when PUID is set; harmless if .claude/ doesn't
         # exist yet.
         if [ -n "$PUID" ] && [ -d "$WORKDIR/.claude" ]; then
             chown -R "${PUID}:${PGID}" "$WORKDIR/.claude"
+        fi
+        if [ -n "$PUID" ] && [ -f "$WORKDIR/CLAUDE.md" ]; then
+            chown "${PUID}:${PGID}" "$WORKDIR/CLAUDE.md"
         fi
     fi
 fi

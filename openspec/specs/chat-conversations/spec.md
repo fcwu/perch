@@ -4,7 +4,7 @@
 
 Per-user conversation rows, per-conversation runtime/model selection, pinning, cursor pagination, and cascading delete. Owns the `conversations` table and `/api/conversations*` endpoints.
 
-## ADDED Requirements
+## Requirements
 
 ### Requirement: Conversation rows carry pinning, runtime, and model state
 

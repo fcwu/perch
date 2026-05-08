@@ -4,7 +4,7 @@
 
 Per-conversation scheduled prompts, including their storage in `chat_schedules`, CRUD endpoints scoped to (user, conversation), dispatcher integration with the existing `Scheduler.fireDue` ticker, and per-(user, conv) isolation.
 
-## ADDED Requirements
+## Requirements
 
 ### Requirement: chat_schedules table stores per-conversation scheduled prompts
 

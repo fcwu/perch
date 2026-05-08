@@ -1,4 +1,4 @@
-## ADDED Requirements
+## Requirements
 
 ### Requirement: Entrypoint copies host Claude config to a writable container-local copy
 

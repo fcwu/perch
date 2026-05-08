@@ -8,7 +8,9 @@ import (
 	"io/fs"
 	"log/slog"
 	"net/http"
+	"os"
 	"strings"
+	"time"
 
 	"github.com/gorilla/websocket"
 )
@@ -55,6 +57,9 @@ type Server struct {
 	// scheduler is the chat scheduler, used to hot-reload chat_schedules rows
 	// when the schedule CRUD endpoints mutate them.
 	scheduler *Scheduler
+	// imgStore serves agent-produced images via /api/images/<convID>/<file>.
+	imgStore *imageStore
+	workdir  string
 }
 
 func newServer(pm *PTYManager, auth *AuthMiddleware, im *IMManager, sessions SessionProvider, userSessions *UserSessionManager, gitlabAuth *gitLabAuth, adminAuth *adminAuth, adminHub *ManagementHub, store *Store, userRL *UserRateLimiter, logger *slog.Logger) *Server {
@@ -146,6 +151,8 @@ func newServerWithMode(pm *PTYManager, auth *AuthMiddleware, im *IMManager, sess
 		s.mux.Handle("DELETE /api/conversations/{id}/schedules/{job_id}", gitlabAuth.middleware(http.HandlerFunc(s.handleDeleteChatSchedule)))
 		// Runtime registry — auth-gated alongside the chat endpoints.
 		s.mux.Handle("GET /api/runtimes", gitlabAuth.middleware(http.HandlerFunc(s.handleListRuntimes)))
+		// Agent-produced image files — auth-gated.
+		s.mux.Handle("GET /api/images/{convID}/{filename}", gitlabAuth.middleware(http.HandlerFunc(s.handleImageFile)))
 	} else {
 		// Register chat routes even when GitLab auth is disabled so unauthenticated
 		// requests get a proper error response instead of falling through to the SPA
@@ -163,6 +170,8 @@ func newServerWithMode(pm *PTYManager, auth *AuthMiddleware, im *IMManager, sess
 		s.mux.HandleFunc("POST /api/conversations/{id}/schedules", s.handleCreateChatSchedule)
 		s.mux.HandleFunc("DELETE /api/conversations/{id}/schedules/{job_id}", s.handleDeleteChatSchedule)
 		s.mux.HandleFunc("GET /api/runtimes", s.handleListRuntimes)
+		// Agent-produced image files.
+		s.mux.HandleFunc("GET /api/images/{convID}/{filename}", s.handleImageFile)
 	}
 	distFS, err := fs.Sub(frontendFS, "frontend/dist")
 	if err == nil {
@@ -533,6 +542,46 @@ func (s *Server) handleChatAPI(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"user_id": userID, "conversation_id": conversationID})
+}
+
+// handleImageFile serves GET /api/images/{convID}/{filename} — agent-produced images.
+func (s *Server) handleImageFile(w http.ResponseWriter, r *http.Request) {
+	if s.imgStore == nil {
+		http.Error(w, "image store not configured", http.StatusServiceUnavailable)
+		return
+	}
+	userID := s.resolveUserID(r)
+	if userID == "" {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	convID := r.PathValue("convID")
+	filename := r.PathValue("filename")
+	if convID == "" || filename == "" {
+		http.NotFound(w, r)
+		return
+	}
+	// Guard against path traversal in the URL segments.
+	if strings.Contains(convID, "/") || strings.Contains(convID, "..") ||
+		strings.Contains(filename, "/") || strings.Contains(filename, "..") {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+	absPath := s.imgStore.AbsPath(convID, filename)
+	f, err := os.Open(absPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			http.NotFound(w, r)
+		} else {
+			http.Error(w, "internal error", http.StatusInternalServerError)
+		}
+		return
+	}
+	defer f.Close()
+	ext := imageFileExt(filename)
+	w.Header().Set("Content-Type", extToMime(ext))
+	w.Header().Set("Cache-Control", "private, max-age=86400")
+	http.ServeContent(w, r, filename, time.Time{}, f)
 }
 
 // handleChatSSE handles GET /api/chat/stream — streams PTY output and JSON tool events via

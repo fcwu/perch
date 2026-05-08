@@ -1,4 +1,4 @@
-## ADDED Requirements
+## Requirements
 
 ### Requirement: Detect workspace as git repository
 System SHALL check whether `/workspace` (or `WORKSPACE_PATH` env var) is a valid git repository at startup.

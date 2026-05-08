@@ -1,4 +1,4 @@
-## ADDED Requirements
+## Requirements
 
 ### Requirement: Telegram messages route through ACP per-chat sessions
 

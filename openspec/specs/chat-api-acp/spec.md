@@ -1,4 +1,4 @@
-## ADDED Requirements
+## Requirements
 
 ### Requirement: Chat-API runs queries through ACP per-conversation persistent sessions
 

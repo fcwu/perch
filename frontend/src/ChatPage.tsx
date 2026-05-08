@@ -78,10 +78,16 @@ function stripAnsi(s: string): string {
   return s.replace(ANSI_RE, '').replace(/\r\n/g, '\n').replace(/\r/g, '\n')
 }
 
+interface ImageAttachment {
+  url: string
+  caption: string
+}
+
 interface Message {
   role: 'user' | 'assistant'
   content: string
   done: boolean
+  images?: ImageAttachment[]
 }
 
 interface ChatPageProps {
@@ -238,8 +244,17 @@ export default function ChatPage({ conversationId }: ChatPageProps) {
 
     es.addEventListener('json', (e: MessageEvent) => {
       try {
-        const ev = JSON.parse(e.data) as { type: string; tool?: string; input?: unknown; elapsed_ms?: number }
-        if (ev.type === 'tool_start' && ev.tool) {
+        const ev = JSON.parse(e.data) as { type: string; tool?: string; input?: unknown; elapsed_ms?: number; text?: string; images?: ImageAttachment[]; }
+        if (ev.type === 'chunk' && ev.text) {
+          setMessages(prev => {
+            const updated = [...prev]
+            const last = updated[updated.length - 1]
+            if (last && last.role === 'assistant') {
+              updated[updated.length - 1] = { ...last, content: last.content + ev.text }
+            }
+            return updated
+          })
+        } else if (ev.type === 'tool_start' && ev.tool) {
           const id = ++toolCounter.current
           const inputStr = ev.input ? JSON.stringify(ev.input) : ''
           setToolEntries(prev => [...prev, { id, tool: ev.tool!, input: inputStr, startTime: Date.now(), done: false }])
@@ -250,12 +265,13 @@ export default function ChatPage({ conversationId }: ChatPageProps) {
               : e
           ))
         } else if (ev.type === 'done') {
-          // Mark last assistant message as complete
           setMessages(prev => {
             const updated = [...prev]
             const last = updated[updated.length - 1]
             if (last && last.role === 'assistant') {
-              updated[updated.length - 1] = { ...last, done: true }
+              // Use server's cleanText to strip any [image: ...] tokens the chunks may have streamed
+              const finalContent = ev.text !== undefined ? ev.text : last.content
+              updated[updated.length - 1] = { ...last, done: true, content: finalContent, images: ev.images ?? [] }
             }
             return updated
           })
@@ -323,6 +339,30 @@ export default function ChatPage({ conversationId }: ChatPageProps) {
                       i === messages.length - 1 && !msg.done && (
                         <span style={{ color: '#555', fontSize: 13 }}>Thinking…</span>
                       )
+                    )}
+                    {msg.images && msg.images.length > 0 && (
+                      <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                        {msg.images.map((img, j) => (
+                          <div key={j}>
+                            <img
+                              src={img.url}
+                              alt={img.caption}
+                              style={{ maxWidth: '100%', borderRadius: 8, display: 'block' }}
+                              onError={e => {
+                                const el = e.currentTarget
+                                el.style.display = 'none'
+                                const placeholder = document.createElement('div')
+                                placeholder.style.cssText = 'padding:12px;background:#2a2a2a;border:1px solid #444;border-radius:8px;color:#888;font-size:12px'
+                                placeholder.textContent = `🖼️ ${img.caption} (無法載入)`
+                                el.parentElement?.appendChild(placeholder)
+                              }}
+                            />
+                            {img.caption && (
+                              <div style={{ fontSize: 11, color: '#666', marginTop: 4 }}>{img.caption}</div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
                     )}
                   </div>
                 </div>

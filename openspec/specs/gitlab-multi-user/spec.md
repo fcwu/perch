@@ -1,4 +1,4 @@
-## ADDED Requirements
+## Requirements
 
 ### Requirement: GITLAB_ALLOWED_IDS controls non-admin access in multi-user mode
 In multi-user mode, `GITLAB_ALLOWED_IDS` determines which non-admin GitLab users may enter. Users in `GITLAB_ADMIN_IDS` are always allowed regardless of this setting.

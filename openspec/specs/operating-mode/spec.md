@@ -1,4 +1,4 @@
-## ADDED Requirements
+## Requirements
 
 ### Requirement: PERCH_MODE selects single or multi-user operating mode
 The system SHALL read the `PERCH_MODE` environment variable at startup. Accepted values are `single` (default) and `multi`. Any other value SHALL cause the server to refuse to start with a descriptive error.

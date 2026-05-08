@@ -203,6 +203,8 @@ func main() {
 	srv.defaultRuntime = runtime
 	srv.pool = chatACP.Pool()
 	srv.scheduler = sched
+	srv.imgStore = newImageStore(workdir, logger.Logger)
+	srv.workdir = workdir
 
 	// Resolve the perch binary path once so we can hand it to ACP runtimes
 	// as the MCP server command. Falls back to "perch" on PATH if the lookup
@@ -248,6 +250,7 @@ func main() {
 		} else {
 			logger.Logger.Info("uploads orphan cleanup", "kept", kept, "removed", removed, "ttl_days", cs.OrphanTTLDays)
 		}
+		cleanupOrphanImagesDir(workdir, ttl, logger.Logger)
 	}
 
 	// Apply rate limiting to sensitive endpoints only

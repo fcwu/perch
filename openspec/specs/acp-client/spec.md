@@ -1,4 +1,4 @@
-## ADDED Requirements
+## Requirements
 
 ### Requirement: ACP client creates a run and returns a run ID
 The system SHALL provide an ACP client that sends a `POST /runs` request to the configured ACP server with the user message as input, and returns a run ID.

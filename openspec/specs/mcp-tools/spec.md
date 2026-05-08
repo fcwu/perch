@@ -4,7 +4,7 @@
 
 The `./perch mcp` stdio sub-mode that exposes scheduler MCP tools (`schedule_message`, `list_schedules`, `cancel_schedule`) to the agent runtime, with identity locked to environment variables set by the spawning chat-API path.
 
-## ADDED Requirements
+## Requirements
 
 ### Requirement: ./perch mcp sub-mode runs an stdio MCP server
 

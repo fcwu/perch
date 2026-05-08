@@ -109,6 +109,7 @@ type ACPUserSessionManager struct {
 	timeout  time.Duration
 	workdir  string
 	settings *SettingsManager // optional; nil → built-in defaults
+	imgStore *imageStore
 
 	defaultRuntime AgentRuntime
 	runtimeFor     func(name string) (AgentRuntime, error)
@@ -133,6 +134,7 @@ func newACPUserSessionManager(runtime AgentRuntime, workdir string, store *Store
 		defaultRuntime: runtime,
 		runtimeFor:     agentRuntimeByName,
 		sessions:       make(map[string]*acpChatSession),
+		imgStore:       newImageStore(workdir, logger),
 	}
 	// Wire per-key process construction so chat-api:<user>:<conv> spawns the
 	// runtime + MCP servers configured for that conversation. Non-chat keys
@@ -179,6 +181,7 @@ func newACPUserSessionManager(runtime AgentRuntime, workdir string, store *Store
 		} else {
 			logger.Info("ACP chat: cleaned uploads dir on evict", "convID", convID)
 		}
+		m.imgStore.Cleanup(convID)
 	}
 	return m
 }
@@ -480,6 +483,18 @@ func (m *ACPUserSessionManager) runPrompt(sess *acpChatSession, prompt string) {
 	blocks := []ACPContent{{Type: "text", Text: prompt}}
 	blocks = append(blocks, AttachmentsToACPBlocks(sess.attachments)...)
 	response, err := proc.PromptWithContent(ctx, blocks, onChunk, onToolStart, onToolEnd)
+
+	// Extract [image: ...] tokens and store images; cleanText has tokens removed.
+	convID := sess.conversationID
+	if convID == "" {
+		convID = "default"
+	}
+	var imgAttachments []ImageAttachment
+	cleanText := response
+	if err == nil {
+		cleanText, imgAttachments = extractImages(response, m.imgStore, m.workdir, convID)
+	}
+
 	if err != nil {
 		errMsg, _ := json.Marshal(map[string]string{"type": "error", "message": err.Error()})
 		sess.broadcastJSON(string(errMsg))
@@ -492,9 +507,9 @@ func (m *ACPUserSessionManager) runPrompt(sess *acpChatSession, prompt string) {
 	} else {
 		if m.store != nil {
 			if sess.conversationID != "" {
-				_ = m.store.UpdateSessionDoneAndTouch(sess.sessionID, response, sess.conversationID)
+				_ = m.store.UpdateSessionDoneAndTouch(sess.sessionID, cleanText, sess.conversationID)
 			} else {
-				_ = m.store.UpdateSessionDone(sess.sessionID, response)
+				_ = m.store.UpdateSessionDone(sess.sessionID, cleanText)
 			}
 		}
 		if m.adminHub != nil {
@@ -502,7 +517,10 @@ func (m *ACPUserSessionManager) runPrompt(sess *acpChatSession, prompt string) {
 		}
 	}
 
-	doneMsg, _ := json.Marshal(map[string]string{"type": "done"})
+	if imgAttachments == nil {
+		imgAttachments = []ImageAttachment{}
+	}
+	doneMsg, _ := json.Marshal(map[string]any{"type": "done", "images": imgAttachments, "text": cleanText})
 	sess.broadcastJSON(string(doneMsg))
 	sess.close()
 

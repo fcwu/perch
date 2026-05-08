@@ -4,7 +4,7 @@
 
 Read-only admin surface for browsing all users' conversations, conversation messages, and chat schedules. Mutations are deliberately excluded; operators perform writes via direct SQL.
 
-## ADDED Requirements
+## Requirements
 
 ### Requirement: GET /admin/conversations lists all conversations across users
 
