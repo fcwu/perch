@@ -50,9 +50,9 @@ RUN ARCH=$(dpkg --print-architecture) && \
     jq -r --arg n "$OC_ASSET" '(.assets[] | select(.name==$n) | .browser_download_url)' | \
     xargs -I {} sh -lc 'tmp=$(mktemp -d) && curl -fsSL "{}" -o "$tmp/opencode.tgz" && tar -xzf "$tmp/opencode.tgz" -C /usr/local/bin && chmod +x /usr/local/bin/opencode && rm -rf "$tmp"'
 # Install Playwright-managed Chromium binary and system dependencies (~270MB)
-RUN npx playwright install --with-deps chromium
-# Expose browser path so skill-local playwright instances share the same binaries
-ENV PLAYWRIGHT_BROWSERS_PATH=/root/.cache/ms-playwright
+# Use /opt so non-root users (PUID) can access the binary at runtime
+ENV PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright
+RUN npx playwright install --with-deps chromium && chmod -R a+rX /opt/ms-playwright
 
 WORKDIR /app
 COPY --from=builder /app/perch .

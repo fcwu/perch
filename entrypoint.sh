@@ -65,7 +65,7 @@ if command -v jq >/dev/null 2>&1; then
                 "command": "npx",
                 "args": ["-y", "@playwright/mcp", "--headless", "--browser=chromium",
                          "--user-data-dir=/data/playwright/profile"],
-                "env": {"PLAYWRIGHT_BROWSERS_PATH": "/root/.cache/ms-playwright"}
+                "env": {"PLAYWRIGHT_BROWSERS_PATH": "/opt/ms-playwright"}
             }
         else . end
     ' "$CLAUDE_JSON" > "${CLAUDE_JSON}.tmp" && mv "${CLAUDE_JSON}.tmp" "$CLAUDE_JSON"
