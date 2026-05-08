@@ -65,7 +65,7 @@ if command -v jq >/dev/null 2>&1; then
             .mcpServers.playwright = {
                 "command": "npx",
                 "args": ["-y", "@playwright/mcp", "--headless", "--browser=chromium",
-                         "--user-data-dir=/data/playwright/profile"],
+                         "--user-data-dir=/data/playwright/profile", "--no-sandbox"],
                 "env": {"PLAYWRIGHT_BROWSERS_PATH": $bpath}
             }
         else . end
