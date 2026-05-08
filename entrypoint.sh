@@ -63,11 +63,12 @@ if command -v jq >/dev/null 2>&1; then
         else . end |
         if (.mcpServers.playwright == null) or
            (.mcpServers.playwright.env.PLAYWRIGHT_BROWSERS_PATH != $bpath) or
-           ((.mcpServers.playwright.args // []) | contains(["--no-sandbox"]) | not) then
+           ((.mcpServers.playwright.args // []) | contains(["--no-sandbox"]) | not) or
+           ((.mcpServers.playwright.args // []) | contains(["--user-data-dir=/data/playwright/profile"])) then
             .mcpServers.playwright = {
                 "command": "npx",
                 "args": ["-y", "@playwright/mcp", "--headless", "--browser=chromium",
-                         "--user-data-dir=/data/playwright/profile", "--no-sandbox"],
+                         "--no-sandbox"],
                 "env": {"PLAYWRIGHT_BROWSERS_PATH": $bpath}
             }
         else . end
