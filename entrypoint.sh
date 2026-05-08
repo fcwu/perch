@@ -73,6 +73,19 @@ if command -v jq >/dev/null 2>&1; then
             }
         else . end
     ' "$CLAUDE_JSON" > "${CLAUDE_JSON}.tmp" && mv "${CLAUDE_JSON}.tmp" "$CLAUDE_JSON"
+
+    # Patch the official Playwright plugin .mcp.json so it uses the container-installed
+    # Chromium (/opt/ms-playwright) with --no-sandbox, overriding any user/agent edits.
+    _playwright_plugin="/home/perchuser/.claude/plugins/marketplaces/claude-plugins-official/external_plugins/playwright/.mcp.json"
+    if [ -f "$_playwright_plugin" ]; then
+        jq --arg bpath "$_bpath" '
+            .playwright = {
+                "command": "npx",
+                "args": ["-y", "@playwright/mcp", "--headless", "--browser=chromium", "--no-sandbox"],
+                "env": {"PLAYWRIGHT_BROWSERS_PATH": $bpath}
+            }
+        ' "$_playwright_plugin" > "${_playwright_plugin}.tmp" && mv "${_playwright_plugin}.tmp" "$_playwright_plugin"
+    fi
 else
     echo "perch entrypoint: warning: jq not found, skipping .claude.json seed" >&2
 fi
