@@ -53,19 +53,20 @@ if [ ! -f "$CLAUDE_JSON" ]; then
 fi
 if command -v jq >/dev/null 2>&1; then
     _wd="${WORKDIR:-/workspace}"
-    jq --arg wd "$_wd" '
+    _bpath="${PLAYWRIGHT_BROWSERS_PATH:-/opt/ms-playwright}"
+    jq --arg wd "$_wd" --arg bpath "$_bpath" '
         if .hasCompletedOnboarding == null then .hasCompletedOnboarding = true else . end |
         if .theme == null then .theme = "dark-daltonized" else . end |
         if .hasAcceptedAllTerms == null then .hasAcceptedAllTerms = true else . end |
         if .projects[$wd].hasTrustDialogAccepted == null then
             .projects[$wd].hasTrustDialogAccepted = true
         else . end |
-        if (.mcpServers.playwright == null) or (.mcpServers.playwright.env.PLAYWRIGHT_BROWSERS_PATH != "/opt/ms-playwright") then
+        if (.mcpServers.playwright == null) or (.mcpServers.playwright.env.PLAYWRIGHT_BROWSERS_PATH != $bpath) then
             .mcpServers.playwright = {
                 "command": "npx",
                 "args": ["-y", "@playwright/mcp", "--headless", "--browser=chromium",
                          "--user-data-dir=/data/playwright/profile"],
-                "env": {"PLAYWRIGHT_BROWSERS_PATH": "/opt/ms-playwright"}
+                "env": {"PLAYWRIGHT_BROWSERS_PATH": $bpath}
             }
         else . end
     ' "$CLAUDE_JSON" > "${CLAUDE_JSON}.tmp" && mv "${CLAUDE_JSON}.tmp" "$CLAUDE_JSON"
