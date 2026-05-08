@@ -60,7 +60,7 @@ if command -v jq >/dev/null 2>&1; then
         if .projects[$wd].hasTrustDialogAccepted == null then
             .projects[$wd].hasTrustDialogAccepted = true
         else . end |
-        if (.mcpServers.playwright == null) or (.mcpServers.playwright.env.PLAYWRIGHT_BROWSERS_PATH == null) then
+        if (.mcpServers.playwright == null) or (.mcpServers.playwright.env.PLAYWRIGHT_BROWSERS_PATH != "/opt/ms-playwright") then
             .mcpServers.playwright = {
                 "command": "npx",
                 "args": ["-y", "@playwright/mcp", "--headless", "--browser=chromium",
