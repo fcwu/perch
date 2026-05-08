@@ -52,7 +52,7 @@ RUN ARCH=$(dpkg --print-architecture) && \
 # Install Playwright-managed Chromium binary and system dependencies (~270MB)
 # Use /opt so non-root users (PUID) can access the binary at runtime
 ENV PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright
-RUN npx playwright install --with-deps chromium && chmod -R a+rX /opt/ms-playwright
+RUN node /usr/lib/node_modules/@playwright/mcp/node_modules/playwright-core/cli.js install --with-deps chromium && chmod -R a+rX /opt/ms-playwright
 
 WORKDIR /app
 COPY --from=builder /app/perch .
