@@ -82,3 +82,48 @@ curl -s -X POST http://localhost:8082/api/chat \
   -H "Content-Type: application/json" \
   -d '{"message": "run: echo hello from container"}' | jq '.response'
 ```
+
+---
+
+### TBC05 — 非 root 使用者（PUID 設定）可存取 Playwright Chromium 並啟動 MCP server
+
+**層級**：E2E-curl
+
+**背景**：Chromium 安裝於 `/opt/ms-playwright`（image build time），執行時 `PUID=1001` 啟動 agent。需確認非 root user 能讀取 binary、MCP server 能正常啟動。
+
+**Given** container 以 `PUID=1001`（或任意非零 uid）啟動
+**When** 在容器內以 uid=1001 執行 Playwright Chromium binary
+**Then**
+- `/opt/ms-playwright/` 目錄可被 uid=1001 讀取（`r-x` 權限）
+- `PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright` 出現在容器 env
+- `~/.claude.json` 的 `mcpServers.playwright.env.PLAYWRIGHT_BROWSERS_PATH` 為 `/opt/ms-playwright`
+- 以 uid=1001 執行 `npx @playwright/mcp --version` 不回傳 "browser not found" 或安裝提示
+
+**驗證指令**：
+```bash
+CONTAINER=mykb-perch-test-perch-1
+DOCKER=/share/CACHEDEV4_DATA/.qpkg/container-station/bin/docker
+
+# 1. 確認 /opt/ms-playwright 對非 root 可讀
+ssh home-auto "$DOCKER exec $CONTAINER sh -c 'ls /opt/ms-playwright/'"
+# 預期：列出 chromium-* 目錄
+
+# 2. 確認環境變數
+ssh home-auto "$DOCKER exec $CONTAINER env | grep PLAYWRIGHT"
+# 預期：PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright
+
+# 3. 確認 .claude.json 已 seed 正確路徑
+ssh home-auto "$DOCKER exec $CONTAINER cat /home/perchuser/.claude.json" \
+  | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['mcpServers']['playwright']['env']['PLAYWRIGHT_BROWSERS_PATH'])"
+# 預期：/opt/ms-playwright
+
+# 4. 以 uid=1001 啟動 MCP server，確認不報 browser not installed
+ssh home-auto "$DOCKER exec -u 1001 $CONTAINER sh -c \
+  'PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright npx @playwright/mcp --version 2>&1'"
+# 預期：Version x.x.x（無 browser 安裝提示）
+
+# 5. 以 uid=1001 確認 chromium binary 可執行
+ssh home-auto "$DOCKER exec -u 1001 $CONTAINER sh -c \
+  'ls /opt/ms-playwright/chromium-*/chrome-linux64/chrome && echo OK'"
+# 預期：OK
+```
