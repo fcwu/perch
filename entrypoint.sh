@@ -60,11 +60,12 @@ if command -v jq >/dev/null 2>&1; then
         if .projects[$wd].hasTrustDialogAccepted == null then
             .projects[$wd].hasTrustDialogAccepted = true
         else . end |
-        if .mcpServers.playwright == null then
+        if (.mcpServers.playwright == null) or (.mcpServers.playwright.env.PLAYWRIGHT_BROWSERS_PATH == null) then
             .mcpServers.playwright = {
                 "command": "npx",
                 "args": ["-y", "@playwright/mcp", "--headless", "--browser=chromium",
-                         "--user-data-dir=/data/playwright/profile"]
+                         "--user-data-dir=/data/playwright/profile"],
+                "env": {"PLAYWRIGHT_BROWSERS_PATH": "/root/.cache/ms-playwright"}
             }
         else . end
     ' "$CLAUDE_JSON" > "${CLAUDE_JSON}.tmp" && mv "${CLAUDE_JSON}.tmp" "$CLAUDE_JSON"
