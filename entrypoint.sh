@@ -54,7 +54,17 @@ fi
 if command -v jq >/dev/null 2>&1; then
     _wd="${WORKDIR:-/workspace}"
     _bpath="${PLAYWRIGHT_BROWSERS_PATH:-/opt/ms-playwright}"
-    jq --arg wd "$_wd" --arg bpath "$_bpath" '
+    # @playwright/mcp creates a state dir inside PLAYWRIGHT_BROWSERS_PATH at runtime.
+    # /opt/ms-playwright is read-only for non-root PUID users, so point the writable
+    # state path at /data/playwright and use --executable-path to reference the binary
+    # directly from /opt/ms-playwright (read access is sufficient for launching).
+    _chrome_exec=$(find "$_bpath" -name "chrome" -path "*/chrome-linux64/chrome" 2>/dev/null | head -1)
+    _mcp_state="/data/playwright"
+    _mcp_args='["-y", "@playwright/mcp", "--headless", "--browser=chromium", "--no-sandbox"]'
+    if [ -n "$_chrome_exec" ]; then
+        _mcp_args="[\"-y\", \"@playwright/mcp\", \"--headless\", \"--browser=chromium\", \"--no-sandbox\", \"--executable-path=$_chrome_exec\"]"
+    fi
+    jq --arg wd "$_wd" --arg mcp_state "$_mcp_state" --argjson mcp_args "$_mcp_args" '
         if .hasCompletedOnboarding == null then .hasCompletedOnboarding = true else . end |
         if .theme == null then .theme = "dark-daltonized" else . end |
         if .hasAcceptedAllTerms == null then .hasAcceptedAllTerms = true else . end |
@@ -62,27 +72,25 @@ if command -v jq >/dev/null 2>&1; then
             .projects[$wd].hasTrustDialogAccepted = true
         else . end |
         if (.mcpServers.playwright == null) or
-           (.mcpServers.playwright.env.PLAYWRIGHT_BROWSERS_PATH != $bpath) or
-           ((.mcpServers.playwright.args // []) | contains(["--no-sandbox"]) | not) or
-           ((.mcpServers.playwright.args // []) | contains(["--user-data-dir=/data/playwright/profile"])) then
+           (.mcpServers.playwright.env.PLAYWRIGHT_BROWSERS_PATH != $mcp_state) or
+           ((.mcpServers.playwright.args // []) | contains(["--no-sandbox"]) | not) then
             .mcpServers.playwright = {
                 "command": "npx",
-                "args": ["-y", "@playwright/mcp", "--headless", "--browser=chromium",
-                         "--no-sandbox"],
-                "env": {"PLAYWRIGHT_BROWSERS_PATH": $bpath}
+                "args": $mcp_args,
+                "env": {"PLAYWRIGHT_BROWSERS_PATH": $mcp_state}
             }
         else . end
     ' "$CLAUDE_JSON" > "${CLAUDE_JSON}.tmp" && mv "${CLAUDE_JSON}.tmp" "$CLAUDE_JSON"
 
-    # Patch the official Playwright plugin .mcp.json so it uses the container-installed
-    # Chromium (/opt/ms-playwright) with --no-sandbox, overriding any user/agent edits.
+    # Patch the official Playwright plugin .mcp.json so it uses the same config,
+    # overriding any user/agent edits that may have broken it.
     _playwright_plugin="/home/perchuser/.claude/plugins/marketplaces/claude-plugins-official/external_plugins/playwright/.mcp.json"
     if [ -f "$_playwright_plugin" ]; then
-        jq --arg bpath "$_bpath" '
+        jq --arg mcp_state "$_mcp_state" --argjson mcp_args "$_mcp_args" '
             .playwright = {
                 "command": "npx",
-                "args": ["-y", "@playwright/mcp", "--headless", "--browser=chromium", "--no-sandbox"],
-                "env": {"PLAYWRIGHT_BROWSERS_PATH": $bpath}
+                "args": $mcp_args,
+                "env": {"PLAYWRIGHT_BROWSERS_PATH": $mcp_state}
             }
         ' "$_playwright_plugin" > "${_playwright_plugin}.tmp" && mv "${_playwright_plugin}.tmp" "$_playwright_plugin"
     fi
@@ -164,6 +172,9 @@ fi
 # These are created at startup so container-side skills can write immediately.
 mkdir -p /data/playwright/profile /data/playwright/downloads /data/playwright/state
 mkdir -p /data/finance
+if [ -n "$PUID" ]; then
+    chown -R "${PUID}:${PGID}" /data/playwright
+fi
 if [ ! -d /data/secrets ]; then
     mkdir -p /data/secrets
     chmod 0700 /data/secrets
