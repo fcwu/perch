@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -18,11 +20,20 @@ const (
 )
 
 const (
-	userSessionTimeout  = 5 * time.Minute
-	userSessionRetain   = 5 * time.Minute
+	userSessionRetain    = 5 * time.Minute
 	conversationWindow   = 24 * time.Hour
 	conversationMaxTurns = 20
 )
+
+// acpRunTimeout reads ACP_RUN_TIMEOUT (seconds) or returns the default 5 minutes.
+func acpRunTimeout() time.Duration {
+	if v := os.Getenv("ACP_RUN_TIMEOUT"); v != "" {
+		if secs, err := strconv.Atoi(v); err == nil && secs > 0 {
+			return time.Duration(secs) * time.Second
+		}
+	}
+	return 5 * time.Minute
+}
 
 // buildPrompt prepends serialised conversation history to query.
 // Returns the raw query when history is empty.
@@ -177,7 +188,7 @@ func (m *UserSessionManager) StartSession(userID, username, query string, newCon
 
 	cmd, args := m.runtime.RunAgent("as-query", prompt, m.workdir)
 
-	ctx, cancel := context.WithTimeout(context.Background(), userSessionTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), acpRunTimeout())
 	sess.cancel = cancel
 
 	go func() {

@@ -129,7 +129,7 @@ func newACPUserSessionManager(runtime AgentRuntime, workdir string, store *Store
 		store:          store,
 		adminHub:       adminHub,
 		logger:         logger,
-		timeout:        userSessionTimeout,
+		timeout:        acpRunTimeout(),
 		workdir:        workdir,
 		defaultRuntime: runtime,
 		runtimeFor:     agentRuntimeByName,

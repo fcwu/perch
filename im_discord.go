@@ -10,7 +10,6 @@ import (
 	"net/http"
 	"os"
 	"regexp"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -300,16 +299,6 @@ func (d *DiscordSessionManager) attachmentLimits() AttachmentLimits {
 		return EffectiveAttachmentLimits(nil)
 	}
 	return EffectiveAttachmentLimits(d.settings.GetEffective().Chat)
-}
-
-// acpRunTimeout reads ACP_RUN_TIMEOUT (seconds) or returns the default 5 minutes.
-func acpRunTimeout() time.Duration {
-	if v := os.Getenv("ACP_RUN_TIMEOUT"); v != "" {
-		if secs, err := strconv.Atoi(v); err == nil && secs > 0 {
-			return time.Duration(secs) * time.Second
-		}
-	}
-	return 5 * time.Minute
 }
 
 // isPrivateChannel returns true if the channel is not visible to @everyone.
