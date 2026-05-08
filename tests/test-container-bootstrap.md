@@ -97,6 +97,7 @@ curl -s -X POST http://localhost:8082/api/chat \
 - `/opt/ms-playwright/` 目錄可被 uid=1001 讀取（`r-x` 權限）
 - `PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright` 出現在容器 env
 - `~/.claude.json` 的 `mcpServers.playwright.env.PLAYWRIGHT_BROWSERS_PATH` 為 `/opt/ms-playwright`
+- `~/.claude.json` 的 `mcpServers.playwright.args` 包含 `--no-sandbox`（QNAP 容器無 D-Bus，sandbox 不可用）
 - 以 uid=1001 執行 `npx @playwright/mcp --version` 不回傳 "browser not found" 或安裝提示
 
 **驗證指令**：
@@ -112,10 +113,11 @@ ssh home-auto "$DOCKER exec $CONTAINER sh -c 'ls /opt/ms-playwright/'"
 ssh home-auto "$DOCKER exec $CONTAINER env | grep PLAYWRIGHT"
 # 預期：PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright
 
-# 3. 確認 .claude.json 已 seed 正確路徑
+# 3. 確認 .claude.json 已 seed 正確路徑與 --no-sandbox
 ssh home-auto "$DOCKER exec $CONTAINER cat /home/perchuser/.claude.json" \
-  | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['mcpServers']['playwright']['env']['PLAYWRIGHT_BROWSERS_PATH'])"
-# 預期：/opt/ms-playwright
+  | python3 -c "import sys,json; d=json.load(sys.stdin); p=d['mcpServers']['playwright']; print('path:', p['env']['PLAYWRIGHT_BROWSERS_PATH']); print('no-sandbox:', '--no-sandbox' in p['args'])"
+# 預期：path: /opt/ms-playwright
+#       no-sandbox: True
 
 # 4. 以 uid=1001 啟動 MCP server，確認不報 browser not installed
 ssh home-auto "$DOCKER exec -u 1001 $CONTAINER sh -c \
