@@ -74,7 +74,8 @@ if command -v jq >/dev/null 2>&1; then
         else . end |
         if (.mcpServers.playwright == null) or
            (.mcpServers.playwright.env.PLAYWRIGHT_BROWSERS_PATH != $mcp_state) or
-           ((.mcpServers.playwright.args // []) | contains(["--no-sandbox"]) | not) then
+           ((.mcpServers.playwright.args // []) | contains(["--no-sandbox"]) | not) or
+           ((.mcpServers.playwright.args // []) | contains(["--output-dir=/tmp/playwright-output"]) | not) then
             .mcpServers.playwright = {
                 "command": "npx",
                 "args": $mcp_args,
