@@ -60,9 +60,10 @@ if command -v jq >/dev/null 2>&1; then
     # directly from /opt/ms-playwright (read access is sufficient for launching).
     _chrome_exec=$(find "$_bpath" -name "chrome" -path "*/chrome-linux64/chrome" 2>/dev/null | head -1)
     _mcp_state="/data/playwright"
-    _mcp_args='["-y", "@playwright/mcp", "--headless", "--browser=chromium", "--no-sandbox"]'
+    _mcp_output="/tmp/playwright-output"
+    _mcp_args="[\"-y\", \"@playwright/mcp\", \"--headless\", \"--browser=chromium\", \"--no-sandbox\", \"--output-dir=$_mcp_output\"]"
     if [ -n "$_chrome_exec" ]; then
-        _mcp_args="[\"-y\", \"@playwright/mcp\", \"--headless\", \"--browser=chromium\", \"--no-sandbox\", \"--executable-path=$_chrome_exec\"]"
+        _mcp_args="[\"-y\", \"@playwright/mcp\", \"--headless\", \"--browser=chromium\", \"--no-sandbox\", \"--output-dir=$_mcp_output\", \"--executable-path=$_chrome_exec\"]"
     fi
     jq --arg wd "$_wd" --arg mcp_state "$_mcp_state" --argjson mcp_args "$_mcp_args" '
         if .hasCompletedOnboarding == null then .hasCompletedOnboarding = true else . end |
@@ -174,6 +175,11 @@ mkdir -p /data/playwright/profile /data/playwright/downloads /data/playwright/st
 mkdir -p /data/finance
 if [ -n "$PUID" ]; then
     chown -R "${PUID}:${PGID}" /data/playwright
+fi
+# Screenshot output dir must be writable by PUID so @playwright/mcp can save files there.
+mkdir -p /tmp/playwright-output
+if [ -n "$PUID" ]; then
+    chown "${PUID}:${PGID}" /tmp/playwright-output
 fi
 if [ ! -d /data/secrets ]; then
     mkdir -p /data/secrets

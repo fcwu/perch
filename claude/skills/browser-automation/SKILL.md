@@ -97,9 +97,21 @@ After Doro replies, continue from the exact point of pause.
 | Download timeout | 2 | Screenshot → describe state → ask Doro |
 | Unexpected page | 1 | Screenshot + describe delta → ask Doro |
 
+## Displaying Screenshots to the User
+
+When you call `browser_take_screenshot`, the screenshot is automatically saved to `/tmp/playwright-output/`. The tool result text shows the filename (e.g., `page-20250509-123456.png`). To display it to the user, emit:
+
+```
+[image: /tmp/playwright-output/page-20250509-123456.png]
+```
+
+Use the **exact filename** from the tool result. The inline base64 in the tool result is only visible to you — the `[image: ...]` token is required for the image to appear in the user's chat.
+
+You may also pass a custom `filename` parameter (e.g., `filename: "login-page.png"`) and then emit `[image: /tmp/playwright-output/login-page.png]`.
+
 ## Profile & Session Notes
 
-The MCP server uses `--user-data-dir=/data/playwright/profile` as a shared persistent profile. Chromium holds a lock on this directory, so avoid concurrent browser sessions in different Claude conversations. If a second session finds the profile locked, take note and retry after the first session's browser closes.
+Chromium uses a temporary profile per MCP session; there is no shared persistent `--user-data-dir`. Avoid launching concurrent browser sessions from different conversations, as they can conflict over the state directory.
 
 ## Bot Detection Fallback Ladder
 
