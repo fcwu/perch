@@ -99,15 +99,21 @@ After Doro replies, continue from the exact point of pause.
 
 ## Displaying Screenshots to the User
 
-When you call `browser_take_screenshot`, the screenshot is automatically saved to `/tmp/playwright-output/`. The tool result text shows the filename (e.g., `page-20250509-123456.png`). To display it to the user, emit:
+When you call `browser_take_screenshot` (no `filename` parameter), the screenshot is automatically saved to `/tmp/playwright-output/` with a timestamped name. The tool result text contains a link like:
 
 ```
-[image: /tmp/playwright-output/page-20250509-123456.png]
+- [Screenshot of viewport](../tmp/playwright-output/page-2026-05-09T01-52-04-689Z.png)
 ```
 
-Use the **exact filename** from the tool result. The inline base64 in the tool result is only visible to you — the `[image: ...]` token is required for the image to appear in the user's chat.
+To display it to the user, emit the absolute path:
 
-You may also pass a custom `filename` parameter (e.g., `filename: "login-page.png"`) and then emit `[image: /tmp/playwright-output/login-page.png]`.
+```
+[image: /tmp/playwright-output/page-2026-05-09T01-52-04-689Z.png]
+```
+
+Use the **exact filename** from the tool result (everything after the last `/` in the link). The inline base64 in the tool result is only visible to you — the `[image: ...]` token is required for the image to appear in the user's chat.
+
+Do NOT use the `filename` parameter in `browser_take_screenshot` — it resolves relative to the app directory which is read-only.
 
 ## Profile & Session Notes
 

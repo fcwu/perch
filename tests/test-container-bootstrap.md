@@ -248,7 +248,7 @@ mcp.stderr.on("data", d => process.stderr.write(d));
 mcp.stdin.write(JSON.stringify({jsonrpc:"2.0",id:1,method:"initialize",params:{protocolVersion:"2024-11-05",capabilities:{},clientInfo:{name:"test",version:"1"}}}) + "\n");
 mcp.stdin.write(JSON.stringify({jsonrpc:"2.0",method:"notifications/initialized",params:{}}) + "\n");
 setTimeout(() => mcp.stdin.write(JSON.stringify({jsonrpc:"2.0",id:2,method:"tools/call",params:{name:"browser_navigate",arguments:{url:"https://example.com"}}}) + "\n"), 300);
-setTimeout(() => mcp.stdin.write(JSON.stringify({jsonrpc:"2.0",id:3,method:"tools/call",params:{name:"browser_take_screenshot",arguments:{filename:"tbc09-test.png"}}}) + "\n"), 8000);
+setTimeout(() => mcp.stdin.write(JSON.stringify({jsonrpc:"2.0",id:3,method:"tools/call",params:{name:"browser_take_screenshot",arguments:{}}}) + "\n"), 8000);
 setTimeout(() => {
   mcp.kill();
   const lines = out.trim().split("\n").map(l => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
@@ -258,10 +258,13 @@ setTimeout(() => {
   if (!shot) { console.error("FAIL: no response for browser_take_screenshot"); process.exit(1); }
   if (shot.result?.isError) { console.error("FAIL: screenshot error:", JSON.stringify(shot.result.content)); process.exit(1); }
   const text = (shot.result?.content || []).filter(c => c.type === "text").map(c => c.text).join("\n");
-  if (!text.includes("tbc09-test.png")) { console.error("FAIL: filename not in tool result text:", text.slice(0,300)); process.exit(1); }
-  console.log("PASS: browser_take_screenshot returned filename in text:", text.slice(0,200));
+  const imgBlocks = (shot.result?.content || []).filter(c => c.type === "image");
+  const match = text.match(/page-[^)]+\.png/);
+  if (!match) { console.error("FAIL: no png filename in tool result text:", text.slice(0,300)); process.exit(1); }
+  if (imgBlocks.length === 0) { console.error("FAIL: no image content block in response"); process.exit(1); }
+  console.log("PASS: browser_take_screenshot saved to /tmp/playwright-output/"+match[0]+", image block present");
   process.exit(0);
-}, 20000);
+}, 22000);
 JSEOF
 
 scp /tmp/test_mcp_screenshot.js home-auto:/tmp/test_mcp_screenshot.js
@@ -269,7 +272,7 @@ ssh home-auto "source /etc/profile && docker cp /tmp/test_mcp_screenshot.js $CON
   docker exec -u 1001 $CONTAINER node /tmp/test_mcp_screenshot.js \
   PLAYWRIGHT_BROWSERS_PATH=/data/playwright -- \
   \$(docker exec $CONTAINER sh -c 'find /opt/ms-playwright -name chrome -path \"*/chrome-linux64/chrome\" | head -1 | xargs -I{} echo \"--headless --browser=chromium --no-sandbox --output-dir=/tmp/playwright-output --executable-path={}\"')"
-# 確認截圖存在
-ssh home-auto "source /etc/profile && docker exec $CONTAINER ls -la /tmp/playwright-output/tbc09-test.png && echo FILEPASS"
+# 確認截圖存在（檔名以 page- 開頭）
+ssh home-auto "source /etc/profile && docker exec $CONTAINER ls /tmp/playwright-output/page-*.png | head -1 && echo FILEPASS"
 # 預期：PASS + FILEPASS
 ```
