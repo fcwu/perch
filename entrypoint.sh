@@ -181,6 +181,9 @@ mkdir -p /tmp/playwright-output
 if [ -n "$PUID" ]; then
     chown "${PUID}:${PGID}" /tmp/playwright-output
 fi
+# Remove stale Chrome SingletonLock files left over from crashed/killed sessions.
+# On fresh container start there are no live Chrome processes, so any lock is stale.
+find /data/playwright -name "SingletonLock" -delete 2>/dev/null || true
 if [ ! -d /data/secrets ]; then
     mkdir -p /data/secrets
     chmod 0700 /data/secrets
