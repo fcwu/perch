@@ -163,7 +163,7 @@ ssh home-auto "source /etc/profile && docker exec -u 1001 $CONTAINER \
 
 **層級**：E2E-curl
 
-**背景**：entrypoint.sh 在啟動時 seed `~/.claude.json`。正確設定需包含：`--no-sandbox`（QNAP 無 D-Bus sandbox）、`--executable-path` 指向 `/opt/ms-playwright`（bypass install check）、`PLAYWRIGHT_BROWSERS_PATH=/data/playwright`（writable state dir）。
+**背景**：entrypoint.sh 在啟動時 seed `~/.claude.json`。正確設定需包含：`--no-sandbox`（QNAP 無 D-Bus sandbox）、`--executable-path` 指向 `/opt/ms-playwright`（bypass install check）、`PLAYWRIGHT_BROWSERS_PATH=/data/playwright`（writable state dir）、`--output-dir=/tmp/playwright-output`（screenshot 存檔路徑）。
 
 **Given** container 啟動完成
 **When** 讀取 `~/.claude.json`
@@ -181,6 +181,7 @@ assert '--no-sandbox' in args, 'missing --no-sandbox'
 assert any('--executable-path' in a for a in args), 'missing --executable-path'
 assert any('/opt/ms-playwright' in a for a in args), '--executable-path not in /opt/ms-playwright'
 assert env.get('PLAYWRIGHT_BROWSERS_PATH') == '/data/playwright', f'wrong state path: {env}'
+assert any('--output-dir=/tmp/playwright-output' in a for a in args), 'missing --output-dir'
 print('PASS')
 "
 # 預期：PASS
@@ -212,4 +213,63 @@ assert p['env'].get('PLAYWRIGHT_BROWSERS_PATH') == '/data/playwright', 'plugin w
 print('PASS')
 "
 # 預期：PASS（plugin 未安裝時可 skip）
+```
+
+---
+
+### TBC09 — browser_take_screenshot 結果能透過 [image:] token 顯示
+
+**層級**：E2E-curl
+
+**背景**：`@playwright/mcp` 的 `browser_take_screenshot` 會將截圖存至 `--output-dir`（`/tmp/playwright-output/`），並在 tool result text 中回傳相對檔名（如 `page-20250509-123456.png`）。agent 須根據 `browser-automation/SKILL.md` 的指示，在回應文字中emit `[image: /tmp/playwright-output/<filename>]`，perch 才能將圖片傳到 chat 前端。
+
+**Given** container 以 `PUID=1001` 啟動，`/tmp/playwright-output` 為可寫目錄
+**When** 透過 MCP protocol 呼叫 `browser_navigate` 後接 `browser_take_screenshot`
+**Then**
+- `browser_take_screenshot` tool result 包含 text content（含相對 filename）
+- `/tmp/playwright-output/` 下出現對應截圖檔
+
+**驗證指令**：
+```bash
+CONTAINER=mykb-perch-perch-1
+
+cat > /tmp/test_mcp_screenshot.js << 'JSEOF'
+const { spawn } = require("child_process");
+const args = process.argv.slice(2);
+const sepIdx = args.indexOf("--");
+const envPairs = args.slice(0, sepIdx);
+const mcpArgs = args.slice(sepIdx + 1);
+const env = { ...process.env };
+envPairs.forEach(p => { const [k,...vs] = p.split("="); env[k] = vs.join("="); });
+const mcp = spawn("node", ["/usr/bin/playwright-mcp", ...mcpArgs], { env, stdio: ["pipe","pipe","pipe"] });
+let out = "";
+mcp.stdout.on("data", d => { out += d; });
+mcp.stderr.on("data", d => process.stderr.write(d));
+mcp.stdin.write(JSON.stringify({jsonrpc:"2.0",id:1,method:"initialize",params:{protocolVersion:"2024-11-05",capabilities:{},clientInfo:{name:"test",version:"1"}}}) + "\n");
+mcp.stdin.write(JSON.stringify({jsonrpc:"2.0",method:"notifications/initialized",params:{}}) + "\n");
+setTimeout(() => mcp.stdin.write(JSON.stringify({jsonrpc:"2.0",id:2,method:"tools/call",params:{name:"browser_navigate",arguments:{url:"https://example.com"}}}) + "\n"), 300);
+setTimeout(() => mcp.stdin.write(JSON.stringify({jsonrpc:"2.0",id:3,method:"tools/call",params:{name:"browser_take_screenshot",arguments:{filename:"tbc09-test.png"}}}) + "\n"), 8000);
+setTimeout(() => {
+  mcp.kill();
+  const lines = out.trim().split("\n").map(l => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
+  const nav = lines.find(l => l.id === 2);
+  const shot = lines.find(l => l.id === 3);
+  if (!nav) { console.error("FAIL: no response for browser_navigate"); process.exit(1); }
+  if (!shot) { console.error("FAIL: no response for browser_take_screenshot"); process.exit(1); }
+  if (shot.result?.isError) { console.error("FAIL: screenshot error:", JSON.stringify(shot.result.content)); process.exit(1); }
+  const text = (shot.result?.content || []).filter(c => c.type === "text").map(c => c.text).join("\n");
+  if (!text.includes("tbc09-test.png")) { console.error("FAIL: filename not in tool result text:", text.slice(0,300)); process.exit(1); }
+  console.log("PASS: browser_take_screenshot returned filename in text:", text.slice(0,200));
+  process.exit(0);
+}, 20000);
+JSEOF
+
+scp /tmp/test_mcp_screenshot.js home-auto:/tmp/test_mcp_screenshot.js
+ssh home-auto "source /etc/profile && docker cp /tmp/test_mcp_screenshot.js $CONTAINER:/tmp/test_mcp_screenshot.js && \
+  docker exec -u 1001 $CONTAINER node /tmp/test_mcp_screenshot.js \
+  PLAYWRIGHT_BROWSERS_PATH=/data/playwright -- \
+  \$(docker exec $CONTAINER sh -c 'find /opt/ms-playwright -name chrome -path \"*/chrome-linux64/chrome\" | head -1 | xargs -I{} echo \"--headless --browser=chromium --no-sandbox --output-dir=/tmp/playwright-output --executable-path={}\"')"
+# 確認截圖存在
+ssh home-auto "source /etc/profile && docker exec $CONTAINER ls -la /tmp/playwright-output/tbc09-test.png && echo FILEPASS"
+# 預期：PASS + FILEPASS
 ```
