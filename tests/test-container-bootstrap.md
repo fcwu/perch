@@ -85,7 +85,7 @@ curl -s -X POST http://localhost:8082/api/chat \
 
 ---
 
-### TBC05 — 非 root 使用者可透過 Playwright MCP 執行 browser_navigate
+### TBC05 — Playwright MCP browser_navigate 端對端可用（uid=1001）
 
 **層級**：E2E-curl
 
@@ -93,37 +93,20 @@ curl -s -X POST http://localhost:8082/api/chat \
 
 **Given** container 以 `PUID=1001` 啟動
 **When** 以 uid=1001 透過 MCP protocol 呼叫 `browser_navigate`
-**Then**
-- MCP server 初始化成功（回傳 `serverInfo.name: "Playwright"`）
-- `browser_navigate` 回傳頁面 title，無 EACCES 錯誤
-- `~/.claude.json` 的 `mcpServers.playwright` 包含 `--no-sandbox`、`--executable-path` 指向 `/opt/ms-playwright` 下的 chrome binary、`env.PLAYWRIGHT_BROWSERS_PATH=/data/playwright`
-- `/data/playwright` 可被 uid=1001 寫入
-- Playwright plugin `.mcp.json` 與 `mcpServers.playwright` 設定一致
+**Then** MCP server 初始化成功，`browser_navigate` 回傳頁面 title，無 EACCES 錯誤
 
 **驗證指令**：
 ```bash
 CONTAINER=mykb-perch-perch-1
-DOCKER="ssh home-auto source /etc/profile && /share/CACHEDEV4_DATA/.qpkg/container-station/bin/docker"
 
-# ── 核心測試：實際呼叫 browser_navigate，確認無 EACCES ──
-# 取得 MCP config args
-MCP_ARGS=$(ssh home-auto "source /etc/profile && docker exec $CONTAINER \
-  cat /home/perchuser/.claude.json" | \
-  python3 -c "import sys,json; p=json.load(sys.stdin)['mcpServers']['playwright']; \
-    print(' '.join(a for a in p['args'] if a not in ['-y','@playwright/mcp']))" )
-MCP_ENV=$(ssh home-auto "source /etc/profile && docker exec $CONTAINER \
-  cat /home/perchuser/.claude.json" | \
-  python3 -c "import sys,json; e=json.load(sys.stdin)['mcpServers']['playwright']['env']; \
-    print(' '.join(f'{k}={v}' for k,v in e.items()))")
-
-# 用真實 MCP 設定跑 browser_navigate（這才是 agent 實際用的路徑）
 cat > /tmp/test_mcp_navigate.js << 'JSEOF'
 const { spawn } = require("child_process");
 const args = process.argv.slice(2);
-const envPairs = args.splice(0, args.indexOf("--"));
-const mcpArgs = args.slice(1);
+const sepIdx = args.indexOf("--");
+const envPairs = args.slice(0, sepIdx);
+const mcpArgs = args.slice(sepIdx + 1);
 const env = { ...process.env };
-envPairs.forEach(p => { const [k,v] = p.split("="); env[k] = v; });
+envPairs.forEach(p => { const [k,...vs] = p.split("="); env[k] = vs.join("="); });
 const mcp = spawn("node", ["/usr/bin/playwright-mcp", ...mcpArgs], { env, stdio: ["pipe","pipe","pipe"] });
 let out = "";
 mcp.stdout.on("data", d => { out += d; });
@@ -138,7 +121,7 @@ setTimeout(() => {
   if (!nav) { console.error("FAIL: no response for browser_navigate"); process.exit(1); }
   if (nav.result && nav.result.isError) { console.error("FAIL:", JSON.stringify(nav.result.content)); process.exit(1); }
   const text = nav.result?.content?.[0]?.text || "";
-  if (!text.includes("Example Domain")) { console.error("FAIL: unexpected response:", text.slice(0,200)); process.exit(1); }
+  if (!text.includes("Example Domain")) { console.error("FAIL: unexpected:", text.slice(0,200)); process.exit(1); }
   console.log("PASS: browser_navigate returned page title OK");
   process.exit(0);
 }, 18000);
@@ -146,40 +129,87 @@ JSEOF
 
 scp /tmp/test_mcp_navigate.js home-auto:/tmp/test_mcp_navigate.js
 ssh home-auto "source /etc/profile && docker cp /tmp/test_mcp_navigate.js $CONTAINER:/tmp/test_mcp_navigate.js && \
-  docker exec -u 1001 $CONTAINER node /tmp/test_mcp_navigate.js $MCP_ENV -- $MCP_ARGS"
+  docker exec -u 1001 $CONTAINER node /tmp/test_mcp_navigate.js \
+  PLAYWRIGHT_BROWSERS_PATH=/data/playwright -- \
+  \$(docker exec $CONTAINER sh -c 'find /opt/ms-playwright -name chrome -path \"*/chrome-linux64/chrome\" | head -1 | xargs -I{} echo \"--headless --browser=chromium --no-sandbox --executable-path={}\"')"
 # 預期：PASS: browser_navigate returned page title OK
+```
 
-# ── 設定完整性檢查 ──
-# 1. mcpServers.playwright 設定正確
+**失敗排查**：EACCES → TBC06；timeout/sandbox → TBC07；config mismatch → TBC08
+
+---
+
+### TBC06 — /data/playwright 可被 PUID 寫入
+
+**層級**：E2E-curl
+
+**背景**：`@playwright/mcp` 在 `PLAYWRIGHT_BROWSERS_PATH` 下建立 state dir，需要 write 權限。entrypoint.sh 應 chown `/data/playwright` 給 PUID。
+
+**Given** container 以 `PUID=1001` 啟動
+**When** 以 uid=1001 在 `/data/playwright` 建立檔案
+**Then** 成功（無 Permission denied）
+
+**驗證指令**：
+```bash
+CONTAINER=mykb-perch-perch-1
+ssh home-auto "source /etc/profile && docker exec -u 1001 $CONTAINER \
+  sh -c 'touch /data/playwright/.write_test && rm /data/playwright/.write_test && echo PASS'"
+# 預期：PASS
+```
+
+---
+
+### TBC07 — mcpServers.playwright 設定包含必要 flags
+
+**層級**：E2E-curl
+
+**背景**：entrypoint.sh 在啟動時 seed `~/.claude.json`。正確設定需包含：`--no-sandbox`（QNAP 無 D-Bus sandbox）、`--executable-path` 指向 `/opt/ms-playwright`（bypass install check）、`PLAYWRIGHT_BROWSERS_PATH=/data/playwright`（writable state dir）。
+
+**Given** container 啟動完成
+**When** 讀取 `~/.claude.json`
+**Then** `mcpServers.playwright` 符合上述所有條件
+
+**驗證指令**：
+```bash
+CONTAINER=mykb-perch-perch-1
 ssh home-auto "source /etc/profile && docker exec $CONTAINER cat /home/perchuser/.claude.json" | \
   python3 -c "
 import sys,json
 p = json.load(sys.stdin)['mcpServers']['playwright']
-args = p['args']
-env = p['env']
+args, env = p['args'], p['env']
 assert '--no-sandbox' in args, 'missing --no-sandbox'
 assert any('--executable-path' in a for a in args), 'missing --executable-path'
-assert any('/opt/ms-playwright' in a for a in args), '--executable-path not pointing to /opt/ms-playwright'
+assert any('/opt/ms-playwright' in a for a in args), '--executable-path not in /opt/ms-playwright'
 assert env.get('PLAYWRIGHT_BROWSERS_PATH') == '/data/playwright', f'wrong state path: {env}'
-print('PASS: mcpServers.playwright config correct')
+print('PASS')
 "
+# 預期：PASS
+```
 
-# 2. /data/playwright 可被 uid=1001 寫入
-ssh home-auto "source /etc/profile && docker exec -u 1001 $CONTAINER sh -c 'touch /data/playwright/.write_test && rm /data/playwright/.write_test && echo PASS: /data/playwright writable'"
+---
 
-# 3. plugin .mcp.json 與 mcpServers 一致（防止 agent 或 plugin 互相覆蓋）
-ssh home-auto "source /etc/profile && docker exec $CONTAINER cat '/home/perchuser/.claude/plugins/marketplaces/claude-plugins-official/external_plugins/playwright/.mcp.json'" | \
+### TBC08 — Playwright plugin .mcp.json 與 mcpServers 設定一致
+
+**層級**：E2E-curl
+
+**背景**：Claude Code 的 official Playwright plugin 有自己的 `.mcp.json`，若與 `mcpServers.playwright` 不一致會導致 agent 用到錯誤設定。entrypoint.sh 應同步修正兩者。
+
+**Given** container 啟動完成且 host `~/.claude` 已掛載
+**When** 讀取 plugin `.mcp.json`
+**Then** 與 `mcpServers.playwright` 相同（含 `--no-sandbox`、`--executable-path`、`PLAYWRIGHT_BROWSERS_PATH`）
+
+**驗證指令**：
+```bash
+CONTAINER=mykb-perch-perch-1
+PLUGIN="/home/perchuser/.claude/plugins/marketplaces/claude-plugins-official/external_plugins/playwright/.mcp.json"
+ssh home-auto "source /etc/profile && docker exec $CONTAINER cat '$PLUGIN'" | \
   python3 -c "
 import sys,json
 p = json.load(sys.stdin)['playwright']
 assert '--no-sandbox' in p['args'], 'plugin missing --no-sandbox'
 assert any('--executable-path' in a for a in p['args']), 'plugin missing --executable-path'
-assert p['env'].get('PLAYWRIGHT_BROWSERS_PATH') == '/data/playwright', f'plugin wrong state path'
-print('PASS: plugin .mcp.json consistent')
+assert p['env'].get('PLAYWRIGHT_BROWSERS_PATH') == '/data/playwright', 'plugin wrong state path'
+print('PASS')
 "
+# 預期：PASS（plugin 未安裝時可 skip）
 ```
-
-**失敗時的排查順序**：
-1. `browser_navigate` EACCES → 檢查 `/data/playwright` 是否為 uid=1001 writable
-2. `browser_navigate` 無回應（timeout）→ 檢查 `--no-sandbox` 是否在 args、`--executable-path` 是否存在
-3. Config 檢查失敗 → 確認 entrypoint.sh 的 jq patch 有執行（`docker logs` 是否有 jq warning）
