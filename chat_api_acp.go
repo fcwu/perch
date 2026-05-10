@@ -451,7 +451,11 @@ func (m *ACPUserSessionManager) runPrompt(sess *acpChatSession, prompt string) {
 		sess.broadcastJSON(string(msg))
 	}
 	var currentToolEventID int64
+	var currentToolName string
+	var currentToolStart time.Time
 	onToolStart := func(toolName string) {
+		currentToolName = toolName
+		currentToolStart = time.Now()
 		if m.adminHub != nil {
 			m.adminHub.SessionUpdated(sess.sessionID, toolName)
 		}
@@ -466,6 +470,9 @@ func (m *ACPUserSessionManager) runPrompt(sess *acpChatSession, prompt string) {
 		sess.broadcastJSON(string(toolMsg))
 	}
 	onToolEnd := func() {
+		elapsedMs := time.Since(currentToolStart).Milliseconds()
+		toolEndMsg, _ := json.Marshal(map[string]interface{}{"type": "tool_end", "tool": currentToolName, "elapsed_ms": elapsedMs})
+		sess.broadcastJSON(string(toolEndMsg))
 		if m.adminHub != nil {
 			m.adminHub.SessionUpdated(sess.sessionID, "")
 		}
@@ -475,6 +482,7 @@ func (m *ACPUserSessionManager) runPrompt(sess *acpChatSession, prompt string) {
 			}
 			currentToolEventID = 0
 		}
+		currentToolName = ""
 	}
 
 	// sess.attachments holds only image attachments (non-images were persisted
