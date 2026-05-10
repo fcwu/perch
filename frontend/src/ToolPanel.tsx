@@ -34,7 +34,7 @@ function ActivityBar({ entries, loading }: ToolPanelProps) {
   const running = entries.filter(e => !e.done)
   const done = entries.filter(e => e.done)
 
-  if (!loading && entries.length === 0) return null
+  if (!loading && running.length === 0) return null
 
   return (
     <div style={{ borderTop: '1px solid #2a2a2a', background: '#0d0d0d', flexShrink: 0, padding: '4px 0' }}>

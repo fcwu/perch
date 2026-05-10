@@ -593,6 +593,71 @@ curl -sS -H "Authorization: Bot ${DISCORD_BOT_TOKEN}" \
 
 ---
 
+---
+
+## E2E-browser — ToolPanel 行為
+
+> ToolPanel（工具呼叫列）在串流期間顯示執行中工具，回應完成後應自動隱藏。
+> 相關修正：`ToolPanel.tsx` line 37 條件從 `entries.length === 0` 改為 `running.length === 0`。
+
+### AIO-TP01 — ToolPanel 在回應完成後消失
+
+**層級**：E2E-browser
+
+**Given** 使用者開啟 `http://${HOST}` 並傳送一個會觸發工具呼叫的查詢（例如 Bash）
+**When** Agent 回應完成（SSE `done` 事件收到，`loading=false`）
+**Then**
+- ToolPanel（含工具名稱與 spinner 的底部列）**不再顯示**
+- DOM 中不再有「thinking…」文字或工具名稱字串（僅在 ToolPanel 內出現的文字）
+
+**驗證步驟**（透過 chrome-cdp）：
+
+```bash
+CDP=~/.claude/skills/chrome-cdp/scripts/cdp.mjs
+TARGET=$(node $CDP list | jq -r '.[0].id')
+
+# 1. 送出觸發工具的查詢，等待完成
+curl -sS -X POST "http://${HOST}/api/chat" \
+  -H "Content-Type: application/json" \
+  -d '{"query":"請執行 bash: echo TP01_TEST","new_conversation":true}'
+sleep 20  # 等待 agent 回應完成
+
+# 2. 截圖確認 ToolPanel 已消失
+node $CDP shot $TARGET /tmp/aio-tp01-after.png
+# 觀察：底部無 spinner 或工具名稱列
+
+# 3. 確認 DOM 中無 ToolPanel 文字（thinking… 或 ✓ 加工具名稱）
+node $CDP eval $TARGET "document.body.innerText.includes('thinking…')"
+# 預期：false
+
+node $CDP eval $TARGET "document.body.innerText.includes('Bash')"
+# 預期：false（Bash 只出現在 ToolPanel，回應完成後應消失）
+```
+
+**反向驗證（串流期間 ToolPanel 可見）**：
+
+```bash
+# 送出長時間 query，立刻截圖（趁 loading 中）
+curl -sS -X POST "http://${HOST}/api/chat" \
+  -H "Content-Type: application/json" \
+  -d '{"query":"請執行 bash: sleep 5 && echo TP01_LOADING","new_conversation":true}' &
+sleep 3
+
+node $CDP shot $TARGET /tmp/aio-tp01-during.png
+# 觀察：底部有 spinner + 工具名稱（ToolPanel 顯示中）
+
+node $CDP eval $TARGET "document.body.innerText.includes('thinking…') || document.body.innerText.includes('Bash')"
+# 預期：true
+
+wait  # 等背景 curl 完成
+```
+
+**失敗排查**：
+- ToolPanel 回應後仍存在 → 檢查 `ToolPanel.tsx` line 37：應為 `if (!loading && running.length === 0) return null`（非 `entries.length === 0`）
+- ToolPanel 串流期間不顯示 → 檢查 `tool_start` / `tool_end` SSE events 是否正常送出（`test-acp-tool-events.md` AT-E01）
+
+---
+
 ## 備註
 
 - AIO01–AIO12 為 curl 層級；AIO01 是其他 curl case 的前置，需先成功。
