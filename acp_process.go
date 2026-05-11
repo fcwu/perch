@@ -63,9 +63,10 @@ type ACPProcess struct {
 	// streaming chunks from agent_message_chunk notifications (one prompt at a time)
 	chunkMu     sync.Mutex
 	chunkBuf    strings.Builder
-	chunkCb     func(string)         // optional per-prompt callback; called from readLoop goroutine
-	toolStartCb func(string, string) // called with (toolName, inputJSON) on tool_call (pending)
-	toolEndCb   func(string)         // called with outputJSON on tool_call_update status=completed
+	chunkCb      func(string)         // optional per-prompt callback; called from readLoop goroutine
+	toolStartCb  func(string)         // called with toolName on tool_call (pending)
+	toolEndCb    func(string, string) // called with (inputJSON, outputJSON) on tool_call_update status=completed
+	toolRawInput string               // rawInput accumulated from tool_call_update events before status=completed
 }
 
 // acpMsg is the wire format for ACP JSON-RPC 2.0 messages.
@@ -297,16 +298,16 @@ func (p *ACPProcess) Prompt(ctx context.Context, text string) (string, error) {
 
 // PromptWithChunks is like Prompt but calls onChunk for each agent_message_chunk as it
 // arrives (before the full response is available). onChunk may be nil.
-// onToolStart is called with (toolName, inputJSON) when a tool_call event arrives.
-// onToolEnd is called with outputJSON when a tool_call_update with status=completed arrives.
-func (p *ACPProcess) PromptWithChunks(ctx context.Context, text string, onChunk func(string), onToolStart func(string, string), onToolEnd func(string)) (string, error) {
+// onToolStart is called with toolName on tool_call (pending).
+// onToolEnd is called with (inputJSON, outputJSON) on tool_call_update status=completed.
+func (p *ACPProcess) PromptWithChunks(ctx context.Context, text string, onChunk func(string), onToolStart func(string), onToolEnd func(string, string)) (string, error) {
 	return p.PromptWithContent(ctx, []ACPContent{{Type: "text", Text: text}}, onChunk, onToolStart, onToolEnd)
 }
 
 // PromptWithContent sends a multi-block prompt (text + optional image blocks) to the agent
 // and returns the accumulated response text. Use this for vision queries; for text-only see
 // Prompt or PromptWithChunks.
-func (p *ACPProcess) PromptWithContent(ctx context.Context, blocks []ACPContent, onChunk func(string), onToolStart func(string, string), onToolEnd func(string)) (string, error) {
+func (p *ACPProcess) PromptWithContent(ctx context.Context, blocks []ACPContent, onChunk func(string), onToolStart func(string), onToolEnd func(string, string)) (string, error) {
 	// Reset chunk accumulator and register callbacks before sending the prompt.
 	p.chunkMu.Lock()
 	p.chunkBuf.Reset()
@@ -513,6 +514,8 @@ func (p *ACPProcess) readLoop(r io.Reader) {
 					SessionUpdate string          `json:"sessionUpdate"`
 					Status        string          `json:"status"`
 					Content       json.RawMessage `json:"content"`
+					RawInput      json.RawMessage `json:"rawInput"`
+					RawOutput     string          `json:"rawOutput"`
 					Meta          struct {
 						ClaudeCode struct {
 							ToolName string `json:"toolName"`
@@ -545,19 +548,29 @@ func (p *ACPProcess) readLoop(r io.Reader) {
 			case "tool_call":
 				p.chunkMu.Lock()
 				cb := p.toolStartCb
+				p.toolRawInput = ""
 				p.chunkMu.Unlock()
 				if cb != nil {
-					cb(params.Update.Meta.ClaudeCode.ToolName, string(params.Update.Content))
+					cb(params.Update.Meta.ClaudeCode.ToolName)
 				}
 			case "tool_call_update":
+				// Accumulate rawInput from any tool_call_update that carries it
+				// (arrives before status=completed with the actual tool arguments).
+				p.chunkMu.Lock()
+				if len(params.Update.RawInput) > 0 && string(params.Update.RawInput) != "{}" {
+					p.toolRawInput = string(params.Update.RawInput)
+				}
+				p.chunkMu.Unlock()
 				if params.Update.Status != "completed" {
 					break
 				}
 				p.chunkMu.Lock()
 				cb := p.toolEndCb
+				inputJSON := p.toolRawInput
+				p.toolRawInput = ""
 				p.chunkMu.Unlock()
 				if cb != nil {
-					cb(string(params.Update.Content))
+					cb(inputJSON, params.Update.RawOutput)
 				}
 			}
 		}

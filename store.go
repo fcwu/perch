@@ -216,10 +216,10 @@ func (s *Store) InsertToolEvent(sessionID, toolName, inputJSON string) (int64, e
 	return res.LastInsertId()
 }
 
-func (s *Store) UpdateToolEventEnd(eventID int64, outputJSON string) error {
+func (s *Store) UpdateToolEventEnd(eventID int64, inputJSON, outputJSON string) error {
 	_, err := s.db.Exec(
-		`UPDATE tool_events SET output_json=?,ended_at=? WHERE id=?`,
-		outputJSON, nowMs(), eventID,
+		`UPDATE tool_events SET input_json=?,output_json=?,ended_at=? WHERE id=?`,
+		inputJSON, outputJSON, nowMs(), eventID,
 	)
 	return err
 }

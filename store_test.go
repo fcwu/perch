@@ -49,7 +49,7 @@ func TestStoreSessionLifecycle(t *testing.T) {
 		t.Errorf("expected positive event ID, got %d", eventID)
 	}
 
-	if err := s.UpdateToolEventEnd(eventID, `{"result":"ok"}`); err != nil {
+	if err := s.UpdateToolEventEnd(eventID, `{"command":"ls"}`, `{"result":"ok"}`); err != nil {
 		t.Fatalf("UpdateToolEventEnd: %v", err)
 	}
 

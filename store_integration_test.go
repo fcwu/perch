@@ -49,7 +49,7 @@ func TestStoreIntegration(t *testing.T) {
 	}
 
 	// Update tool event end (as ACPUserSessionManager does on tool_call_completed)
-	if err := store.UpdateToolEventEnd(eventID, `"HBS content here"`); err != nil {
+	if err := store.UpdateToolEventEnd(eventID, `{"command":"cat file.txt"}`, `"HBS content here"`); err != nil {
 		t.Fatalf("UpdateToolEventEnd: %v", err)
 	}
 
