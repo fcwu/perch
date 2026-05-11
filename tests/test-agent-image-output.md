@@ -475,6 +475,32 @@ docker logs "${CONTAINER}" --tail 50 | grep -i "orphan\|cleanup"
 
 ---
 
+### AIO19 — 重新整理頁面後，歷史訊息的圖片仍正常顯示
+
+**層級**：E2E-browser
+
+**Given** 使用者已在 `/chat?id=<uuid>` 頁面，且該對話的助理回覆中包含圖片（圖片在文字下方可見）
+**When** 使用者按下 F5 或 Ctrl+Shift+R 執行強制重新整理
+**Then**
+- 頁面重載完成後，助理回覆的文字內容仍正常顯示
+- 助理回覆中的圖片在文字下方仍正常顯示（無破圖 icon）
+- 使用者不需要重新送出訊息，圖片即出現
+
+---
+
+### AIO20 — 直接以帶 id 的 URL 開啟含圖片的對話，歷史圖片正常顯示
+
+**層級**：E2E-browser
+
+**Given** 已存在一個助理回覆含圖片的對話，其 id 為 `<uuid>`
+**When** 使用者在新分頁或新視窗直接輸入 `/chat?id=<uuid>` 並開啟
+**Then**
+- 頁面載入後，歷史訊息（含使用者查詢與助理回覆）顯示在 chat area
+- 助理回覆中的圖片在文字下方正常顯示（無破圖 icon）
+- 使用者不需要做任何額外操作，圖片即出現
+
+---
+
 ## E2E-browser — Discord 整合（需 Discord bot 上線）
 
 ### AIO17 — Discord session：Agent 輸出圖片以檔案附件方式傳送

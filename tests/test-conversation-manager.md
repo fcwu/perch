@@ -112,7 +112,7 @@
 
 **Given** 已存在一個有歷史訊息的 conversation（透過先前的對話建立），其 id 為 `<uuid>`
 **When** 使用者在瀏覽器網址列直接輸入 `/chat?id=<uuid>` 並按 Enter
-**Then** 頁面載入後，chat area 呈現該對話的歷史訊息：使用者發出的訊息顯示在右側，助理回覆顯示在左側；使用者不需要重新送出任何訊息
+**Then** 頁面載入後，chat area 呈現該對話的歷史訊息：使用者發出的訊息顯示在右側，助理回覆顯示在左側（包含回覆中的圖片，若有的話）；使用者不需要重新送出任何訊息
 
 ---
 
@@ -120,8 +120,8 @@
 
 **層級**：E2E-browser
 
-**Given** 使用者已在 `/chat?id=<uuid>` 頁面，chat area 可見歷史訊息
+**Given** 使用者已在 `/chat?id=<uuid>` 頁面，chat area 可見歷史訊息（含文字與圖片）
 **When** 使用者按下 F5 或 Ctrl+Shift+R 執行強制重新整理
-**Then** 頁面重載完成後，chat area 仍顯示相同的歷史訊息；URL 維持 `/chat?id=<uuid>`，使用者不需要任何額外操作
+**Then** 頁面重載完成後，chat area 仍顯示相同的歷史訊息（包含助理回覆中的圖片，無破圖）；URL 維持 `/chat?id=<uuid>`，使用者不需要任何額外操作
 
 ---
