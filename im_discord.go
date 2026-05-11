@@ -235,11 +235,19 @@ type discordSession struct {
 	last *discordPending
 }
 
-func newDiscordSession(runtime AgentRuntime, channelID, workdir string, imgStore *imageStore, logger *slog.Logger) *discordSession {
+func newDiscordSession(runtime AgentRuntime, channelID, workdir string, imgStore *imageStore, mcpServers []map[string]any, logger *slog.Logger) *discordSession {
+	proc := NewACPProcess(runtime.ACPExecutable, runtime.ACPArgs, workdir, logger)
+	if runtime.SupportsMCP && len(mcpServers) > 0 {
+		asAny := make([]any, len(mcpServers))
+		for i, s := range mcpServers {
+			asAny[i] = s
+		}
+		proc.SetMCPServers(asAny)
+	}
 	return &discordSession{
 		channelID:  channelID,
 		runtime:    runtime,
-		acpProcess: NewACPProcess(runtime.ACPExecutable, runtime.ACPArgs, workdir, logger),
+		acpProcess: proc,
 		imgStore:   imgStore,
 		workdir:    workdir,
 	}
@@ -261,6 +269,7 @@ type DiscordSessionManager struct {
 	workdir          string
 	settings         *SettingsManager // optional; nil = use built-in defaults
 	imgStore         *imageStore
+	mcpServersFor    func(rt AgentRuntime, userID, conversationID string) []map[string]any
 
 	mu             sync.Mutex
 	dgo            *discordgo.Session
@@ -290,6 +299,17 @@ func newDiscordSessionManager(runtime AgentRuntime, token, channelID string, all
 // limits at request time. Safe to call before or after Start.
 func (d *DiscordSessionManager) SetSettings(sm *SettingsManager) {
 	d.settings = sm
+}
+
+// SetMCPServers wires the per-channel MCP server descriptor builder. Each new
+// Discord channel session will receive these descriptors before the ACP
+// subprocess starts, giving Claude access to perch's self-hosted MCP tools
+// (schedule_message, list_schedules, cancel_schedule). Safe to call before or
+// after Start; only affects sessions created afterwards.
+func (d *DiscordSessionManager) SetMCPServers(fn func(rt AgentRuntime, userID, conversationID string) []map[string]any) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.mcpServersFor = fn
 }
 
 // attachmentLimits returns the effective limits (or built-in defaults if no
@@ -717,7 +737,14 @@ func (d *DiscordSessionManager) getOrCreateSession(channelID string) *discordSes
 	if sess, ok := d.sessions[channelID]; ok {
 		return sess
 	}
-	sess := newDiscordSession(d.runtime, channelID, d.workdir, d.imgStore, d.logger)
+	var mcp []map[string]any
+	if d.mcpServersFor != nil {
+		// userID is a stable identifier for Discord traffic; convID is the
+		// channel ID so per-conversation MCP state (schedules, etc.) is keyed
+		// to the channel.
+		mcp = d.mcpServersFor(d.runtime, "discord", channelID)
+	}
+	sess := newDiscordSession(d.runtime, channelID, d.workdir, d.imgStore, mcp, d.logger)
 	d.sessions[channelID] = sess
 	return sess
 }

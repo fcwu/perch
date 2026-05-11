@@ -192,7 +192,7 @@ func TestACPRunTimeout(t *testing.T) {
 // ============================================================
 
 func TestDiscordACPMode(t *testing.T) {
-	sess := newDiscordSession(AgentRuntime{ACPExecutable: "fake-agent-acp"}, "ch-acp", "", nil, slog.Default())
+	sess := newDiscordSession(AgentRuntime{ACPExecutable: "fake-agent-acp"}, "ch-acp", "", nil, nil, slog.Default())
 	if sess.acpProcess == nil {
 		t.Error("ACP mode: acpProcess should be non-nil")
 	}

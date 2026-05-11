@@ -215,7 +215,7 @@ func main() {
 		perchBin = "perch"
 	}
 
-	chatACP.SetMCPServers(func(rt AgentRuntime, userID, convID string) []map[string]any {
+	mcpServersFor := func(rt AgentRuntime, userID, convID string) []map[string]any {
 		if !rt.SupportsMCP {
 			return nil
 		}
@@ -232,13 +232,30 @@ func main() {
 				},
 			},
 		}
-	})
+	}
+	chatACP.SetMCPServers(mcpServersFor)
+	if discordSess != nil {
+		discordSess.SetMCPServers(mcpServersFor)
+	}
 
 	// Wire the chat-schedules dispatcher into the scheduler and load existing
 	// rows on boot. The scheduler ticker handles both legacy JSONL jobs and
-	// chat_schedules from the store.
+	// chat_schedules from the store. Discord-originated schedules
+	// (user_id="discord", conversation_id=channelID) are routed via the Discord
+	// adapter's DispatchScheduled instead of the chat ACP path, since they have
+	// no row in the conversations table.
 	if store != nil {
-		sched.SetChatFire(store, chatACP.RunScheduledPrompt)
+		fire := func(sch ChatSchedule) error {
+			if sch.UserID == "discord" && discordSess != nil {
+				if discordSess.DispatchScheduled("discord:"+sch.ConversationID, sch.Prompt) {
+					return nil
+				}
+				// Fall through to ACP path (will likely fail with
+				// "conversation not found", which is the right signal to log).
+			}
+			return chatACP.RunScheduledPrompt(sch)
+		}
+		sched.SetChatFire(store, fire)
 		sched.LoadChatSchedules()
 	}
 
