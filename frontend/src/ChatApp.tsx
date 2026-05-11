@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import Sidebar from './Sidebar'
 import ChatPage from './ChatPage'
 import SettingsPanel from './SettingsPanel'
@@ -20,11 +20,26 @@ export default function ChatApp({ authStatus, accessDenied }: ChatAppProps) {
   const [sidebarOpen, setSidebarOpen] = useState(true)
   const isAdmin = authStatus.role === 'admin' || authStatus.mode === 'single'
 
-  // conversation_id from URL ?id=<uuid>
-  const conversationId = new URLSearchParams(window.location.search).get('id') ?? undefined
+  const [conversationId, setConversationId] = useState<string | undefined>(
+    new URLSearchParams(window.location.search).get('id') ?? undefined
+  )
+
+  useEffect(() => {
+    const onPopState = () => {
+      setConversationId(new URLSearchParams(window.location.search).get('id') ?? undefined)
+    }
+    window.addEventListener('popstate', onPopState)
+    return () => window.removeEventListener('popstate', onPopState)
+  }, [])
 
   const onNewChat = () => {
-    window.location.href = '/chat'
+    window.history.pushState({}, '', '/chat')
+    setConversationId(undefined)
+  }
+
+  const onSelectConversation = (id: string) => {
+    window.history.pushState({}, '', `/chat?id=${id}`)
+    setConversationId(id)
   }
 
   return (
@@ -40,6 +55,7 @@ export default function ChatApp({ authStatus, accessDenied }: ChatAppProps) {
           onNewChat={onNewChat}
           onCollapse={() => setSidebarOpen(false)}
           activeConversationId={conversationId}
+          onSelectConversation={onSelectConversation}
         />
       )}
       {/* Hamburger for mobile / collapse */}
@@ -53,9 +69,10 @@ export default function ChatApp({ authStatus, accessDenied }: ChatAppProps) {
           }}
         >☰</button>
       )}
-      {/* Chat area */}
+      {/* Chat area — key forces remount when conversation changes */}
       <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
         <ChatPage
+          key={conversationId ?? '__new__'}
           userID="me"
           conversationId={conversationId}
           onSidebarToggle={() => setSidebarOpen(s => !s)}

@@ -13,6 +13,7 @@ interface Conversation {
 
 interface ConversationListProps {
   activeId?: string
+  onSelect?: (id: string) => void
 }
 
 interface ListResponse {
@@ -21,7 +22,7 @@ interface ListResponse {
   next_before?: number
 }
 
-export default function ConversationList({ activeId }: ConversationListProps) {
+export default function ConversationList({ activeId, onSelect }: ConversationListProps) {
   const [pinned, setPinned] = useState<Conversation[]>([])
   const [recent, setRecent] = useState<Conversation[]>([])
   const [nextBefore, setNextBefore] = useState<number>(0)
@@ -110,6 +111,7 @@ export default function ConversationList({ activeId }: ConversationListProps) {
     >
       <a
         href={`/chat?id=${conv.id}`}
+        onClick={e => { if (onSelect) { e.preventDefault(); onSelect(conv.id) } }}
         style={{
           display: 'block', padding: '7px 10px',
           fontSize: 13, fontFamily: FONT,

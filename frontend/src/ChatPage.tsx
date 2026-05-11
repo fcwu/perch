@@ -101,6 +101,24 @@ export default function ChatPage({ conversationId }: ChatPageProps) {
   const [query, setQuery] = useState('')
   const [messages, setMessages] = useState<Message[]>([])
   const [loading, setLoading] = useState(false)
+
+  useEffect(() => {
+    if (!conversationId) return
+    fetch(`/api/conversations/${conversationId}/messages`)
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        if (!data?.messages?.length) return
+        const loaded: Message[] = []
+        for (const m of data.messages) {
+          loaded.push({ role: 'user', content: m.query, done: true })
+          if (m.response != null) {
+            loaded.push({ role: 'assistant', content: m.response, done: true })
+          }
+        }
+        setMessages(loaded)
+      })
+      .catch(() => {})
+  }, [conversationId])
   const [toolEntries, setToolEntries] = useState<ToolEntry[]>([])
   const [attachments, setAttachments] = useState<PendingAttachment[]>([])
   const [dragOver, setDragOver] = useState(false)

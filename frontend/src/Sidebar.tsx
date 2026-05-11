@@ -12,9 +12,10 @@ interface SidebarProps {
   onNewChat: () => void
   onCollapse: () => void
   activeConversationId?: string
+  onSelectConversation?: (id: string) => void
 }
 
-export default function Sidebar({ isAdmin, authMethod, authenticated = true, accessDenied, onNewChat, onCollapse, activeConversationId }: SidebarProps) {
+export default function Sidebar({ isAdmin, authMethod, authenticated = true, accessDenied, onNewChat, onCollapse, activeConversationId, onSelectConversation }: SidebarProps) {
   return (
     <div style={{
       width: 260, flexShrink: 0, display: 'flex', flexDirection: 'column',
@@ -60,7 +61,7 @@ export default function Sidebar({ isAdmin, authMethod, authenticated = true, acc
 
           {/* Conversation list */}
           <div style={{ flex: 1, overflowY: 'auto' }}>
-            <ConversationList activeId={activeConversationId} />
+            <ConversationList activeId={activeConversationId} onSelect={onSelectConversation} />
           </div>
 
           {/* Bottom nav */}
