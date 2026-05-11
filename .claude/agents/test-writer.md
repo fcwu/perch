@@ -84,6 +84,23 @@ description: Writes test cases into tests/test*.md based on openspec specs or us
    - 反例（不應出現）：`When 呼叫 gitlabAuth.enabled()` / `Then 回傳 false`
    - 正例：`When 使用者造訪 /auth/gitlab` / `Then 收到 HTTP 404`
 
+   **E2E-browser 專用規則**：
+   - Given/When/Then body 中**禁止出現任何 code block**（JS snippet、curl 指令、CDP 命令、DOM selector 等）
+   - 驗證工具的細節（如何用 chrome-cdp 抓 DOM、如何判斷未重載）屬於 test-verifier 執行腳本，不屬於 test case 描述
+   - 技術指標要轉換成可觀察現象：
+     | 技術指標（禁止）| 可觀察現象（應寫） |
+     |---|---|
+     | `window.__noReload === true` | 瀏覽器分頁標題不閃爍或消失 |
+     | `window.performance.navigation.type === 0` | 頁面未整頁重新載入 |
+     | `document.querySelectorAll('.bubble').length > 0` | chat area 顯示訊息泡泡 |
+     | `history.pushState` 被呼叫 | URL 更新為 `/chat?id=<uuid>` |
+     | `messages.length >= 1` from API | 頁面可見歷史訊息 |
+   - When 描述**使用者動作**（點擊、輸入、按鍵、重新整理），不描述程式呼叫
+
+   **E2E-curl 規則**：
+   - 可在 test case 末尾附上 curl 範例指令，用於說明如何驗證
+   - curl 指令只出現在 Given/When/Then **之後**的獨立 code block，不混入 Then 描述句子中
+
    層級選擇原則：
    - 能在 Unit / Integration 驗證的邏輯，**不要**標 E2E
    - 只有真正需要 HTTP 行為驗證才用 E2E-curl
