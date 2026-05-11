@@ -2,6 +2,7 @@ package main
 
 import (
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"sync"
 	"time"
@@ -139,6 +140,9 @@ func migrateQuerySessionsColumns(db *sql.DB) error {
 	if err := addColumnIfMissing(db, "query_sessions", "source", "TEXT NOT NULL DEFAULT 'user'"); err != nil {
 		return err
 	}
+	if err := addColumnIfMissing(db, "query_sessions", "images_json", "TEXT"); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -170,10 +174,17 @@ func (s *Store) InsertSession(id, userID, username, query string) error {
 	return err
 }
 
-func (s *Store) UpdateSessionDone(id, response string) error {
+func (s *Store) UpdateSessionDone(id, response string, images ...ImageAttachment) error {
+	var imagesJSON *string
+	if len(images) > 0 {
+		if b, err := json.Marshal(images); err == nil {
+			s := string(b)
+			imagesJSON = &s
+		}
+	}
 	_, err := s.db.Exec(
-		`UPDATE query_sessions SET response=?,ended_at=?,status='done' WHERE id=?`,
-		response, nowMs(), id,
+		`UPDATE query_sessions SET response=?,images_json=?,ended_at=?,status='done' WHERE id=?`,
+		response, imagesJSON, nowMs(), id,
 	)
 	return err
 }

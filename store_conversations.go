@@ -3,6 +3,7 @@ package main
 import (
 	"crypto/rand"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"unicode"
@@ -386,14 +387,15 @@ func (s *Store) ListConversationsAdmin(user, q string, from, to int64, page, lim
 
 // ConversationMessage is one persisted turn returned by message-list endpoints.
 type ConversationMessage struct {
-	ID        string  `json:"id"`
-	UserID    string  `json:"user_id,omitempty"`
-	Query     string  `json:"query"`
-	Response  *string `json:"response,omitempty"`
-	Status    string  `json:"status"`
-	Source    string  `json:"source"`
-	StartedAt int64   `json:"started_at"`
-	EndedAt   *int64  `json:"ended_at,omitempty"`
+	ID        string            `json:"id"`
+	UserID    string            `json:"user_id,omitempty"`
+	Query     string            `json:"query"`
+	Response  *string           `json:"response,omitempty"`
+	Images    []ImageAttachment `json:"images,omitempty"`
+	Status    string            `json:"status"`
+	Source    string            `json:"source"`
+	StartedAt int64             `json:"started_at"`
+	EndedAt   *int64            `json:"ended_at,omitempty"`
 }
 
 // ListMessagesByConversation returns query_sessions belonging to the
@@ -410,7 +412,7 @@ func (s *Store) ListMessagesByConversation(conversationID string, page, limit in
 	if err := s.db.QueryRow(`SELECT COUNT(*) FROM query_sessions WHERE conversation_id=?`, conversationID).Scan(&total); err != nil {
 		return nil, 0, err
 	}
-	q := `SELECT id,user_id,query,response,status,source,started_at,ended_at FROM query_sessions WHERE conversation_id=? ORDER BY started_at ASC`
+	q := `SELECT id,user_id,query,response,images_json,status,source,started_at,ended_at FROM query_sessions WHERE conversation_id=? ORDER BY started_at ASC`
 	args := []any{conversationID}
 	if limit > 0 {
 		q += " LIMIT ? OFFSET ?"
@@ -424,14 +426,17 @@ func (s *Store) ListMessagesByConversation(conversationID string, page, limit in
 	var out []ConversationMessage
 	for rows.Next() {
 		var m ConversationMessage
-		var resp sql.NullString
+		var resp, imagesJSON sql.NullString
 		var ended sql.NullInt64
-		if err := rows.Scan(&m.ID, &m.UserID, &m.Query, &resp, &m.Status, &m.Source, &m.StartedAt, &ended); err != nil {
+		if err := rows.Scan(&m.ID, &m.UserID, &m.Query, &resp, &imagesJSON, &m.Status, &m.Source, &m.StartedAt, &ended); err != nil {
 			return nil, 0, err
 		}
 		if resp.Valid {
 			s := resp.String
 			m.Response = &s
+		}
+		if imagesJSON.Valid && imagesJSON.String != "" {
+			_ = json.Unmarshal([]byte(imagesJSON.String), &m.Images)
 		}
 		if ended.Valid {
 			v := ended.Int64
@@ -446,8 +451,8 @@ func (s *Store) ListMessagesByConversation(conversationID string, page, limit in
 }
 
 // UpdateSessionDoneAndTouch marks the session done and touches the conversation.
-func (s *Store) UpdateSessionDoneAndTouch(id, response, conversationID string) error {
-	if err := s.UpdateSessionDone(id, response); err != nil {
+func (s *Store) UpdateSessionDoneAndTouch(id, response, conversationID string, images ...ImageAttachment) error {
+	if err := s.UpdateSessionDone(id, response, images...); err != nil {
 		return err
 	}
 	if conversationID != "" {

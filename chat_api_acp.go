@@ -515,9 +515,9 @@ func (m *ACPUserSessionManager) runPrompt(sess *acpChatSession, prompt string) {
 	} else {
 		if m.store != nil {
 			if sess.conversationID != "" {
-				_ = m.store.UpdateSessionDoneAndTouch(sess.sessionID, cleanText, sess.conversationID)
+				_ = m.store.UpdateSessionDoneAndTouch(sess.sessionID, cleanText, sess.conversationID, imgAttachments...)
 			} else {
-				_ = m.store.UpdateSessionDone(sess.sessionID, cleanText)
+				_ = m.store.UpdateSessionDone(sess.sessionID, cleanText, imgAttachments...)
 			}
 		}
 		if m.adminHub != nil {

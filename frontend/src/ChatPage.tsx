@@ -112,7 +112,7 @@ export default function ChatPage({ conversationId }: ChatPageProps) {
         for (const m of data.messages) {
           loaded.push({ role: 'user', content: m.query, done: true })
           if (m.response != null) {
-            loaded.push({ role: 'assistant', content: m.response, done: true })
+            loaded.push({ role: 'assistant', content: m.response, done: true, images: m.images ?? [] })
           }
         }
         setMessages(loaded)
