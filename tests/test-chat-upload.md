@@ -92,10 +92,10 @@ curl -sS -X POST http://localhost:8080/api/chat \
 **層級**：E2E-browser
 
 **Given** 使用者開 `/chat` 頁面，桌面截圖（Cmd/Ctrl+Shift+4 或 PrintScreen）放到剪貼簿
-**When** focus textarea 後按 Cmd/Ctrl+V
+**When** 使用者點擊訊息輸入框後按 Cmd/Ctrl+V
 **Then**
-- chip 列出現 `📎 pasted-<timestamp>.png`（檔名是 fabricate）
-- 不會把 base64 字串塞進 textarea（preventDefault 生效）
+- chip 列出現 `📎 pasted-<timestamp>.png`（檔名依貼上時間自動命名）
+- 輸入框中不出現大量亂碼或 base64 字串，保持乾淨
 - 送出後依 CU01 的 placeholder 規則顯示
 
 ---

@@ -94,7 +94,7 @@
 **層級**：Unit
 
 **Given** 使用者有 2 筆近期對話記錄
-**When** `buildPrompt` 函式組裝 prompt
+**When** 系統組裝含歷史的 prompt 送給 Agent
 **Then** 注入的歷史前置格式符合規範：
 ```
 <conversation_history>

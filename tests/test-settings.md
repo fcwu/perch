@@ -19,49 +19,49 @@
 
 ## Unit / Integration（無需啟動 server）
 
-### SP01 — buildEnvSeed 將 Workspace env vars 放入 seed
+### SP01 — Workspace env vars 正確載入為初始設定
 
 **層級**：Unit
 
 > **自動化**：`go test -run TestBuildEnvSeed_WorkspaceFields ./...`
 
 **Given** 程序啟動前設定 `WORKSPACE_GIT_SYNC_ENABLED=true`、`WORKSPACE_GIT_SYNC_INTERVAL=300`、`WORKSPACE_GIT_TOKEN=mytoken`、`WORKSPACE_GIT_SYNC_NOTIFY_CHANNEL=alerts`、`WORKSPACE_GIT_SYNC_SUBMODULES=true`
-**When** 呼叫 `buildEnvSeed()`
-**Then** 回傳的 `RuntimeSettings.Workspace` 不為 nil，且各欄位值分別對應所設定的環境變數（sync_enabled=true、sync_interval="300"、git_token="mytoken"、notify_channel="alerts"、sync_submodules=true）
+**When** 伺服器以上述環境變數啟動，並請求初始設定
+**Then** 初始設定中 workspace 各欄位值分別對應所設定的環境變數（sync_enabled=true、sync_interval="300"、git_token="mytoken"、notify_channel="alerts"、sync_submodules=true）
 
-**When** 五個 workspace env vars 均為空值時呼叫 `buildEnvSeed()`
-**Then** 回傳的 `RuntimeSettings.Workspace` 為 nil（不設預設值，避免覆蓋 settings.json）
+**When** 五個 workspace env vars 均為空值
+**Then** 初始設定中 workspace 欄位不存在（不以預設值填充，避免覆蓋 settings.json）
 
 ---
 
-### SP02 — GetEffective 合併 env seed 與 settings.json override
+### SP02 — settings.json 覆蓋優先於 env var 初始值
 
 **層級**：Unit
 
 > **自動化**：`go test -run TestGetEffective_WorkspaceMerge ./...`
 
-**Given** env seed 含 `workspace.sync_interval="300"`，而 settings.json 已存有 `workspace.sync_interval="600"`（JSON override）
-**When** 呼叫 `GetEffective()`
-**Then** 回傳的 `workspace.sync_interval` 為 `"600"`（settings.json 優先）；`workspace.sync_enabled` 則來自 env seed
+**Given** 環境變數設定 `WORKSPACE_GIT_SYNC_INTERVAL=300`，且 settings.json 已存有 `workspace.sync_interval="600"`
+**When** 伺服器啟動後，請求有效設定
+**Then** `workspace.sync_interval` 為 `"600"`（settings.json 優先）；`workspace.sync_enabled` 則來自環境變數初始值
 
 ---
 
-### SP03 — redactSettings 遮蔽 workspace.git_token
+### SP03 — GET /api/settings 遮蔽 workspace.git_token
 
 **層級**：Unit
 
 > **自動化**：`go test -run TestRedactSettings_WorkspaceGitToken ./...`
 
-**Given** `RuntimeSettings.Workspace.GitToken` 設為非空字串
-**When** 通過 `redactSettings()` 處理
-**Then** 回傳的 `workspace.git_token` 值為 `"••••"`，原始 token 值不出現在輸出中
+**Given** 伺服器設定中 `WORKSPACE_GIT_TOKEN` 為非空字串
+**When** 請求 `GET /api/settings`
+**Then** 回應中 `workspace.git_token` 值為 `"••••"`，原始 token 值不出現在回應中
 
-**When** `workspace.git_token` 為空字串時通過 `redactSettings()`
-**Then** `workspace.git_token` 保持空字串（不遮蔽空值）
+**When** `WORKSPACE_GIT_TOKEN` 為空字串
+**Then** 回應中 `workspace.git_token` 保持空字串（不遮蔽空值）
 
 ---
 
-### SP04 — handleGetSettings 回傳完整 workspace 結構
+### SP04 — GET /api/settings 回傳完整 workspace 結構
 
 **層級**：Integration
 
@@ -221,7 +221,7 @@ curl -s -o /dev/null -w "%{http_code}" -X PATCH http://localhost:8081/api/settin
 **層級**：E2E-browser
 
 **Given** Perch 以 `AUTH_MODE=none` 啟動，使用者開啟 `/chat`
-**When** 點擊 sidebar 底部的齒輪圖示（Settings 入口）觸發 `perch:open-settings` 事件
+**When** 點擊 sidebar 底部的齒輪圖示（Settings 入口）
 **Then**
 - 頁面中央出現 Settings modal dialog
 - dialog 頂部顯示「Settings」標題
@@ -270,7 +270,7 @@ curl -s -o /dev/null -w "%{http_code}" -X PATCH http://localhost:8081/api/settin
 - 按鈕短暫顯示「Saving…」（disabled 狀態）
 - 儲存完成後 footer 左側出現藍色「Saved」toast 訊息
 - 約 3 秒後 toast 自動消失
-- `restart_required` 為 `false`（Rate Limit 不需重啟），按鈕恢復為藍色「Save」
+- 按鈕恢復為藍色「Save」（不出現「Save & Restart」警示，表示不需重啟）
 
 ---
 
@@ -278,7 +278,7 @@ curl -s -o /dev/null -w "%{http_code}" -X PATCH http://localhost:8081/api/settin
 
 **層級**：E2E-browser
 
-**Given** Settings 面板開啟，Auth 分頁可見，目前 `restart_required=false`
+**Given** Settings 面板開啟，Auth 分頁可見，按鈕目前顯示藍色「Save」（無需重啟）
 **When** 點擊 Auth Method，切換為 `password`，輸入新密碼，點擊 Save
 **Then**
 - 儲存後 footer 右側按鈕文字變為「Save & Restart」，樣式顯示橘色警示外框

@@ -82,7 +82,7 @@
 
 **層級**：E2E-browser
 
-**Given** Settings panel 開啟，且 `restart_required=true`（已修改過 restart-required 欄位）
+**Given** Settings panel 開啟，且 footer 顯示橘色「Save & Restart」按鈕（表示已修改需重啟的欄位）
 **When** 點擊橘色的 ⚠ Restart Container 按鈕，確認 dialog
 **Then** 顯示「Restarting…」訊息；容器重啟後設定生效
 

@@ -429,36 +429,11 @@ docker logs "${CONTAINER}" --tail 50 | grep -i "orphan\|cleanup"
 **層級**：E2E-browser
 
 **Given** 使用者已開啟 `http://${HOST}/chat`，AIO01 已完成（conv-id 已知）
-**When** 使用者切換到含圖片回應的對話，瀏覽器接收到含 `images` 欄位的 SSE `message` 事件
+**When** 使用者切換到含圖片回應的對話，等待頁面完整載入
 **Then**
 - 訊息氣泡顯示 markdown 渲染後的文字
-- 文字下方跟著一個 `<img>` 元素
-- `<img>` 的 `src` 屬性為 `/api/images/<conv-id>/<uuid>.png`
-- `<img>` 的 `alt` 屬性為 `caption`（即原始檔名，例如 `aio01.png`）
-- 圖片正常顯示（無破圖 icon）
-
-**驗證步驟**（透過 chrome-cdp）：
-
-```bash
-CDP=~/.claude/skills/chrome-cdp/scripts/cdp.mjs
-
-# 截圖確認圖片已渲染
-node $CDP shot <target> /tmp/aio13-screenshot.png
-# 觀察：訊息氣泡底部有圖片區塊
-
-# 驗證 img 元素存在
-node $CDP eval <target> "
-  document.querySelectorAll('.message-bubble img').length
-"
-# 預期：大於 0
-
-# 驗證 src / alt
-node $CDP eval <target> "
-  const img = document.querySelector('.message-bubble img');
-  ({src: img?.src, alt: img?.alt})
-"
-# 預期：src 含 /api/images/...，alt 含 caption 字串
-```
+- 文字下方顯示圖片，圖片正常顯示（無破圖 icon）
+- 圖片下方或旁邊可見原始檔名作為說明文字（例如 `aio01.png`）
 
 ---
 
@@ -467,24 +442,11 @@ node $CDP eval <target> "
 **層級**：E2E-browser
 
 **Given** AIO05 已完成（conv-id 含兩張圖片的回應）
-**When** 瀏覽器接收到含兩個圖片附件的 SSE `message` 事件
+**When** 使用者切換到該對話，等待頁面完整載入
 **Then**
-- 訊息氣泡文字下方依序渲染兩個 `<img>` 元素
-- 第一個 `<img>` 對應 `aio05a.png`，第二個對應 `aio05b.png`
+- 訊息氣泡文字下方依序顯示兩張圖片
+- 第一張圖片對應 `aio05a.png`，第二張對應 `aio05b.png`（依出現順序排列）
 - 兩圖垂直堆疊排列（不並排）
-
-**驗證步驟**（透過 chrome-cdp）：
-
-```bash
-node $CDP eval <target> "
-  const imgs = document.querySelectorAll('.message-bubble img');
-  Array.from(imgs).map(i => i.alt)
-"
-# 預期：["aio05a.png", "aio05b.png"]
-
-node $CDP shot <target> /tmp/aio14-screenshot.png
-# 觀察：兩張圖上下排列
-```
 
 ---
 
@@ -492,53 +454,24 @@ node $CDP shot <target> /tmp/aio14-screenshot.png
 
 **層級**：E2E-browser
 
-**Given** AIO01 的圖片已在 server 端被手動刪除（或 conv eviction 後），但頁面上仍有對應的 `<img>` 元素
-**When** 瀏覽器嘗試載入該 `<img>` 的 src URL
+**Given** AIO01 的圖片已在 server 端被手動刪除（從 server 端移除 `${WORKDIR}/images/${CONV}/` 目錄），使用者重新整理頁面後仍瀏覽含該對話的頁面
+**When** 使用者瀏覽含該圖片的對話
 **Then**
-- `<img>` 元素顯示瀏覽器預設破圖佔位符
-- `alt` 屬性文字（即 caption）作為備用說明顯示
-
-**驗證步驟**（透過 chrome-cdp）：
-
-```bash
-# 刪除 server 端圖片（docker 模式）
-docker exec "${CONTAINER}" rm -rf "${WORKDIR}/images/${CONV}/"
-
-# 重新整理頁面
-node $CDP nav <target> "http://${HOST}/chat"
-
-# 截圖確認破圖狀態
-node $CDP shot <target> /tmp/aio15-screenshot.png
-# 觀察：img 元素位置顯示破圖 icon，alt 文字可見
-
-# JS 驗證 naturalWidth（破圖時為 0）
-node $CDP eval <target> "document.querySelector('.message-bubble img')?.naturalWidth"
-# 預期：0（圖片載入失敗）
-```
+- 圖片位置顯示瀏覽器預設破圖佔位符（broken image icon）
+- 圖片原本的 caption 文字仍可見（作為備用說明）
+- 頁面其餘文字內容正常顯示，不出現錯誤頁面
 
 ---
 
-### AIO16 — 無圖片回應時訊息氣泡僅顯示文字，無多餘 DOM 元素
+### AIO16 — 無圖片回應時訊息氣泡僅顯示文字，無多餘圖片區塊
 
 **層級**：E2E-browser
 
 **Given** AIO10 的對話（純文字回應，無 `[image: ...]` token）
-**When** 瀏覽器渲染該訊息氣泡
+**When** 使用者瀏覽該對話
 **Then**
 - 訊息氣泡僅顯示 markdown 文字
-- 氣泡 DOM 中**不存在** `<img>` 元素（與有圖片時行為明確區分）
-
-**驗證步驟**（透過 chrome-cdp）：
-
-```bash
-node $CDP eval <target> "
-  document.querySelectorAll('.message-bubble img').length
-"
-# 預期：0
-
-node $CDP shot <target> /tmp/aio16-screenshot.png
-# 觀察：訊息氣泡只有純文字，沒有圖片區塊
-```
+- 氣泡區域中沒有任何圖片顯示（與有圖片時行為明確區分）
 
 ---
 
@@ -604,57 +537,15 @@ curl -sS -H "Authorization: Bot ${DISCORD_BOT_TOKEN}" \
 
 **層級**：E2E-browser
 
-**Given** 使用者開啟 `http://${HOST}` 並傳送一個會觸發工具呼叫的查詢（例如 Bash）
-**When** Agent 回應完成（SSE `done` 事件收到，`loading=false`）
+**Given** 使用者開啟 `http://${HOST}` 並傳送一個會觸發工具呼叫的查詢（例如要求執行 Bash 指令）
+**When** Agent 回應完成，頁面顯示完整回應內容
 **Then**
-- ToolPanel（含工具名稱與 spinner 的底部列）**不再顯示**
-- DOM 中不再有「thinking…」文字或工具名稱字串（僅在 ToolPanel 內出現的文字）
+- 頁面底部的 ToolPanel（含工具名稱與 spinner 的區塊）不再顯示
+- 頁面上看不到「thinking…」提示或執行中的工具名稱
 
-**驗證步驟**（透過 chrome-cdp）：
-
-```bash
-CDP=~/.claude/skills/chrome-cdp/scripts/cdp.mjs
-TARGET=$(node $CDP list | jq -r '.[0].id')
-
-# 1. 送出觸發工具的查詢，等待完成
-curl -sS -X POST "http://${HOST}/api/chat" \
-  -H "Content-Type: application/json" \
-  -d '{"query":"請執行 bash: echo TP01_TEST","new_conversation":true}'
-sleep 20  # 等待 agent 回應完成
-
-# 2. 截圖確認 ToolPanel 已消失
-node $CDP shot $TARGET /tmp/aio-tp01-after.png
-# 觀察：底部無 spinner 或工具名稱列
-
-# 3. 確認 DOM 中無 ToolPanel 文字（thinking… 或 ✓ 加工具名稱）
-node $CDP eval $TARGET "document.body.innerText.includes('thinking…')"
-# 預期：false
-
-node $CDP eval $TARGET "document.body.innerText.includes('Bash')"
-# 預期：false（Bash 只出現在 ToolPanel，回應完成後應消失）
-```
-
-**反向驗證（串流期間 ToolPanel 可見）**：
-
-```bash
-# 送出長時間 query，立刻截圖（趁 loading 中）
-curl -sS -X POST "http://${HOST}/api/chat" \
-  -H "Content-Type: application/json" \
-  -d '{"query":"請執行 bash: sleep 5 && echo TP01_LOADING","new_conversation":true}' &
-sleep 3
-
-node $CDP shot $TARGET /tmp/aio-tp01-during.png
-# 觀察：底部有 spinner + 工具名稱（ToolPanel 顯示中）
-
-node $CDP eval $TARGET "document.body.innerText.includes('thinking…') || document.body.innerText.includes('Bash')"
-# 預期：true
-
-wait  # 等背景 curl 完成
-```
-
-**失敗排查**：
-- ToolPanel 回應後仍存在 → 檢查 `ToolPanel.tsx` line 37：應為 `if (!loading && running.length === 0) return null`（非 `entries.length === 0`）
-- ToolPanel 串流期間不顯示 → 檢查 `tool_start` / `tool_end` SSE events 是否正常送出（`test-acp-tool-events.md` AT-E01）
+**When** Agent 回應尚未完成、仍在執行工具呼叫時（串流進行中）
+**Then**
+- 頁面底部可見 ToolPanel，顯示目前執行中的工具名稱與 spinner
 
 ---
 
