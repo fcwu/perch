@@ -360,6 +360,11 @@ func (s *Scheduler) run() {
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
 	for t := range ticker.C {
+		// Pick up rows inserted by out-of-process writers (notably the
+		// `perch mcp` subprocesses spawned per ACP session, which write to
+		// chat_schedules directly but cannot call ReloadChatSchedules in the
+		// parent). Cheap: a single SELECT each minute.
+		s.LoadChatSchedules()
 		s.fireDue(t)
 	}
 }
