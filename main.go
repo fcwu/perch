@@ -118,7 +118,7 @@ func main() {
 	var im *IMManager
 	var discordSess *DiscordSessionManager
 	discordToken := sm.EffectiveDiscordToken(os.Getenv("DISCORD_BOT_TOKEN"))
-	discordChannel := os.Getenv("DISCORD_CHANNEL_ID")
+	discordChannel := sm.EffectiveDiscordChannelID(os.Getenv("DISCORD_CHANNEL_ID"))
 	discordAllowedDMRaw := os.Getenv("DISCORD_ALLOWED_USER_IDS")
 	telegramToken := sm.EffectiveTelegramToken(os.Getenv("TELEGRAM_BOT_TOKEN"))
 	telegramChatStr := os.Getenv("TELEGRAM_CHAT_ID")

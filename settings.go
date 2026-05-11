@@ -598,6 +598,18 @@ func (sm *SettingsManager) EffectiveDiscordToken(envDefault string) string {
 	return envDefault
 }
 
+// EffectiveDiscordChannelID returns the Discord channel ID from settings if set,
+// else envDefault. An empty *string in settings is treated as an explicit override
+// (open-channel mode), distinct from "not set" (settings.json missing the field).
+func (sm *SettingsManager) EffectiveDiscordChannelID(envDefault string) string {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+	if sm.current.Discord != nil && sm.current.Discord.ChannelID != nil {
+		return *sm.current.Discord.ChannelID
+	}
+	return envDefault
+}
+
 // EffectiveTelegramToken returns the Telegram bot token from settings if set, else envDefault.
 func (sm *SettingsManager) EffectiveTelegramToken(envDefault string) string {
 	sm.mu.RLock()
