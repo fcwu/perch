@@ -453,14 +453,14 @@ func (m *ACPUserSessionManager) runPrompt(sess *acpChatSession, prompt string) {
 	var currentToolEventID int64
 	var currentToolName string
 	var currentToolStart time.Time
-	onToolStart := func(toolName string) {
+	onToolStart := func(toolName, inputJSON string) {
 		currentToolName = toolName
 		currentToolStart = time.Now()
 		if m.adminHub != nil {
 			m.adminHub.SessionUpdated(sess.sessionID, toolName)
 		}
 		if m.store != nil {
-			if id, err := m.store.InsertToolEvent(sess.sessionID, toolName, ""); err == nil {
+			if id, err := m.store.InsertToolEvent(sess.sessionID, toolName, inputJSON); err == nil {
 				currentToolEventID = id
 			} else {
 				m.logger.Warn("ACP chat: insert tool event", "err", err)
@@ -469,7 +469,7 @@ func (m *ACPUserSessionManager) runPrompt(sess *acpChatSession, prompt string) {
 		toolMsg, _ := json.Marshal(map[string]string{"type": "tool_start", "tool": toolName})
 		sess.broadcastJSON(string(toolMsg))
 	}
-	onToolEnd := func() {
+	onToolEnd := func(outputJSON string) {
 		elapsedMs := time.Since(currentToolStart).Milliseconds()
 		toolEndMsg, _ := json.Marshal(map[string]interface{}{"type": "tool_end", "tool": currentToolName, "elapsed_ms": elapsedMs})
 		sess.broadcastJSON(string(toolEndMsg))
@@ -477,7 +477,7 @@ func (m *ACPUserSessionManager) runPrompt(sess *acpChatSession, prompt string) {
 			m.adminHub.SessionUpdated(sess.sessionID, "")
 		}
 		if m.store != nil && currentToolEventID > 0 {
-			if err := m.store.UpdateToolEventEnd(currentToolEventID, ""); err != nil {
+			if err := m.store.UpdateToolEventEnd(currentToolEventID, outputJSON); err != nil {
 				m.logger.Warn("ACP chat: update tool event", "err", err)
 			}
 			currentToolEventID = 0

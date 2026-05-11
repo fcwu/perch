@@ -63,9 +63,9 @@ type ACPProcess struct {
 	// streaming chunks from agent_message_chunk notifications (one prompt at a time)
 	chunkMu     sync.Mutex
 	chunkBuf    strings.Builder
-	chunkCb     func(string)      // optional per-prompt callback; called from readLoop goroutine
-	toolStartCb func(string)      // called with tool name on session/update tool_call (pending)
-	toolEndCb   func()            // called on session/update tool_call_update with status=completed
+	chunkCb     func(string)         // optional per-prompt callback; called from readLoop goroutine
+	toolStartCb func(string, string) // called with (toolName, inputJSON) on tool_call (pending)
+	toolEndCb   func(string)         // called with outputJSON on tool_call_update status=completed
 }
 
 // acpMsg is the wire format for ACP JSON-RPC 2.0 messages.
@@ -297,16 +297,16 @@ func (p *ACPProcess) Prompt(ctx context.Context, text string) (string, error) {
 
 // PromptWithChunks is like Prompt but calls onChunk for each agent_message_chunk as it
 // arrives (before the full response is available). onChunk may be nil.
-// onToolStart is called with the tool name when a session/update tool_call event arrives.
-// onToolEnd is called when a session/update tool_call_update with status=completed arrives.
-func (p *ACPProcess) PromptWithChunks(ctx context.Context, text string, onChunk func(string), onToolStart func(string), onToolEnd func()) (string, error) {
+// onToolStart is called with (toolName, inputJSON) when a tool_call event arrives.
+// onToolEnd is called with outputJSON when a tool_call_update with status=completed arrives.
+func (p *ACPProcess) PromptWithChunks(ctx context.Context, text string, onChunk func(string), onToolStart func(string, string), onToolEnd func(string)) (string, error) {
 	return p.PromptWithContent(ctx, []ACPContent{{Type: "text", Text: text}}, onChunk, onToolStart, onToolEnd)
 }
 
 // PromptWithContent sends a multi-block prompt (text + optional image blocks) to the agent
 // and returns the accumulated response text. Use this for vision queries; for text-only see
 // Prompt or PromptWithChunks.
-func (p *ACPProcess) PromptWithContent(ctx context.Context, blocks []ACPContent, onChunk func(string), onToolStart func(string), onToolEnd func()) (string, error) {
+func (p *ACPProcess) PromptWithContent(ctx context.Context, blocks []ACPContent, onChunk func(string), onToolStart func(string, string), onToolEnd func(string)) (string, error) {
 	// Reset chunk accumulator and register callbacks before sending the prompt.
 	p.chunkMu.Lock()
 	p.chunkBuf.Reset()
@@ -547,7 +547,7 @@ func (p *ACPProcess) readLoop(r io.Reader) {
 				cb := p.toolStartCb
 				p.chunkMu.Unlock()
 				if cb != nil {
-					cb(params.Update.Meta.ClaudeCode.ToolName)
+					cb(params.Update.Meta.ClaudeCode.ToolName, string(params.Update.Content))
 				}
 			case "tool_call_update":
 				if params.Update.Status != "completed" {
@@ -557,7 +557,7 @@ func (p *ACPProcess) readLoop(r io.Reader) {
 				cb := p.toolEndCb
 				p.chunkMu.Unlock()
 				if cb != nil {
-					cb()
+					cb(string(params.Update.Content))
 				}
 			}
 		}
