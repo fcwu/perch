@@ -81,6 +81,7 @@ SKIP 一律附「解法類別」，由 qa agent 依此決定後續動作：
 | 需 mTLS 憑證且未配置 | `needs-user-action` | `mtls-cert-missing` | 報告請用戶配憑證 |
 | Discord bot→channel 訊息驗證 | `auto-fixable` | — | Discord REST API；不准 SKIP、不准開 web 看 |
 | Discord user→bot — chrome-cdp 已登入 Discord | `auto-fixable` | — | chrome-cdp 自動傳訊 |
+| Discord user→bot 含圖片附件 — chrome-cdp 已登入 Discord | `auto-fixable` | — | chrome-cdp `upload_file` 指令；Chromium snap 環境需先將檔案 stage 至 `~/snap/chromium/common/`（`/tmp/` 會被沙盒擋） |
 | Discord user→bot — chrome-cdp 沒 Discord session | `needs-user-action` | `discord-session-missing` | 報告附真人傳訊步驟 |
 | 遠端 bot 仍佔用 token（home / cdrdla 容器沒先停）| `env-fix-by-qa` | `bot-conflict-active: <hosts>` | qa 命令 deployer 停掉指定 host 容器後重跑，測完啟回 |
 | 手機 — CDP emulation 可驗證（T08b 等）| `auto-fixable` | — | CDP `setDeviceMetricsOverride` + `setEmulatedMedia` |

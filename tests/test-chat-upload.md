@@ -109,7 +109,7 @@ curl -sS -X POST http://localhost:8080/api/chat \
 **Then**
 - 訊息上出現 👀
 - `RunCompleted` 後 👀 → 💬 + Discord 回覆描述圖片內容
-- container log 出現 `Discord ACP: attachments processed kept=1 failed=0`
+- container log 出現 `Discord ACP: attachments processed images=1 files=0 failed=0`
 
 ---
 
