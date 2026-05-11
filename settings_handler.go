@@ -86,6 +86,10 @@ func (s *Server) handlePatchSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	current := s.sm.Get()
+	// Propagate live (no-restart) settings to running components.
+	if delta.RateLimit != nil && delta.RateLimit.RPM != nil && s.userRateLimiter != nil {
+		s.userRateLimiter.SetRPM(*delta.RateLimit.RPM)
+	}
 	redacted := redactSettings(current)
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]any{

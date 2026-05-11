@@ -39,6 +39,38 @@ func TestUserRateLimiterDisabled(t *testing.T) {
 	}
 }
 
+func TestUserRateLimiterSetRPMResetsExistingLimiters(t *testing.T) {
+	rl := newUserRateLimiter(2)
+	// Consume all tokens for alice.
+	rl.Allow("alice")
+	rl.Allow("alice")
+	if ok, _ := rl.Allow("alice"); ok {
+		t.Fatal("alice should be limited after burning her bucket")
+	}
+	// Bump RPM to 10 — existing per-user limiter must be discarded so the
+	// new rate takes effect immediately, not after the old limiter refills.
+	rl.SetRPM(10)
+	for i := 0; i < 10; i++ {
+		if ok, _ := rl.Allow("alice"); !ok {
+			t.Errorf("request %d should be allowed after SetRPM(10) reset", i+1)
+		}
+	}
+}
+
+func TestUserRateLimiterSetRPMToZeroDisables(t *testing.T) {
+	rl := newUserRateLimiter(1)
+	rl.Allow("alice")
+	if ok, _ := rl.Allow("alice"); ok {
+		t.Fatal("alice should be limited at rpm=1")
+	}
+	rl.SetRPM(0)
+	for i := 0; i < 5; i++ {
+		if ok, _ := rl.Allow("alice"); !ok {
+			t.Errorf("expected unlimited after SetRPM(0), but request %d denied", i+1)
+		}
+	}
+}
+
 func TestUserRateLimiterIsolation(t *testing.T) {
 	rl := newUserRateLimiter(1)
 	// alice uses her quota

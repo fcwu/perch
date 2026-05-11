@@ -33,6 +33,15 @@ func (u *UserRateLimiter) limiterFor(userID string) *rate.Limiter {
 	return l
 }
 
+// SetRPM updates the per-user rate limit. Existing per-user limiter state is
+// discarded so the new rate takes effect on the next request.
+func (u *UserRateLimiter) SetRPM(rpm int) {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	u.rpm = rpm
+	u.m = make(map[string]*rate.Limiter)
+}
+
 // Allow returns (true, 0) if the user is within the limit, or (false, retryAfterMs) if exceeded.
 func (u *UserRateLimiter) Allow(userID string) (bool, int64) {
 	if u.rpm <= 0 {
