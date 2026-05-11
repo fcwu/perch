@@ -24,6 +24,17 @@ fi
 # Copy host ~/.claude to a writable local copy so Claude Code 2.1.x can
 # mutate plugins/*.bak and session-env/<uuid>/ without hitting EROFS on the
 # RO bind mount.  Mount convention: ${HOME}/.claude:/etc/perch-claude-host:ro
+#
+# Preserve any credentials written by a previous in-container `claude /login`
+# (stored in the persistent /home/perchuser volume).  The cp below would
+# overwrite them with the host's potentially stale copy, so we rescue them
+# first and restore them afterwards.
+_local_creds="/home/perchuser/.claude/.credentials.json"
+_saved_creds=""
+if [ -f "$_local_creds" ]; then
+    _saved_creds=$(cat "$_local_creds")
+fi
+
 if [ -d /etc/perch-claude-host ]; then
     if mkdir -p /home/perchuser/.claude && \
        cp -a /etc/perch-claude-host/. /home/perchuser/.claude/ 2>/dev/null; then
@@ -43,6 +54,14 @@ if [ -d /etc/perch-claude-host ]; then
 else
     # No staging mount — start with an empty local dir; user will claude /login.
     mkdir -p /home/perchuser/.claude
+fi
+
+# Restore in-container credentials if they existed before the cp above.
+# These take priority over the host's copy so that `claude /login` run inside
+# the container persists across restarts (the /home/perchuser volume is persistent).
+if [ -n "$_saved_creds" ]; then
+    echo "$_saved_creds" > "$_local_creds"
+    echo "perch entrypoint: restored in-container credentials ($(wc -c < "$_local_creds") bytes)" >&2
 fi
 
 # Seed ~/.claude.json with required onboarding flags for fresh containers.
@@ -86,6 +105,12 @@ if command -v jq >/dev/null 2>&1; then
 
     # Patch the official Playwright plugin .mcp.json so it uses the same config,
     # overriding any user/agent edits that may have broken it.
+    #
+    # NOTE: The Claude Code plugin marketplace re-syncs this file shortly after
+    # perch starts (when the first claude-agent-acp subprocess initialises), so
+    # a one-shot patch here loses the race.  Stage a long-form patch in a tmp
+    # script and have the post-startup loop (just before exec perch) keep
+    # rewriting the file until it stops getting reset.
     _playwright_plugin="/home/perchuser/.claude/plugins/marketplaces/claude-plugins-official/external_plugins/playwright/.mcp.json"
     if [ -f "$_playwright_plugin" ]; then
         jq --arg mcp_state "$_mcp_state" --argjson mcp_args "$_mcp_args" '
@@ -95,6 +120,10 @@ if command -v jq >/dev/null 2>&1; then
                 "env": {"PLAYWRIGHT_BROWSERS_PATH": $mcp_state}
             }
         ' "$_playwright_plugin" > "${_playwright_plugin}.tmp" && mv "${_playwright_plugin}.tmp" "$_playwright_plugin"
+
+        # Cache the patched payload so the background re-applier can restore
+        # it whenever claude resets the file.
+        cp "$_playwright_plugin" /tmp/perch-playwright-mcp.json
     fi
 else
     echo "perch entrypoint: warning: jq not found, skipping .claude.json seed" >&2
@@ -173,8 +202,11 @@ fi
 # These are created at startup so container-side skills can write immediately.
 mkdir -p /data/playwright/profile /data/playwright/downloads /data/playwright/state
 mkdir -p /data/finance
+# /data itself must be writable by PUID so perch can create perch.db there.
+# When /data is a freshly created docker volume it's owned by root:root.
 if [ -n "$PUID" ]; then
-    chown -R "${PUID}:${PGID}" /data/playwright
+    chown "${PUID}:${PGID}" /data
+    chown -R "${PUID}:${PGID}" /data/playwright /data/finance
 fi
 # Screenshot output dir must be writable by PUID so @playwright/mcp can save files there.
 mkdir -p /tmp/playwright-output
@@ -191,6 +223,31 @@ fi
 
 AUTH_METHOD="${AUTH_METHOD:-${AUTH_MODE:-none}}"
 export AUTH_METHOD
+
+# Background re-applier for the Playwright plugin .mcp.json.
+# Claude Code's plugin marketplace overwrites this file ~2-5s after the first
+# claude-agent-acp subprocess starts, reverting our patch.  Loop in the
+# background, restoring the file whenever its size shrinks below the patched
+# payload (87B "npx @playwright/mcp@latest" template = unpatched).
+_pw_plg="/home/perchuser/.claude/plugins/marketplaces/claude-plugins-official/external_plugins/playwright/.mcp.json"
+if [ -f /tmp/perch-playwright-mcp.json ] && [ -f "$_pw_plg" ]; then
+    (
+        # Run forever — claude marketplace may resync the file at any time
+        # (on each ACP session start, plugin update, etc.).  Keep watching as
+        # long as perch is alive.
+        while :; do
+            sleep 5
+            cur=$(wc -c < "$_pw_plg" 2>/dev/null || echo 0)
+            want=$(wc -c < /tmp/perch-playwright-mcp.json 2>/dev/null || echo 0)
+            if [ "$cur" != "$want" ]; then
+                cp /tmp/perch-playwright-mcp.json "$_pw_plg" 2>/dev/null || true
+                if [ -n "$PUID" ]; then
+                    chown "${PUID}:${PGID}" "$_pw_plg" 2>/dev/null || true
+                fi
+            fi
+        done
+    ) &
+fi
 
 if [ -n "$PUID" ]; then
     exec gosu "${PUID}:${PGID}" env HOME=/home/perchuser /app/perch
