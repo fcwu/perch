@@ -95,3 +95,51 @@
 **Then** URL 更新為 `/chat?id=<uuid>`；sidebar 自動出現新 conversation 項目
 
 ---
+
+## CM09 — 點擊 conversation 切換為 SPA（不觸發整頁重新載入）
+
+**層級**：E2E-browser
+
+**Given** Sidebar 顯示多個 conversations，目前在 `/chat`
+**When** 點擊某個 conversation 連結
+**Then** URL 更新為 `/chat?id=<uuid>`（透過 `history.pushState`），頁面**不**觸發整頁重新載入（`window.performance.navigation.type` 保持 0，或用 JS 旗標驗證 DOM 未 destroy）
+
+**驗證方式（curl/browser）**：
+```js
+// 在頁面上設置旗標
+window.__noReload = true;
+// 點擊 conversation link
+// 點擊後確認旗標仍存在（未 reload）
+window.__noReload === true  // → true = SPA OK
+```
+
+---
+
+## CM10 — 開啟帶有 id 的 URL 時自動載入歷史訊息
+
+**層級**：E2E-browser
+
+**Given** conversation `<uuid>` 已有 2 筆 query_sessions（query + response 都有值）
+**When** 瀏覽器直接打開 `/chat?id=<uuid>`
+**Then** chat area 顯示所有歷史訊息（user bubble + assistant bubble），不需重新送出訊息
+
+**驗證方式（curl）**：
+```bash
+# 確認 API 有資料
+curl -s http://localhost:8081/api/conversations/<uuid>/messages | jq '.messages | length'
+# → 應 >= 1
+
+# 用 browser 工具確認 DOM 有 bubble 元素
+```
+
+---
+
+## CM11 — 重新載入頁面後歷史訊息保留
+
+**層級**：E2E-browser
+
+**Given** 已在 `/chat?id=<uuid>` 且頁面顯示歷史訊息
+**When** 執行 hard reload（F5 / Ctrl+R / `Page.reload` with `ignoreCache: true`）
+**Then** 重載後頁面仍顯示相同的歷史訊息；URL 維持 `/chat?id=<uuid>`
+
+---
