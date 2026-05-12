@@ -1034,6 +1034,11 @@ func (s *Server) handleListConversationMessages(w http.ResponseWriter, r *http.R
 	if msgs == nil {
 		msgs = []ConversationMessage{}
 	}
+	if s.imgStore != nil {
+		for i := range msgs {
+			msgs[i].Images = s.imgStore.InlineAttachmentsAsDataURIs(msgs[i].Images)
+		}
+	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]any{"total": total, "messages": msgs})
 }
@@ -1184,6 +1189,11 @@ func (s *Server) handleManagementListConversationMessages(w http.ResponseWriter,
 	}
 	if msgs == nil {
 		msgs = []ConversationMessage{}
+	}
+	if s.imgStore != nil {
+		for i := range msgs {
+			msgs[i].Images = s.imgStore.InlineAttachmentsAsDataURIs(msgs[i].Images)
+		}
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]any{"total": total, "messages": msgs})

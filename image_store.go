@@ -336,6 +336,48 @@ func extToMime(ext string) string {
 	}
 }
 
+// inlineAsDataURI reads the stored image and returns a copy of the attachment
+// with URL replaced by a base64 data URI. Falls back to original if reading
+// fails or the MIME type is unknown.
+func (s *imageStore) inlineAsDataURI(a ImageAttachment) ImageAttachment {
+	const prefix = "/api/images/"
+	if !strings.HasPrefix(a.URL, prefix) {
+		return a
+	}
+	rest := a.URL[len(prefix):]
+	idx := strings.Index(rest, "/")
+	if idx < 0 {
+		return a
+	}
+	convID, filename := rest[:idx], rest[idx+1:]
+	absPath := s.AbsPath(convID, filename)
+	data, err := os.ReadFile(absPath)
+	if err != nil || int64(len(data)) > maxImageBytes {
+		return a
+	}
+	mimeType := extToMime(imageFileExt(filename))
+	if mimeType == "application/octet-stream" {
+		return a
+	}
+	result := a
+	result.URL = "data:" + mimeType + ";base64," + base64.StdEncoding.EncodeToString(data)
+	return result
+}
+
+// InlineAttachmentsAsDataURIs returns a copy of attachments with each URL
+// replaced by an inline base64 data URI, eliminating the need for a separate
+// authenticated HTTP request to serve the image.
+func (s *imageStore) InlineAttachmentsAsDataURIs(attachments []ImageAttachment) []ImageAttachment {
+	if len(attachments) == 0 {
+		return attachments
+	}
+	result := make([]ImageAttachment, len(attachments))
+	for i, a := range attachments {
+		result[i] = s.inlineAsDataURI(a)
+	}
+	return result
+}
+
 // walkImageFiles returns all file entries under convDir (non-recursive).
 func (s *imageStore) listFiles(convID string) ([]fs.DirEntry, error) {
 	dir := s.convDir(convID)

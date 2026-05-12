@@ -541,7 +541,13 @@ func (m *ACPUserSessionManager) runPrompt(sess *acpChatSession, prompt string) {
 	if imgAttachments == nil {
 		imgAttachments = []ImageAttachment{}
 	}
-	doneMsg, _ := json.Marshal(map[string]any{"type": "done", "images": imgAttachments, "text": cleanText})
+	// Inline images as data URIs so the browser can render them without a
+	// separate authenticated request (needed when CF Access protects /api/*).
+	sseImages := imgAttachments
+	if m.imgStore != nil {
+		sseImages = m.imgStore.InlineAttachmentsAsDataURIs(imgAttachments)
+	}
+	doneMsg, _ := json.Marshal(map[string]any{"type": "done", "images": sseImages, "text": cleanText})
 	sess.broadcastJSON(string(doneMsg))
 	sess.close()
 
