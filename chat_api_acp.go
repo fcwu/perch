@@ -453,9 +453,13 @@ func (m *ACPUserSessionManager) runPrompt(sess *acpChatSession, prompt string) {
 	var currentToolEventID int64
 	var currentToolName string
 	var currentToolStart time.Time
+	var screenshotCalled bool
 	onToolStart := func(toolName string) {
 		currentToolName = toolName
 		currentToolStart = time.Now()
+		if strings.Contains(strings.ToLower(toolName), "screenshot") {
+			screenshotCalled = true
+		}
 		if m.adminHub != nil {
 			m.adminHub.SessionUpdated(sess.sessionID, toolName)
 		}
@@ -490,6 +494,7 @@ func (m *ACPUserSessionManager) runPrompt(sess *acpChatSession, prompt string) {
 	// into prompt by BuildPromptFilePrefix).
 	blocks := []ACPContent{{Type: "text", Text: prompt}}
 	blocks = append(blocks, AttachmentsToACPBlocks(sess.attachments)...)
+	sessionStart := time.Now()
 	response, err := proc.PromptWithContent(ctx, blocks, onChunk, onToolStart, onToolEnd)
 
 	// Extract [image: ...] tokens and store images; cleanText has tokens removed.
@@ -501,6 +506,9 @@ func (m *ACPUserSessionManager) runPrompt(sess *acpChatSession, prompt string) {
 	cleanText := response
 	if err == nil {
 		cleanText, imgAttachments = extractImages(response, m.imgStore, m.workdir, convID)
+		if len(imgAttachments) == 0 && screenshotCalled && m.imgStore != nil {
+			imgAttachments = collectPlaywrightScreenshots(sessionStart, m.imgStore, convID, m.logger)
+		}
 	}
 
 	if err != nil {

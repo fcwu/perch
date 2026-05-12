@@ -265,6 +265,52 @@ func cleanupOrphanImagesDir(workdir string, ttl time.Duration, logger *slog.Logg
 	}
 }
 
+// collectPlaywrightScreenshots scans /tmp/playwright-output for image files
+// created after since, stores them via store, and returns ImageAttachments.
+// Called as a fallback when the agent omits the [image: ...] token.
+func collectPlaywrightScreenshots(since time.Time, store *imageStore, convID string, logger *slog.Logger) []ImageAttachment {
+	const playwrightOutputDir = "/tmp/playwright-output"
+	entries, err := os.ReadDir(playwrightOutputDir)
+	if err != nil {
+		return nil
+	}
+	var attachments []ImageAttachment
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		name := e.Name()
+		switch strings.ToLower(filepath.Ext(name)) {
+		case ".png", ".jpg", ".jpeg", ".webp":
+		default:
+			continue
+		}
+		info, err := e.Info()
+		if err != nil || !info.ModTime().After(since) {
+			continue
+		}
+		absPath := filepath.Join(playwrightOutputDir, name)
+		if info.Size() > maxImageBytes {
+			logger.Warn("playwright auto-pickup: file too large", "path", absPath, "size", info.Size())
+			continue
+		}
+		f, err := os.Open(absPath)
+		if err != nil {
+			logger.Warn("playwright auto-pickup: open failed", "path", absPath, "err", err)
+			continue
+		}
+		url, storeErr := store.Store(convID, name, f)
+		f.Close()
+		if storeErr != nil {
+			logger.Warn("playwright auto-pickup: store failed", "path", absPath, "err", storeErr)
+			continue
+		}
+		logger.Info("playwright auto-pickup: stored screenshot", "path", absPath, "url", url)
+		attachments = append(attachments, ImageAttachment{URL: url, Caption: name})
+	}
+	return attachments
+}
+
 // fileExt safely extracts a URL's filename extension for Content-Type sniffing.
 func imageFileExt(urlPath string) string {
 	return filepath.Ext(filepath.Base(urlPath))

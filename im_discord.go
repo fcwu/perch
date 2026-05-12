@@ -633,6 +633,7 @@ func (sess *discordSession) handleWithACP(s *discordgo.Session, channelID, messa
 		blocks = append(blocks, ACPContent{Type: "text", Text: ""})
 	}
 	blocks = append(blocks, imageBlocks...)
+	discordSessionStart := time.Now()
 	text, err := sess.acpProcess.PromptWithContent(ctx, blocks, nil, nil, nil)
 	_ = s.MessageReactionRemove(channelID, messageID, emojiEyes, "@me")
 
@@ -652,6 +653,9 @@ func (sess *discordSession) handleWithACP(s *discordgo.Session, channelID, messa
 
 	// Extract [image: ...] tokens from the response and store images.
 	text, imgAttachments := extractImages(text, sess.imgStore, sess.workdir, channelID)
+	if len(imgAttachments) == 0 && sess.imgStore != nil {
+		imgAttachments = collectPlaywrightScreenshots(discordSessionStart, sess.imgStore, channelID, logger)
+	}
 
 	_ = s.MessageReactionAdd(channelID, messageID, emojiSpeech)
 	if len(fetchFailed) > 0 {
