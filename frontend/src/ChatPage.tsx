@@ -293,6 +293,8 @@ export default function ChatPage({ conversationId }: ChatPageProps) {
             }
             return updated
           })
+          // Flush any tool entries that never received tool_end
+          setToolEntries(prev => prev.map(e => e.done ? e : { ...e, done: true }))
           setLoading(false)
           setTimeout(() => es.close(), 300)
         }
