@@ -267,8 +267,9 @@ func cleanupOrphanImagesDir(workdir string, ttl time.Duration, logger *slog.Logg
 
 // collectPlaywrightScreenshots scans /tmp/playwright-output for image files
 // created after since, stores them via store, and returns ImageAttachments.
-// Called as a fallback when the agent omits the [image: ...] token.
-func collectPlaywrightScreenshots(since time.Time, store *imageStore, convID string, logger *slog.Logger) []ImageAttachment {
+// skip lists filenames (captions) already stored by extractImages so the same
+// file is not double-stored when the agent emitted a partial [image:] token.
+func collectPlaywrightScreenshots(since time.Time, store *imageStore, convID string, logger *slog.Logger, skip map[string]bool) []ImageAttachment {
 	const playwrightOutputDir = "/tmp/playwright-output"
 	entries, err := os.ReadDir(playwrightOutputDir)
 	if err != nil {
@@ -280,6 +281,9 @@ func collectPlaywrightScreenshots(since time.Time, store *imageStore, convID str
 			continue
 		}
 		name := e.Name()
+		if skip[name] {
+			continue
+		}
 		switch strings.ToLower(filepath.Ext(name)) {
 		case ".png", ".jpg", ".jpeg", ".webp":
 		default:

@@ -653,8 +653,13 @@ func (sess *discordSession) handleWithACP(s *discordgo.Session, channelID, messa
 
 	// Extract [image: ...] tokens from the response and store images.
 	text, imgAttachments := extractImages(text, sess.imgStore, sess.workdir, channelID)
-	if len(imgAttachments) == 0 && sess.imgStore != nil {
-		imgAttachments = collectPlaywrightScreenshots(discordSessionStart, sess.imgStore, channelID, logger)
+	if sess.imgStore != nil {
+		already := make(map[string]bool, len(imgAttachments))
+		for _, a := range imgAttachments {
+			already[a.Caption] = true
+		}
+		extra := collectPlaywrightScreenshots(discordSessionStart, sess.imgStore, channelID, logger, already)
+		imgAttachments = append(imgAttachments, extra...)
 	}
 
 	_ = s.MessageReactionAdd(channelID, messageID, emojiSpeech)

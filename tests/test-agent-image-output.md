@@ -575,6 +575,38 @@ curl -sS -H "Authorization: Bot ${DISCORD_BOT_TOKEN}" \
 
 ---
 
+## E2E-browser — Playwright 截圖自動顯示
+
+> 當 Agent 使用 playwright MCP 執行瀏覽器截圖時，即使未在回應文字中明確寫出 `[image: ...]` token，Perch 也應自動偵測 `/tmp/playwright-output/` 內的截圖並顯示於 chat UI。
+
+### AIO21 — Playwright 截圖未附 token，Perch 自動收集並顯示
+
+**層級**：E2E-browser
+
+**Given** 使用者開啟 Perch chat，Perch 已掛載 playwright MCP 並設定 `--output-dir /tmp/playwright-output`
+**When** 使用者輸入：「請幫我截圖 https://tw.yahoo.com 的首頁」並送出
+**Then**
+- Agent 回應完成後，訊息氣泡文字下方出現至少一張截圖
+- 截圖內容為 Yahoo 首頁畫面（可見 Yahoo Logo 或頁面主要內容）
+- ToolPanel 在回應完成後消失，不殘留 spinner 或執行中工具名稱
+- 截圖下方顯示原始檔名（例如 `page-<timestamp>.png`）
+
+---
+
+### AIO22 — 多張 Playwright 截圖（含登入流程）全部顯示
+
+**層級**：E2E-browser
+
+**Given** 使用者開啟 Perch chat，目標網站為有帳密登入的服務
+**When** 使用者輸入：「請幫我測試 https://vkgo.dorowu.cc/login，打開頁面截圖，填入帳號 test 密碼 test 登入，登入後再截圖，把每張截圖都顯示」並送出
+**Then**
+- Agent 回應完成後，訊息氣泡出現至少 2 張截圖
+- 第一張截圖可見 VKGO 登入表單（包含帳號 / 密碼欄位）
+- 最後一張截圖可見登入後的主頁面（右上角可見用戶名稱 `test` 或「登出」按鈕）
+- ToolPanel 在回應完成後消失
+
+---
+
 ## 備註
 
 - AIO01–AIO12 為 curl 層級；AIO01 是其他 curl case 的前置，需先成功。

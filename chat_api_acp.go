@@ -506,8 +506,13 @@ func (m *ACPUserSessionManager) runPrompt(sess *acpChatSession, prompt string) {
 	cleanText := response
 	if err == nil {
 		cleanText, imgAttachments = extractImages(response, m.imgStore, m.workdir, convID)
-		if len(imgAttachments) == 0 && screenshotCalled && m.imgStore != nil {
-			imgAttachments = collectPlaywrightScreenshots(sessionStart, m.imgStore, convID, m.logger)
+		if screenshotCalled && m.imgStore != nil {
+			already := make(map[string]bool, len(imgAttachments))
+			for _, a := range imgAttachments {
+				already[a.Caption] = true
+			}
+			extra := collectPlaywrightScreenshots(sessionStart, m.imgStore, convID, m.logger, already)
+			imgAttachments = append(imgAttachments, extra...)
 		}
 	}
 
