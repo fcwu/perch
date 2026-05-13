@@ -1,4 +1,5 @@
-import { useState, useRef, useCallback, useEffect } from 'react'
+import { useState, useRef, useCallback, useEffect, useMemo } from 'react'
+import { marked } from 'marked'
 import { ToolPanel, ToolEntry } from './ToolPanel'
 import ChatHeader from './ChatHeader'
 import SchedulePanel from './SchedulePanel'
@@ -65,6 +66,39 @@ async function fileToAttachment(file: File): Promise<PendingAttachment> {
     size: file.size,
     data_base64: btoa(binary),
   }
+}
+
+marked.setOptions({ gfm: true, breaks: true })
+
+const MD_STYLES = `
+.md-body { color: #d4d4d4; font-size: 13px; line-height: 1.65; word-break: break-word; }
+.md-body p { margin: 0 0 0.6em; }
+.md-body p:last-child { margin-bottom: 0; }
+.md-body h1,.md-body h2,.md-body h3,.md-body h4 { margin: 0.8em 0 0.4em; color: #e8e8e8; font-weight: 600; }
+.md-body h1 { font-size: 1.3em; } .md-body h2 { font-size: 1.15em; } .md-body h3 { font-size: 1.05em; }
+.md-body ul,.md-body ol { margin: 0 0 0.6em 1.2em; padding: 0; }
+.md-body li { margin-bottom: 0.2em; }
+.md-body code { background: #2a2a2a; border-radius: 3px; padding: 0.1em 0.35em; font-family: 'Menlo','Consolas','Monaco',monospace; font-size: 0.9em; color: #ce9178; }
+.md-body pre { background: #1e1e1e; border: 1px solid #333; border-radius: 6px; padding: 10px 14px; overflow-x: auto; margin: 0.4em 0 0.8em; }
+.md-body pre code { background: none; padding: 0; color: #d4d4d4; font-size: 12px; }
+.md-body table { border-collapse: collapse; margin: 0.4em 0 0.8em; width: 100%; font-size: 12px; }
+.md-body th,.md-body td { border: 1px solid #444; padding: 5px 10px; text-align: left; }
+.md-body th { background: #2a2a2a; color: #e8e8e8; font-weight: 600; }
+.md-body tr:nth-child(even) { background: #1a1a1a; }
+.md-body blockquote { border-left: 3px solid #555; margin: 0 0 0.6em; padding-left: 12px; color: #999; }
+.md-body a { color: #4e9eff; text-decoration: none; } .md-body a:hover { text-decoration: underline; }
+.md-body hr { border: none; border-top: 1px solid #333; margin: 0.8em 0; }
+.md-body strong { color: #e8e8e8; }
+`
+
+function MarkdownContent({ content }: { content: string }) {
+  const html = useMemo(() => marked.parse(content) as string, [content])
+  return (
+    <>
+      <style>{MD_STYLES}</style>
+      <div className="md-body" dangerouslySetInnerHTML={{ __html: html }} />
+    </>
+  )
 }
 
 // Strip ANSI/VT100 escape sequences applied to the FULL accumulated buffer.
@@ -348,13 +382,7 @@ export default function ChatPage({ conversationId }: ChatPageProps) {
                 <div style={{ display: 'flex', justifyContent: 'flex-start' }}>
                   <div style={{ maxWidth: '100%', width: '100%' }}>
                     {msg.content ? (
-                      <pre style={{
-                        margin: 0, lineHeight: 1.65,
-                        whiteSpace: 'pre-wrap', wordBreak: 'break-word',
-                        fontFamily: "'Menlo', 'Consolas', 'Monaco', monospace", fontSize: 13, color: '#d4d4d4',
-                      }}>
-                        {msg.content}
-                      </pre>
+                      <MarkdownContent content={msg.content} />
                     ) : (
                       i === messages.length - 1 && !msg.done && (
                         <span style={{ color: '#555', fontSize: 13 }}>Thinking…</span>

@@ -516,6 +516,17 @@ func (m *ACPUserSessionManager) runPrompt(sess *acpChatSession, prompt string) {
 		}
 	}
 
+	if imgAttachments == nil {
+		imgAttachments = []ImageAttachment{}
+	}
+	// Inline images as data URIs so the browser can render them without a
+	// separate authenticated request (needed when CF Access protects /api/*).
+	// Also store data URIs in DB so images survive file cleanup between sessions.
+	sseImages := imgAttachments
+	if m.imgStore != nil {
+		sseImages = m.imgStore.InlineAttachmentsAsDataURIs(imgAttachments)
+	}
+
 	if err != nil {
 		errMsg, _ := json.Marshal(map[string]string{"type": "error", "message": err.Error()})
 		sess.broadcastJSON(string(errMsg))
@@ -528,24 +539,14 @@ func (m *ACPUserSessionManager) runPrompt(sess *acpChatSession, prompt string) {
 	} else {
 		if m.store != nil {
 			if sess.conversationID != "" {
-				_ = m.store.UpdateSessionDoneAndTouch(sess.sessionID, cleanText, sess.conversationID, imgAttachments...)
+				_ = m.store.UpdateSessionDoneAndTouch(sess.sessionID, cleanText, sess.conversationID, sseImages...)
 			} else {
-				_ = m.store.UpdateSessionDone(sess.sessionID, cleanText, imgAttachments...)
+				_ = m.store.UpdateSessionDone(sess.sessionID, cleanText, sseImages...)
 			}
 		}
 		if m.adminHub != nil {
 			m.adminHub.SessionRemoved(sess.sessionID, "done")
 		}
-	}
-
-	if imgAttachments == nil {
-		imgAttachments = []ImageAttachment{}
-	}
-	// Inline images as data URIs so the browser can render them without a
-	// separate authenticated request (needed when CF Access protects /api/*).
-	sseImages := imgAttachments
-	if m.imgStore != nil {
-		sseImages = m.imgStore.InlineAttachmentsAsDataURIs(imgAttachments)
 	}
 	doneMsg, _ := json.Marshal(map[string]any{"type": "done", "images": sseImages, "text": cleanText})
 	sess.broadcastJSON(string(doneMsg))
